@@ -295,7 +295,12 @@ final class Catalog
                         'commission_rate' => ($o['commission_rate'] ?? '') ?: null,
                         'commission_value' => ($o['commission'] ?? '') ?: null,
                     ];
-                    if (self::findMatches($pdo, $row)) {
+                    if ($matches = self::findMatches($pdo, $row)) {
+                        // Produto importado só com o link: completa o ID do anúncio (sem tocar em offers).
+                        if (count($matches) === 1 && empty($matches[0]['external_id'])
+                            && Db::value($pdo, "SELECT 1 FROM gmax3_catalog WHERE marketplace='shopee' AND external_id=?", [$row['external_id']]) === null) {
+                            Db::run($pdo, 'UPDATE gmax3_catalog SET external_id=?, legacy_table=COALESCE(legacy_table,?), legacy_key=COALESCE(legacy_key,?) WHERE id=?', [$row['external_id'], 'offers', $row['external_id'], $matches[0]['id']]);
+                        }
                         continue;
                     }
                     $id = self::insertLegacy($pdo, $row, $actor, 'offers', (string)$o['item_id']);
@@ -368,7 +373,7 @@ final class Catalog
         }
     }
 
-    /** Estado do registro legado (ex.: "enviado" pelo publicador V2.1). */
+    /** Estado do registro legado (ex.: "enviado" pelo publicador antigo). */
     public static function legacyStatus(PDO $pdo, array $r): ?string
     {
         if ($r['legacy_table'] === 'offers' && Db::tableExists($pdo, 'offers')) {

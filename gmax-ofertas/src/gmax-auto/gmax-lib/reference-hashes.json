@@ -1,8 +1,8 @@
 {
-    "app.php": "6077b71f6359ad943c3ec663e001a328d893914f4a44cb2f095fb3f5bfe523c8",
+    "app.php": "5cf9801675f848e56610a572365a84803114e574d61e1bb0fb4e5109ef458ca3",
     "index.php": "f82ced3c7d74395fc921cb3006d360a4b29949fbf2b65e4d0663d1dda9b13a71",
     "cron.php": "2be65a839bf7d8c079e4f6d3977d45803c7367940ff5056fd3f91350c131edf4",
-    "gmax-publicador-cli.php": "7d9e5b90d1b4120937ef15b2d8bc92b6f68048d1571be3c62f5f0b3a54ec2e65",
+    "gmax-publicador-cli.php": "2e93f3718544d72ada2538028319789f1d7625e72c8d32dc8819b12914d7be6a",
     "mercadolivre.php": "99eed9e2df3b00ca10fce1c37d658829a74e840a64c7827a260ef948ecea0937",
     "gmax-ml-importar-cli.php": "73fcd1f2566a95457c6abff2fccf26cbb7d7509904fc9e51d837d0d81012e6f2"
 }

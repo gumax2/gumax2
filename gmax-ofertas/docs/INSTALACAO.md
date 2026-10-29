@@ -1,108 +1,118 @@
-# Instalação — GMAX Ofertas 3.0 P0 (atualização incremental)
+# Instalação no cPanel — GMAX Ofertas 3.0.1 P0 (atualização incremental)
 
-> **Situação: PRÉVIA, AINDA NÃO LIBERADA PARA INSTALAÇÃO.** O pacote foi desenvolvido e testado com as versões de referência dos arquivos. A instalação **adiciona** arquivos e **não substitui** nenhum existente. Mesmo assim, só instale quando decidir, depois de ler este guia. Nenhum envio ao Telegram é ativado.
+> **Situação:** o pacote foi conferido com a cópia dos arquivos instalados na HostGator (29/10/2026). **Só instale quando você autorizar.** A instalação **adiciona** arquivos e não substitui nenhum existente. Nenhum envio ao Telegram é ativado em nenhum passo.
 
-Tempo estimado: 15 a 20 minutos. Tudo é feito pelo cPanel e pelo navegador.
+Tempo estimado: 20 minutos. Tudo pelo cPanel e pelo navegador.
 
-## 0. O que será adicionado (nada será substituído)
+## 0. O que será adicionado
 
 ```
 /home1/gust1922/gmaxcanais.com.br/gmax-auto/
-├── painel.php            NOVO  painel multiloja (mesmo login do index.php)
-├── gmax-admin-cli.php    NOVO  ferramenta de linha de comando (bloqueada na web)
-├── gmax-assets/          NOVO  painel.css, painel.js
-└── gmax-lib/             NOVO  código interno (.htaccess bloqueia acesso web)
+├── painel.php                    NOVO  painel multiloja (mesmo login do index.php)
+├── gmax-admin-cli.php            NOVO  ferramenta de linha de comando (bloqueada na web)
+├── gmax-diagnostico-esquema.php  NOVO  diagnóstico do banco (só estrutura, só CLI)
+├── gmax-assets/                  NOVO  painel.css, painel.js
+└── gmax-lib/                     NOVO  código interno (.htaccess bloqueia acesso web)
 ```
 
 Continuam **intocados**: `app.php`, `index.php`, `cron.php`, `gmax-publicador-cli.php`, `mercadolivre.php`, `gmax-ml-importar-cli.php`, `.htaccess`, `storage/`, Crons, credenciais e `gmax-secrets/`.
 
-## 1. Backup antes de tudo (obrigatório)
+O arquivo `opcional/gmax-publicador-cli.php` **não** é instalado agora (veja o passo 9).
 
-1. cPanel → **Gerenciador de Arquivos** → abra `/home1/gust1922/gmaxcanais.com.br/`.
-2. Clique com o botão direito em `gmax-auto` → **Compress** → *Zip Archive* → nome `gmax-auto-backup-AAAAMMDD.zip`.
-3. Mova esse ZIP para `/home1/gust1922/gmax-secrets/` (fora da área pública).
-4. Confira se o ZIP tem a pasta `storage/` com o arquivo `.sqlite`.
+## 1. Backup (obrigatório)
 
-> O painel também faz um backup verificado do banco antes da migração, mas este primeiro backup cobre **todos** os arquivos.
+1. cPanel → **Gerenciador de Arquivos** → `/home1/gust1922/gmaxcanais.com.br/`.
+2. Botão direito em `gmax-auto` → **Compress** → *Zip Archive* → `gmax-auto-backup-AAAAMMDD.zip`.
+3. Mova o ZIP para `/home1/gust1922/gmax-secrets/`.
+4. Abra o ZIP (botão direito → View) e confirme que ele tem `storage/offers.sqlite`.
 
-## 2. Confirmar que não há conflito de nomes
+## 2. Enviar os arquivos
 
-Em `gmax-auto/`, confirme que **não** existem `painel.php`, `gmax-admin-cli.php`, `gmax-lib` nem `gmax-assets`. Se algum existir, **pare** e me avise.
+1. Confirme que em `gmax-auto/` **não** existem `painel.php`, `gmax-admin-cli.php`, `gmax-diagnostico-esquema.php`, `gmax-lib` nem `gmax-assets`. Se existir algum, **pare**.
+2. **Upload** de `GMAX_Ofertas_3.0.1_P0_arquivos.zip` para `gmax-auto/` → botão direito → **Extract** para `/home1/gust1922/gmaxcanais.com.br/gmax-auto/`.
+3. Confira que os 5 itens novos estão direto em `gmax-auto/` e apague o ZIP enviado.
 
-## 3. Enviar os arquivos
+## 3. Diagnóstico do banco (só leitura, sem dados)
 
-1. Em `gmax-auto/`, clique em **Upload** e envie `GMAX_Ofertas_3.0_P0_arquivos.zip` (está dentro do pacote).
-2. Clique com o botão direito no ZIP → **Extract** → destino `/home1/gust1922/gmaxcanais.com.br/gmax-auto/`.
-3. Confirme que apareceram `painel.php`, `gmax-admin-cli.php`, `gmax-lib/` e `gmax-assets/` direto em `gmax-auto/`. Se tiverem caído numa subpasta, mova o conteúdo para `gmax-auto/`.
-4. Apague o ZIP enviado.
-5. Permissões: pastas `0755`, arquivos `0644`. O pacote não exige nenhuma permissão especial.
+1. cPanel → **Cron Jobs** → adicione um Cron **temporário** para *Uma vez por minuto* (`* * * * *`):
 
-## 4. Testar a proteção (30 segundos)
+   ```
+   /usr/local/bin/php /home1/gust1922/gmaxcanais.com.br/gmax-auto/gmax-diagnostico-esquema.php > /home1/gust1922/gmax-secrets/gmax-esquema.txt 2>&1
+   ```
 
-No navegador, abra estes endereços. Cada um deve ser **bloqueado** (erro 403) ou aparecer **em branco**:
+2. Espere 1 a 2 minutos e **apague o Cron**.
+3. Abra `gmax-secrets/gmax-esquema.txt`. Ele lista tabelas, colunas, quantidade de linhas e contagem por estado. **Não** contém títulos, links, preços, senhas nem tokens, e o banco é aberto em modo somente leitura.
+4. Confira:
+   - `SQLite` com versão **3.27 ou maior**;
+   - `TABELA offers (5 linha(s))` e `TABELA gmax_ml_offers (1 linha(s))`;
+   - `gmax-publicacao-privada.php  ausente`.
+5. Se quiser, me envie o arquivo: ele foi feito para poder ser compartilhado.
+
+## 4. Testar a proteção web
+
+Cada endereço abaixo deve dar **403** ou abrir **em branco**:
 
 - `https://gmaxcanais.com.br/gmax-auto/gmax-lib/reference-hashes.json` → **403**
 - `https://gmaxcanais.com.br/gmax-auto/gmax-lib/pages/painel.php` → 403 ou em branco
-- `https://gmaxcanais.com.br/gmax-auto/gmax-admin-cli.php` → "Apenas CLI" (403)
+- `https://gmaxcanais.com.br/gmax-auto/gmax-admin-cli.php` → "Apenas CLI"
+- `https://gmaxcanais.com.br/gmax-auto/gmax-diagnostico-esquema.php` → "Apenas CLI"
 
-Se o primeiro endereço mostrar o conteúdo do arquivo, o servidor não está lendo o `.htaccess` da subpasta. **Pare** e me avise; não é perigoso para os dados, mas precisa de ajuste.
+Se o primeiro mostrar o conteúdo do arquivo, **pare** e me avise.
 
-## 5. Verificação do ambiente (somente leitura)
+## 5. Verificação no painel
 
 1. Abra `https://gmaxcanais.com.br/gmax-auto/painel.php` e entre com **a mesma senha** do painel atual.
-2. Você vai cair em **Sistema → Migração pendente**. Leia a tabela **Verificação do ambiente**:
-   - **FALHA** em qualquer linha → **não migre**. Me envie um print da tabela (ela não mostra senhas nem tokens).
-   - **AVISO** → leia o detalhe. É comum ver "Arquivo … DIFERENTE da referência do kit": significa só que o servidor tem uma versão mais nova. A 3.0 não substitui esses arquivos.
-3. Confirme estas três linhas:
-   - **Ativação do publicador V2.1: ausente (bloqueado)** e **Ativação da fila 3.0: ausente (bloqueado)**
-   - **cron.php em modo prévia: slot(db(), false) preservado**
-   - **Pendências de reconciliação de envios: nenhuma**
+2. Em **Sistema → Verificação do ambiente**, o esperado é:
+   - **Nenhuma linha FALHA.** Se houver alguma, não migre.
+   - `Arquivo index.php / cron.php / mercadolivre.php / gmax-ml-importar-cli.php / app.php / gmax-publicador-cli.php: idêntico à cópia de produção de 29/10/2026`. Se algum aparecer **DIFERENTE**, ele foi alterado depois da cópia: me avise antes de migrar.
+   - **AVISO** `Publicador antigo … versão SEM pausa global…`. É **esperado**: a versão instalada é anterior ao V2.1. Não impede a migração (veja o passo 9).
+   - `Ativação do publicador antigo: ausente` e `Ativação da fila 3.0: ausente`.
+   - `cron.php em modo prévia: slot(db(), false) preservado`.
 
 ## 6. Migrar
 
-1. Ainda em Sistema, digite `MIGRAR` e clique em **Fazer backup e migrar**.
-2. A mensagem de sucesso mostra o nome do backup e quantos produtos foram copiados. O esperado é `{"shopee":5,"mercadolivre":1}`.
-3. O backup fica em `/home1/gust1922/gmax-secrets/gmax-backups/`.
+1. Em Sistema, digite `MIGRAR` → **Fazer backup e migrar**.
+2. O esperado é a mensagem com `{"shopee":5,"mercadolivre":1}` e o nome do backup (gravado em `gmax-secrets/gmax-backups/`).
 
 ## 7. Validação (critérios de aceite)
 
-Marque cada item:
+- [ ] **Visão geral**: Shopee **5**, Mercado Livre **1**.
+- [ ] `index.php` lista as 5 ofertas Shopee e `mercadolivre.php` mostra a ML-001.
+- [ ] **Ofertas** → ML-001: De R$ 299,90 / Por R$ 104,31 / **65% OFF** / "Preço não conferido".
+- [ ] Os 5 links `s.shopee.com.br` e o `meli.la/1uPYV76` aparecem iguais aos do painel antigo.
+- [ ] **Importar** → `GMAX_25_Anuncios_Individuais_MercadoLivre.xlsx` → **25 novos** → Confirmar. Reenviar o mesmo arquivo → **0 novos** → Descartar.
+- [ ] **Publicações**: "Pausado" e "Automação comercial desativada"; os registros antigos de `gmax_dispatches` aparecem iguais.
+- [ ] Os Crons existentes continuam como estavam (nada foi criado ou alterado).
 
-- [ ] **Visão geral** mostra **Shopee 5** e **Mercado Livre 1**.
-- [ ] `index.php` continua listando as 5 ofertas Shopee, e `mercadolivre.php` continua mostrando a parafusadeira (ML-001).
-- [ ] **Ofertas** → filtro Mercado Livre → ML-001 com **De R$ 299,90 / Por R$ 104,31 / 65% OFF** e "Preço não conferido".
-- [ ] **Importar** → envie `GMAX_25_Anuncios_Individuais_MercadoLivre.xlsx` → prévia com **25 novos** → **Confirmar**.
-- [ ] Envie o **mesmo arquivo de novo** → prévia com **0 novos / 25 sem alteração** → descarte a prévia.
-- [ ] **Links afiliados** → cole um link `meli.la` gerado no programa oficial em um dos 25 → o produto sai de rascunho.
-- [ ] Abra um produto → digite os preços → veja o **% OFF e a economia** calculados na hora → confira a **Prévia da mensagem**.
-- [ ] **Publicações** → "Pausado" + "Automação comercial desativada". O botão **Pausa emergencial** fica no topo de todas as telas.
-- [ ] Na tabela `gmax_dispatches` (vista em Publicações), os registros do V2.1 continuam iguais.
+## 8. (Opcional) Batimento do agendador, sem envio
 
-Pronto: o painel está em uso, e **nenhum envio foi habilitado**.
-
-## 8. (Opcional) Monitoramento sem envio
-
-Para a página Publicações mostrar o "batimento" do agendador, crie no cPanel → **Cron Jobs** (a cada 5 minutos):
+Cron a cada 5 minutos, que **não envia e não altera a fila**:
 
 ```
 /usr/local/bin/php /home1/gust1922/gmaxcanais.com.br/gmax-auto/gmax-admin-cli.php fila:simular > /dev/null 2>&1
 ```
 
-`fila:simular` **não envia nada e não altera a fila**: só registra a hora da execução e mostra o que seria publicado.
+## 9. (Opcional, só antes de uma ativação futura) Revisão 2.2 do publicador antigo
 
-**Não crie** Cron de `fila:processar`. Isso só deve acontecer depois de uma autorização separada e explícita (veja abaixo).
+O `gmax-publicador-cli.php` instalado reenviaria a mesma oferta depois de um envio incerto **se** fosse ativado (veja `COMPARATIVO_PRODUCAO.md`). Enquanto continuar sem ativação, ele só simula. Para trocá-lo:
 
-## 9. O que continua exigindo sua autorização explícita
+1. Renomeie o atual para `gmax-publicador-cli.php.bak-AAAAMMDD` (**não apague**).
+2. Envie `opcional/gmax-publicador-cli.php` para `gmax-auto/`.
+3. O Cron existente continua o mesmo (mesmo nome de arquivo). Em 5 minutos o log continua mostrando `simulacao_sem_envio` ou `fora_do_horario`.
+4. Na página Sistema, a linha **Publicador antigo** passa a **OK (revisão 2.2)**.
 
-Nada disto é feito pelo pacote, e cada item precisa de uma ação deliberada sua:
+Para desfazer, apague o novo e renomeie o `.bak` de volta.
 
-1. `php gmax-admin-cli.php automacao --autorizar AUTORIZO_AUTOMACAO_COMERCIAL`
-2. Criar `gmax-secrets/gmax3-publicacao-privada.php`, com `enabled => true`, `chat_id => '-1004443626419'` e `authorization => 'AUTORIZO_FILA_GMAX3_PRIVADA'`. Esse arquivo é **diferente** do arquivo do V2.1. A fila 3.0 se recusa a operar enquanto o arquivo do V2.1 (`gmax-publicacao-privada.php`) existir.
-3. Decidir qual publicador fica ativo. Os itens Shopee que o V2.1 ainda tem como `pendente` ficam bloqueados no 3.0 até você registrar que o V2.1 foi desativado: `php gmax-admin-cli.php publicador-v21 --aposentar CONFIRMO_V21_DESATIVADO`. Depois disso, **nunca** reative o V2.1.
-4. Remover a pausa no painel (digitando `RETOMAR`)
-5. Criar o Cron de `fila:processar`
-6. Para Mercado Livre em grupo privado: `ml-grupo-privado --permitir CONFIRMO_REGRAS_ML_AFILIADOS`, **somente** se as regras do programa permitirem
+## 10. O que continua exigindo sua autorização explícita
 
-A pausa emergencial do painel também cria `gmax-secrets/gmax-publicacao.pause`, que o V2.1 respeita.
+Nada disto é feito pelo pacote:
 
-Para executar comandos CLI sem SSH, use um **Cron temporário** (como já é feito hoje), redirecionando a saída para um log em `gmax-secrets/`, e remova o Cron logo depois.
+1. Escolher **um** publicador: a fila 3.0 **ou** o antigo (revisão 2.2). Nunca os dois.
+2. Para a fila 3.0:
+   - `gmax-admin-cli.php automacao --autorizar AUTORIZO_AUTOMACAO_COMERCIAL`;
+   - criar `gmax-secrets/gmax3-publicacao-privada.php` com a frase `AUTORIZO_FILA_GMAX3_PRIVADA`;
+   - aposentar o antigo (`publicador-v21 --aposentar CONFIRMO_V21_DESATIVADO`);
+   - remover a pausa (`RETOMAR`);
+   - criar o Cron de `fila:processar`.
+3. Para o publicador antigo: instalar a revisão 2.2, criar `gmax-publicacao-privada.php` e remover a pausa no painel (a revisão 2.2 também respeita essa pausa).
+4. Mercado Livre em grupo privado: só com `ml-grupo-privado --permitir CONFIRMO_REGRAS_ML_AFILIADOS`, depois de você conferir as regras do programa.

@@ -2,7 +2,8 @@
 
 ## Ainda não verificado (depende do servidor real)
 
-- **Os arquivos instalados na HostGator não foram vistos.** Todo o desenvolvimento e os testes usaram as versões de referência do kit. Por isso, a página Sistema compara os arquivos por hash e confere o esquema do banco antes de migrar.
+- **Arquivos:** a cópia sanitizada de 29/10/2026 foi comparada, e os testes usam esses arquivos. Se algo mudar no servidor depois dela, a página Sistema aponta como DIFERENTE.
+- **Banco:** a estrutura real não foi vista, porque a cópia não tinha banco. O `gmax-diagnostico-esquema.php` (passo 3) a exporta sem dados, e a verificação confere as colunas obrigatórias antes de migrar.
 - O comportamento do Apache da HostGator com o `.htaccess` dentro de `gmax-lib/` precisa do teste manual descrito no passo 4 da instalação.
 - A versão do SQLite e a presença da extensão `zip` na HostGator são conferidas pela verificação, mas não puderam ser confirmadas daqui.
 - Os dados reais (5 ofertas Shopee, ML-001, registros do V2.1) foram **simulados** nos testes com o mesmo formato. Os IDs e os links Shopee dos testes são fictícios.

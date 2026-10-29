@@ -46,7 +46,7 @@ $heart = $pdo->query('SELECT * FROM gmax3_heartbeats ORDER BY name')->fetchAll()
       <button class="btn" type="submit">Registrar</button>
     </form>
   <?php endforeach; ?>
-  <?php if ($legacy): ?><p class="muted small">Pendências do publicador V2.1 (tabela gmax_dispatches) devem ser reconciliadas pelo procedimento do V2.1; este painel apenas as exibe.</p><?php endif; ?>
+  <?php if ($legacy): ?><p class="muted small">Pendências do publicador antigo (tabela gmax_dispatches) devem ser reconciliadas pelo procedimento do publicador antigo; este painel apenas as exibe.</p><?php endif; ?>
 </section>
 <?php endif; ?>
 
@@ -74,7 +74,7 @@ $heart = $pdo->query('SELECT * FROM gmax3_heartbeats ORDER BY name')->fetchAll()
 </section>
 
 <section class="card">
-  <h2>Registros do publicador V2.1 (somente leitura)</h2>
+  <h2>Registros do publicador antigo (somente leitura)</h2>
   <?php if (!$legacy): ?><p class="muted">Tabela gmax_dispatches vazia ou inexistente.</p><?php else: ?>
   <div class="table-wrap"><table class="table compact"><thead><tr><th>Janela</th><th>Item</th><th>Estado</th><th>HTTP</th><th>Mensagem</th><th>Nota</th></tr></thead><tbody>
   <?php foreach ($legacy as $d): ?><tr><td><?= View::e($d['slot'] ?? '') ?></td><td><?= View::e($d['item_id'] ?? '') ?></td><td><?= View::e($d['status'] ?? '') ?></td><td><?= View::e($d['http_code'] ?? '') ?></td><td><?= View::e($d['message_id'] ?? '') ?></td><td class="small"><?= View::e($d['response_note'] ?? '') ?></td></tr><?php endforeach; ?>
@@ -88,7 +88,7 @@ $heart = $pdo->query('SELECT * FROM gmax3_heartbeats ORDER BY name')->fetchAll()
     <tr><td><?= View::e($h['name']) ?></td><td><?= View::e(Time::show($h['last_at'])) ?></td><td class="<?= $age !== null && $age > 1 ? 'warn' : 'ok' ?>"><?= $age === null ? '—' : View::e(number_format($age * 60, 0, ',', '.')) . ' min' ?></td></tr>
   <?php endforeach; ?>
   <?php $lastLegacy = $legacy[0]['started_at'] ?? null; ?>
-    <tr><td>Publicador V2.1 (último registro de envio)</td><td><?= View::e(Time::show($lastLegacy)) ?></td><td class="muted">—</td></tr>
+    <tr><td>Publicador antigo (último registro de envio)</td><td><?= View::e(Time::show($lastLegacy)) ?></td><td class="muted">—</td></tr>
   </tbody></table>
-  <p class="muted small">O cron atual (cron.php / V2.1) não grava batimentos; o monitoramento completo começa quando a CLI 3.0 for agendada em modo simulação (ver INSTALACAO.md).</p>
+  <p class="muted small">O cron atual (cron.php / publicador antigo) não grava batimentos; o monitoramento completo começa quando a CLI 3.0 for agendada em modo simulação (ver INSTALACAO.md).</p>
 </section>

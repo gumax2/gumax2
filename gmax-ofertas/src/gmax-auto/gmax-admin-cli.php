@@ -124,10 +124,10 @@ try {
             $needMigrated();
             if ($has('--reativar')) {
                 Settings::set($pdo, 'publicador_v21_aposentado', '0', $actor);
-                out('Itens pendentes do V2.1 voltam a ser bloqueados no 3.0.');
+                out('Itens pendentes do publicador antigo voltam a ser bloqueados no 3.0.');
             } elseif ($after('--aposentar') === 'CONFIRMO_V21_DESATIVADO') {
                 Settings::set($pdo, 'publicador_v21_aposentado', '1', $actor);
-                out('Registrado: o publicador V2.1 foi desativado e não será mais ativado. Itens Shopee pendentes podem seguir pelo 3.0.');
+                out('Registrado: o publicador antigo foi desativado e não será mais ativado. Itens Shopee pendentes podem seguir pelo 3.0.');
             } else {
                 throw new RuntimeException('Use --aposentar CONFIRMO_V21_DESATIVADO ou --reativar');
             }

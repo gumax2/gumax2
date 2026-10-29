@@ -50,7 +50,7 @@ try {
       <select name="name" required aria-label="Backup"><?php foreach ($backups as $b): ?><option value="<?= View::e($b['name']) ?>"><?= View::e($b['name']) ?></option><?php endforeach; ?></select>
       <input name="confirm" maxlength="10" required placeholder="Digite RESTAURAR" autocomplete="off" aria-label="Confirmação">
       <button type="submit" class="btn btn-danger">Restaurar</button>
-      <p class="muted small">Restaura somente as tabelas gmax3_ (catálogo, fila, lotes, configurações). As tabelas antigas não são tocadas. Um backup do estado atual é feito antes. A restauração completa do arquivo do banco é feita pelo cPanel (ver ROLLBACK.md).</p>
+      <p class="muted small">Restaura somente catálogo, histórico de preços, categorias e lotes. Fila, configurações e auditoria não voltam no tempo, e a pausa é ativada. As tabelas antigas não são tocadas. Um backup do estado atual é feito antes. A restauração completa do arquivo do banco é feita pelo cPanel (ver ROLLBACK.md).</p>
     </form>
   </details>
   <?php endif; ?>

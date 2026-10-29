@@ -63,7 +63,7 @@ final class Settings
 
     public const PAUSE_MARKER = "GMAX3 pausa emergencial\n";
 
-    /** Pausa no banco E no arquivo gmax-publicacao.pause (respeitado também pelo publicador V2.1). */
+    /** Pausa no banco E no arquivo gmax-publicacao.pause (respeitado também pelo publicador antigo). */
     public static function pause(PDO $pdo, string $reason, string $actor): void
     {
         self::set($pdo, 'publicacao_pausada', '1', $actor);

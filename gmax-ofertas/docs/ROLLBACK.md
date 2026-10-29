@@ -8,10 +8,11 @@ No Gerenciador de Arquivos, em `gmax-auto/`, apague (ou renomeie com `.off`):
 
 - `painel.php`
 - `gmax-admin-cli.php`
+- `gmax-diagnostico-esquema.php`
 - `gmax-lib/`
 - `gmax-assets/`
 
-Pronto. `index.php`, `mercadolivre.php`, `cron.php` e o publicador V2.1 continuam funcionando como antes. As tabelas `gmax3_*` ficam no banco, mas o sistema antigo não as usa.
+Pronto. `index.php`, `mercadolivre.php`, `cron.php` e o publicador antigo continuam funcionando como antes. As tabelas `gmax3_*` ficam no banco, mas o sistema antigo não as usa.
 
 ## Nível B: remover as tabelas novas (mantendo os dados antigos)
 
@@ -35,9 +36,13 @@ Use só se o banco tiver sido danificado.
 
 > Atenção: o nível C também desfaz registros **antigos** criados depois do backup (por exemplo, um envio do V2.1). Confira `gmax_dispatches` antes.
 
+## Publicador antigo (se a revisão 2.2 do passo 9 foi instalada)
+
+Em `gmax-auto/`, apague o `gmax-publicador-cli.php` novo e renomeie `gmax-publicador-cli.php.bak-AAAAMMDD` de volta para `gmax-publicador-cli.php`. O Cron não muda.
+
 ## Restauração parcial pelo painel (só dados do 3.0)
 
-Em **Sistema → Backups → Restaurar dados do painel 3.0**, escolha o backup e digite `RESTAURAR`. Isso restaura só as tabelas `gmax3_*` (catálogo, fila, lotes, configurações). Um backup do estado atual é feito antes.
+Em **Sistema → Backups → Restaurar dados do painel 3.0**, escolha o backup e digite `RESTAURAR`. Isso restaura só o catálogo, o histórico de preços, as categorias e os lotes. A fila de publicação, as configurações e a auditoria **não** voltam (um item publicado nunca volta a ser agendado), e a pausa é ativada ao final. Um backup do estado atual é feito antes.
 
 ## Desfazer só um lote importado
 

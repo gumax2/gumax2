@@ -165,7 +165,8 @@ test('Preflight: ambiente de teste sem falhas e arquivos iguais à referência',
     $files = array_filter($res, fn($r) => str_starts_with($r[1], 'Arquivo ') && str_ends_with($r[1], '.php'));
     foreach ($files as $f) {
         // O publicador do teste foi ajustado para a pasta isolada: deve ser apontado como DIFERENTE.
-        $expected = $f[1] === 'Arquivo gmax-publicador-cli.php' ? 'DIFERENTE' : 'idêntico';
+        // app.php e publicador do teste apontam para a pasta isolada: devem ser DIFERENTES da produção.
+        $expected = in_array($f[1], ['Arquivo gmax-publicador-cli.php', 'Arquivo app.php'], true) ? 'DIFERENTE' : 'idêntico';
         ok(str_contains($f[2], $expected), $f[1] . " => $expected");
     }
 });
@@ -337,13 +338,13 @@ test('Alterar preço retira aprovação e confirmação', function () use ($migr
     eq('aguardando_validacao', $r['status']);
     eq(null, Catalog::get($pdo, $id)['price_verified_at']);
 });
-test('Item já enviado pelo publicador V2.1 é bloqueado por duplicidade', function () use ($migrated, $approveReady) {
+test('Item já enviado pelo publicador antigo é bloqueado por duplicidade', function () use ($migrated, $approveReady) {
     $pdo = $migrated();
     $id = (int)Db::value($pdo, "SELECT id FROM gmax3_catalog WHERE external_id='22812345601'");
     Db::run($pdo, "UPDATE gmax3_catalog SET payment_condition='normal' WHERE id=?", [$id]);
     $approveReady($pdo, $id);
     $reasons = Queue::enqueue($pdo, $id, 'telegram_privado', null, 'teste');
-    ok(str_contains(implode(' ', $reasons), 'V2.1'), 'bloqueado pelo histórico V2.1');
+    ok(str_contains(implode(' ', $reasons), 'publicador antigo'), 'bloqueado pelo histórico V2.1');
 });
 
 echo "\n== Fila de publicação (transporte FALSO, nunca Telegram real)\n";
@@ -352,7 +353,7 @@ test('Item ainda pendente no V2.1 é bloqueado até o V2.1 ser aposentado', func
     $id = (int)Db::value($pdo, "SELECT id FROM gmax3_catalog WHERE external_id='22812345602'");
     Db::run($pdo, "UPDATE gmax3_catalog SET payment_condition='normal' WHERE id=?", [$id]);
     $approveReady($pdo, $id);
-    ok(str_contains(implode(' ', Queue::enqueue($pdo, $id, 'telegram_privado', null, 'teste')), 'pendente na fila do publicador V2.1'), 'bloqueado');
+    ok(str_contains(implode(' ', Queue::enqueue($pdo, $id, 'telegram_privado', null, 'teste')), 'pendente na fila do publicador antigo'), 'bloqueado');
     Settings::set($pdo, 'publicador_v21_aposentado', '1', 'teste');
     eq([], Queue::enqueue($pdo, $id, 'telegram_privado', null, 'teste'));
 });
@@ -538,7 +539,7 @@ test('Reserva atômica: item já reservado por outro processo não é enviado de
     eq('pausa_reconciliacao', Queue::processNext($pdo, false, fn() => $t, 'teste')['resultado']);
     eq(0, $t->calls);
 });
-test('Pendência do publicador V2.1 (attempted) também bloqueia a fila 3.0', function () use ($migrated, $approveReady, $shopeeReadyId, $allowSending) {
+test('Pendência do publicador antigo (attempted) também bloqueia a fila 3.0', function () use ($migrated, $approveReady, $shopeeReadyId, $allowSending) {
     $pdo = $migrated();
     $id = $shopeeReadyId($pdo);
     $approveReady($pdo, $id);

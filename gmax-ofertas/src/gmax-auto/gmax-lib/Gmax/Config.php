@@ -34,7 +34,7 @@ final class Config
 
     public static function lockFile(): string
     {
-        // Mesmo mutex do publicador V2.1: os dois nunca rodam ao mesmo tempo.
+        // Mesmo mutex do publicador antigo: os dois nunca rodam ao mesmo tempo.
         // Sem alternativa: se a pasta privada não for gravável, o processador não roda.
         return self::secretsDir() . '/gmax-publicador.mutex';
     }
@@ -50,7 +50,7 @@ final class Config
         return self::secretsDir() . '/gmax3-publicacao-privada.php';
     }
 
-    /** Arquivo de ativação do publicador V2.1 (somente leitura: nunca criado pelo 3.0). */
+    /** Arquivo de ativação do publicador antigo (somente leitura: nunca criado pelo 3.0). */
     public static function legacyActivationFile(): string
     {
         return self::secretsDir() . '/gmax-publicacao-privada.php';

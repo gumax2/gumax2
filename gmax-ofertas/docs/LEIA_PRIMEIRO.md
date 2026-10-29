@@ -1,25 +1,29 @@
-# GMAX Ofertas 3.0 P0: pacote único de atualização
+# GMAX Ofertas 3.0.1 P0: pacote único de atualização
 
-**Situação: PRÉVIA AINDA NÃO LIBERADA PARA INSTALAÇÃO.** O código foi desenvolvido e testado com as versões de referência do kit, porque os arquivos atuais da HostGator não estavam disponíveis. A instalação só **adiciona** arquivos. Antes de migrar, a página Sistema compara o servidor real com as referências.
+**Situação:** o pacote foi conferido com a cópia dos arquivos atuais da HostGator (29/10/2026). Os testes rodam sobre esses arquivos reais. **Só instale quando você autorizar.** A instalação só **adiciona** arquivos, não ativa nenhuma publicação e não cria nem altera Crons ou credenciais.
 
-Nenhuma publicação, nenhum Cron e nenhuma credencial foram criados ou alterados.
+## Achado principal
+
+O `gmax-publicador-cli.php` instalado **não é o V2.1**: falta a pausa global depois de um envio incerto. Se ele for ativado um dia, pode reenviar a mesma oferta. Hoje não envia nada, porque está sem ativação. Detalhes e a revisão 2.2 opcional estão em `COMPARATIVO_PRODUCAO.md`.
 
 ## Conteúdo
 
 | Arquivo | Para quê |
 |---|---|
-| `GMAX_Ofertas_3.0_P0_arquivos.zip` | **Arquivos a enviar** para `gmax-auto/` (só arquivos novos) |
-| `MANIFESTO.txt` | Lista do que é adicionado, modificado (nada) e preservado, com hashes |
-| `INSTALACAO.md` | Passo a passo pelo cPanel: backup, envio, verificação, migração e validação |
-| `ROLLBACK.md` | Três níveis de reversão |
-| `DIAGNOSTICO.md` | Análise técnica da base atual, riscos e arquitetura |
+| `GMAX_Ofertas_3.0.1_P0_arquivos.zip` | **Arquivos a enviar** para `gmax-auto/` (só arquivos novos) |
+| `opcional/gmax-publicador-cli.php` | Revisão 2.2 do publicador antigo. **Não instalar agora** (passo 9) |
+| `MANIFESTO.txt` | O que é adicionado, modificado (nada) e preservado, com hashes |
+| `INSTALACAO.md` | Backup, envio, diagnóstico, verificação, migração e validação |
+| `ROLLBACK.md` | Reversão em níveis |
+| `COMPARATIVO_PRODUCAO.md` | Diferenças entre a produção e a 3.0, e os conflitos entre os publicadores |
+| `DIAGNOSTICO.md` | Análise técnica e arquitetura |
 | `TESTES.md` | Testes **executados**, com resultado gerado automaticamente |
 | `LIMITACOES.md` | O que ainda depende do servidor real ou de terceiros |
-| `capturas/` | Telas do painel no computador e no celular |
-| `desenvolvimento/` | Código-fonte, testes, arquivos de referência e script de build (não enviar ao servidor) |
+| `capturas/` | Telas do painel |
+| `desenvolvimento/` | Fontes, testes e cópia da produção usada nos testes (não enviar ao servidor) |
 
-## Ordem de leitura
+## Ordem
 
-1. `INSTALACAO.md`, passos 1 a 5 (backup e verificação, sem alterar nada).
-2. Se a verificação não mostrar **FALHA**, siga para o passo 6 (migrar).
-3. Em caso de dúvida, consulte `ROLLBACK.md`. O nível A desfaz tudo em 1 minuto.
+1. `INSTALACAO.md`, passos 1 a 5: backup, envio, diagnóstico e verificação. Nada no banco é alterado.
+2. Sem **FALHA** na verificação → passo 6 (migrar) e passo 7 (validar).
+3. Problema → `ROLLBACK.md`, nível A (1 minuto).

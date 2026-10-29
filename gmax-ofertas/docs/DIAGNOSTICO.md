@@ -11,7 +11,9 @@
 | `gmax-ml-importar-cli.php` + modelo + CSV | kit `importador_mercadolivre` | referência histórica |
 | Planilhas de 16 e 25 anúncios ML | kit `02_MercadoLivre` | dados reais de pesquisa |
 
-**Importante:** os ZIPs recebidos não têm a cópia dos arquivos que estão **realmente instalados** na HostGator, e não houve acesso ao servidor. Por isso:
+> **Atualização de 29/10/2026:** a cópia dos arquivos da HostGator foi recebida e comparada. Veja `COMPARATIVO_PRODUCAO.md`. Os testes agora usam os arquivos reais. O texto abaixo é a análise original, feita com as referências do kit.
+
+**Importante (análise original):** os ZIPs recebidos não têm a cópia dos arquivos que estão **realmente instalados** na HostGator, e não houve acesso ao servidor. Por isso:
 
 - a entrega é uma **prévia ainda não liberada para instalação**, até que você rode a verificação no servidor (veja a seção 5);
 - o pacote **não substitui nenhum arquivo existente**: só adiciona arquivos novos;

@@ -1,8 +1,8 @@
 <?php
 declare(strict_types=1);
 /*
- * Ambiente de teste isolado: cria uma cópia da aplicação com os arquivos de REFERÊNCIA
- * (app.php, index.php, cron.php, publicador V2.1, mercadolivre.php) + o pacote 3.0, e um
+ * Ambiente de teste isolado: cria uma cópia da aplicação com os arquivos ATUAIS DA HOSTGATOR
+ * (cópia sanitizada de 29/10/2026 em referencia/producao-20261029) + o pacote 3.0, e um
  * banco que reproduz o estado declarado da produção (5 Shopee, 1 Mercado Livre, registros
  * do publicador). GMAX_TESTING=1 proíbe transporte real; allow_url_fopen deve estar desligado.
  */
@@ -18,22 +18,23 @@ function t_sandbox(): string
     $app = "$dir/gmaxcanais.com.br/gmax-auto";
     mkdir($app, 0700, true);
     mkdir("$dir/gmax-secrets", 0700, true);
-    $ref = T_ROOT . '/referencia';
-    $map = [
-        'base_inicial/app.php' => 'app.php', 'painel_v2_2/index.php' => 'index.php', 'base_inicial/cron.php' => 'cron.php',
-        'base_inicial/.htaccess' => '.htaccess', 'publicador_v2_1/gmax-publicador-v2-1-cli.php' => 'gmax-publicador-cli.php',
-        'painel_mercadolivre/mercadolivre.php' => 'mercadolivre.php', 'importador_mercadolivre/gmax-ml-importar-cli.php' => 'gmax-ml-importar-cli.php',
-    ];
-    foreach ($map as $from => $to) {
-        copy("$ref/$from", "$app/$to");
+    $prod = T_ROOT . '/referencia/producao-20261029';
+    foreach (['app.php', 'index.php', 'cron.php', '.htaccess', 'gmax-publicador-cli.php', 'mercadolivre.php', 'gmax-ml-importar-cli.php'] as $f) {
+        copy("$prod/$f", "$app/$f");
     }
-    // O publicador V2.1 de referência aponta para /home1/...; no teste aponta para a pasta isolada.
-    $pub = file_get_contents("$app/gmax-publicador-cli.php");
-    file_put_contents("$app/gmax-publicador-cli.php", str_replace("'/home1/gust1922/gmax-secrets'", var_export("$dir/gmax-secrets", true), $pub));
+    // Os arquivos de produção apontam para /home1/...; no teste apontam para a pasta isolada.
+    foreach (['app.php', 'gmax-publicador-cli.php'] as $f) {
+        file_put_contents("$app/$f", t_isolate(file_get_contents("$app/$f"), $dir));
+    }
     t_copy_tree(T_ROOT . '/src/gmax-auto', $app);
     putenv("GMAX_SECRETS_DIR=$dir/gmax-secrets");
     putenv('GMAX_TESTING=1');
     return $dir;
+}
+
+function t_isolate(string $code, string $dir): string
+{
+    return str_replace("'/home1/gust1922/gmax-secrets", "'$dir/gmax-secrets", $code);
 }
 
 function t_app(): string

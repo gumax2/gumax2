@@ -134,7 +134,7 @@ test('Arquivos internos não executam pela web (guarda direta e CLI)', function 
     eq('', http('GET', 'gmax-lib/pages/painel.php')['body'], 'página interna sem saída');
     $r = http('GET', 'gmax-admin-cli.php');
     eq(403, $r['status']);
-    eq(403, http('GET', 'gmax-publicador-cli.php')['status'], 'publicador V2.1 continua só CLI');
+    eq(403, http('GET', 'gmax-publicador-cli.php')['status'], 'publicador antigo continua só CLI');
 });
 test('Login pelo painel antigo (index.php) vale para o novo painel', function () {
     $t = csrf(http('GET', 'index.php')['body']);
@@ -245,12 +245,12 @@ test('Associar link, conferir preço, aprovar e enfileirar (sem envio)', functio
     $r = follow(http('POST', 'painel.php', ['action' => 'bulk', 'op' => 'aprovar', 'ids' => $shopee, 'csrf' => $t, 'back' => 'ofertas']));
     ok(str_contains($r['body'], '5 produto(s) processado(s)'), 'lote aprovado');
     $r = follow(http('POST', 'painel.php', ['action' => 'bulk', 'op' => 'enfileirar', 'ids' => $shopee, 'csrf' => $t, 'back' => 'ofertas']));
-    ok(str_contains($r['body'], '0 produto(s) processado(s)') && str_contains($r['body'], 'pendente na fila do publicador V2.1'), 'pendentes do V2.1 bloqueados');
+    ok(str_contains($r['body'], '0 produto(s) processado(s)') && str_contains($r['body'], 'pendente na fila do publicador antigo'), 'pendentes do V2.1 bloqueados');
     global $cliRun;
     [$code, $out] = $cliRun(['gmax-admin-cli.php', 'publicador-v21', '--aposentar', 'CONFIRMO_V21_DESATIVADO']);
     eq(0, $code, $out);
     $r = follow(http('POST', 'painel.php', ['action' => 'bulk', 'op' => 'enfileirar', 'ids' => $shopee, 'csrf' => $t, 'back' => 'ofertas']));
-    ok(str_contains($r['body'], '4 produto(s) processado(s)') && str_contains($r['body'], 'enviado pelo publicador V2.1'), 'item já enviado pelo V2.1 não entra');
+    ok(str_contains($r['body'], '4 produto(s) processado(s)') && str_contains($r['body'], 'enviado pelo publicador antigo'), 'item já enviado pelo V2.1 não entra');
     eq(4, (int)$pdo->query('SELECT COUNT(DISTINCT scheduled_for) FROM gmax3_pub_queue')->fetchColumn(), 'horários distintos');
     eq(4, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state='agendado'"));
 });
@@ -310,7 +310,7 @@ test('cron.php original continua rodando em modo prévia após a migração', fu
     eq(0, $code, $out);
     ok(str_contains($out, 'Fora da janela') || str_contains($out, 'PRÉVIA') || str_contains($out, 'Janela') || str_contains($out, 'Fila vazia'), $out);
 });
-test('Publicador V2.1 continua sem enviar (sem arquivo de ativação)', function () use ($cli) {
+test('Publicador antigo continua sem enviar (sem arquivo de ativação)', function () use ($cli) {
     [$code, $out] = $cli(['gmax-publicador-cli.php']);
     eq(0, $code, $out);
     ok(str_contains($out, 'fora_do_horario') || str_contains($out, 'simulacao_sem_envio'), $out);

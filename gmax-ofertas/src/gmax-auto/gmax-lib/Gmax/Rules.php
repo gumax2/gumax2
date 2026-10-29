@@ -35,7 +35,7 @@ final class Rules
 
     /**
      * Duplicidade: mesmo produto (ou mesmo link afiliado) já confirmado, reservado ou com
-     * envio incerto dentro da janela — ou já enviado pelo publicador V2.1.
+     * envio incerto dentro da janela — ou já enviado pelo publicador antigo.
      */
     public static function duplicate(PDO $pdo, array $r, ?int $ignoreQueueId = null): ?string
     {
@@ -48,19 +48,41 @@ final class Rules
         if ($dup) {
             return "Duplicidade: item #{$r['id']} já está na fila ou foi publicado (fila #{$dup['id']}, estado {$dup['state']}) dentro da janela de $days dia(s)";
         }
-        if ($r['marketplace'] === 'shopee' && !empty($r['external_id'])) {
+        $legacyId = $r['marketplace'] === 'shopee' ? self::legacyShopeeId($pdo, $r) : null;
+        if ($legacyId !== null) {
+            $r['external_id'] = $legacyId;
             if (Db::tableExists($pdo, 'offers') && in_array('status', Db::columns($pdo, 'offers'), true)) {
                 $legacy = Db::value($pdo, 'SELECT status FROM offers WHERE item_id=?', [$r['external_id']]);
                 if ($legacy === 'enviado') {
-                    return 'Duplicidade: item já marcado como enviado pelo publicador V2.1 (tabela offers)';
+                    return 'Duplicidade: item já marcado como enviado pelo publicador antigo (tabela offers)';
                 }
                 if ($legacy === 'pendente' && Settings::get($pdo, 'publicador_v21_aposentado', '0') !== '1') {
                     // O 3.0 não altera a tabela offers; publicar aqui deixaria o V2.1 enviar de novo.
-                    return 'Item ainda pendente na fila do publicador V2.1 (tabela offers): publicar pelo 3.0 permitiria envio duplicado';
+                    return 'Item ainda pendente na fila do publicador antigo (tabela offers): publicar pelo 3.0 permitiria envio duplicado';
                 }
             }
             if (Db::tableExists($pdo, 'gmax_dispatches') && in_array('item_id', Db::columns($pdo, 'gmax_dispatches'), true) && Db::value($pdo, 'SELECT status FROM gmax_dispatches WHERE item_id=? LIMIT 1', [$r['external_id']]) !== null) {
-                return 'Duplicidade: item já registrado em gmax_dispatches (publicador V2.1) — revisão manual';
+                return 'Duplicidade: item já registrado em gmax_dispatches (publicador antigo) — revisão manual';
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Item Shopee correspondente na tabela offers: pelo ID do anúncio ou, quando o produto foi
+     * importado só com o link afiliado, pelo link normalizado. Evita que a checagem cruzada falhe.
+     */
+    public static function legacyShopeeId(PDO $pdo, array $r): ?string
+    {
+        if (!empty($r['external_id'])) {
+            return (string)$r['external_id'];
+        }
+        if (empty($r['affiliate_norm']) || !Db::tableExists($pdo, 'offers') || !in_array('affiliate_url', Db::columns($pdo, 'offers'), true)) {
+            return null;
+        }
+        foreach ($pdo->query('SELECT item_id, affiliate_url FROM offers')->fetchAll(PDO::FETCH_ASSOC) as $o) {
+            if (Url::normalizeAffiliate((string)$o['affiliate_url']) === $r['affiliate_norm']) {
+                return (string)$o['item_id'];
             }
         }
         return null;

@@ -80,7 +80,15 @@ final class Preflight
             }
             $sha = hash_file('sha256', $file);
             $ref = $hashes[$f] ?? null;
-            $add('ok', "Arquivo $f", $ref === null ? 'sem referência para comparar' : ($sha === $ref ? 'idêntico à referência do kit' : 'DIFERENTE da referência do kit (versão do servidor prevalece; nada será substituído)'));
+            $add($sha === $ref || $ref === null ? 'ok' : 'aviso', "Arquivo $f", $ref === null ? 'sem referência para comparar' : ($sha === $ref ? 'idêntico à cópia de produção de 29/10/2026' : 'DIFERENTE da cópia de produção de 29/10/2026 (alterado depois?) — revise antes de migrar'));
+        }
+        $pub = @file_get_contents(GMAX_APP_DIR . '/gmax-publicador-cli.php');
+        if (is_string($pub)) {
+            $hardened = str_contains($pub, 'pausa_global_reconciliacao') && str_contains($pub, 'item_ja_processado_ou_reservado');
+            $aware = str_contains($pub, 'gmax3_pub_queue');
+            $add($hardened && $aware ? 'ok' : 'aviso', 'Publicador antigo (gmax-publicador-cli.php)', $hardened && $aware
+                ? 'revisão 2.2: travas do V2.1 e convivência com a fila 3.0'
+                : 'versão SEM pausa global em envio incerto' . ($aware ? '' : ' e sem conhecer a fila 3.0') . ' — inofensivo enquanto não for ativado; instale a revisão 2.2 (opcional/) antes de qualquer ativação');
         }
         $cron = @file_get_contents(GMAX_APP_DIR . '/cron.php');
         $preview = is_string($cron) && preg_match('/slot\(\s*db\(\)\s*,\s*false\s*\)/', $cron) === 1;
@@ -104,7 +112,7 @@ final class Preflight
                 $add(($p & 0077) === 0 ? 'ok' : 'aviso', 'Permissão de telegram.php', sprintf('%04o', $p) . (($p & 0077) ? ' — recomendável 0600' : ''));
             }
         }
-        $add(is_file(Config::legacyActivationFile()) ? 'aviso' : 'ok', 'Ativação do publicador V2.1', is_file(Config::legacyActivationFile()) ? 'EXISTE — V2.1 pode enviar; revise' : 'ausente (bloqueado)');
+        $add(is_file(Config::legacyActivationFile()) ? 'aviso' : 'ok', 'Ativação do publicador antigo', is_file(Config::legacyActivationFile()) ? 'EXISTE — V2.1 pode enviar; revise' : 'ausente (bloqueado)');
         $add(is_file(Config::activationFile()) ? 'aviso' : 'ok', 'Ativação da fila 3.0', is_file(Config::activationFile()) ? 'EXISTE — revise' : 'ausente (bloqueado)');
         try {
             $dir = Backup::dir();
@@ -122,7 +130,7 @@ final class Preflight
         if (!Db::tableExists($pdo, 'gmax_dispatches')) {
             return [];
         }
-        return array_map(static fn($d) => "V2.1 {$d['slot']} {$d['item_id']} {$d['status']}", Db::all($pdo, "SELECT slot,item_id,status FROM gmax_dispatches WHERE status IN ('attempted','uncertain')"));
+        return array_map(static fn($d) => "Publicador antigo {$d['slot']} {$d['item_id']} {$d['status']}", Db::all($pdo, "SELECT slot,item_id,status FROM gmax_dispatches WHERE status IN ('attempted','uncertain')"));
     }
 
     private static function referenceHashes(): array

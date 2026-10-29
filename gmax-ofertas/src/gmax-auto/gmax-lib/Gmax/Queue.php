@@ -113,7 +113,7 @@ final class Queue
         });
     }
 
-    /** Pendências que impedem qualquer envio (fila 3.0 e publicador V2.1). @return list<string> */
+    /** Pendências que impedem qualquer envio (fila 3.0 e publicador antigo). @return list<string> */
     public static function unreconciled(PDO $pdo): array
     {
         $out = [];
@@ -128,14 +128,14 @@ final class Queue
         if (Db::tableExists($pdo, 'gmax_dispatches')) {
             if (array_diff(['slot', 'item_id', 'status'], Db::columns($pdo, 'gmax_dispatches'))) {
                 // Formato diferente do esperado: bloqueia de forma conservadora.
-                $out[] = 'Tabela gmax_dispatches com colunas diferentes do publicador V2.1 conhecido — revisar manualmente';
+                $out[] = 'Tabela gmax_dispatches com colunas diferentes do publicador antigo conhecido — revisar manualmente';
                 return $out;
             }
             $hasOffers = Db::tableExists($pdo, 'offers');
             $sql = "SELECT slot, item_id, status FROM gmax_dispatches WHERE status IN ('attempted','uncertain')"
                 . ($hasOffers ? " OR (status='confirmed' AND EXISTS (SELECT 1 FROM offers o WHERE o.item_id=gmax_dispatches.item_id AND o.status='pendente'))" : '');
             foreach (Db::all($pdo, $sql) as $d) {
-                $out[] = "Publicador V2.1: janela {$d['slot']} item {$d['item_id']} em estado {$d['status']}";
+                $out[] = "Publicador antigo: janela {$d['slot']} item {$d['item_id']} em estado {$d['status']}";
             }
         }
         return $out;
@@ -158,7 +158,7 @@ final class Queue
             $g[] = 'Arquivo de ativação gmax3-publicacao-privada.php ausente ou inválido';
         }
         if (is_file(Config::legacyActivationFile())) {
-            $g[] = 'Publicador V2.1 está ativado (gmax-publicacao-privada.php): os dois publicadores não podem operar juntos';
+            $g[] = 'Publicador antigo está ativado (gmax-publicacao-privada.php): os dois publicadores não podem operar juntos';
         }
         foreach (self::unreconciled($pdo) as $u) {
             $g[] = 'Pendência de reconciliação: ' . $u;
