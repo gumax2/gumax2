@@ -1,0 +1,14 @@
+GMAX MERCADO LIVRE — IMPORTAÇÃO DE LOTE (SEM PUBLICAÇÃO)
+
+1. Preencha a planilha. Cada codigo_gmax deve ser único (ex.: ML-002).
+2. Exporte APENAS a aba Ofertas ML como CSV UTF-8 delimitado por ponto e vírgula.
+3. Renomeie CSV para mercadolivre-lote.csv e envie para /home1/gust1922/gmax-secrets/ (fora do domínio).
+4. Envie gmax-ml-importar-cli.php para /home1/gust1922/gmaxcanais.com.br/gmax-auto/.
+5. Crie CRON TEMPORÁRIO * * * * * com comando:
+/usr/local/bin/php /home1/gust1922/gmaxcanais.com.br/gmax-auto/gmax-ml-importar-cli.php > /home1/gust1922/gmax-secrets/gmax-ml-importacao.log 2>&1
+6. Verifique gmax-ml-importacao.log; REMOVA O CRON TEMPORÁRIO após a primeira execução.
+7. Apague o CSV de importação privado depois do resultado, se não quiser manter cópia.
+
+IMPORTANTE: Este importador cria uma tabela independente gmax_ml_offers, não modifica offers nem os agendadores de Shopee, não publica Telegram. Não integra ainda os produtos ao painel visual.
+As URLs são conferidas somente quanto a formato/domínio; não há comprovação de atribuição nem validação de preço em tempo real. O exemplo de preço foi extraído da captura do usuário e deve ser revalidado antes de publicar.
+É necessário PHP com PDO SQLite e SQLite >= 3.24 (ON CONFLICT DO UPDATE).

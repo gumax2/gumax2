@@ -1,0 +1,21 @@
+GMAX Ofertas — Correção do botão e auditoria local (SEM ENVIO)
+
+Arquivos:
+- index.php: substituição do painel original; corrige o botão Copiar mensagem sem JavaScript dentro de atributo HTML.
+- gmax-auditoria-local-cli.php: inspeção de segurança CLI somente; não envia mensagens e não altera ofertas.
+
+INSTALAÇÃO
+1. Faça BACKUP do index.php ATUAL da HostGator (ex.: index.php.bak-20261026). Este index.php foi gerado a partir do pacote original GMAX_Automacao_CPanel_v1. Se você modificou seu index.php depois, NÃO substitua diretamente; compare/mescle somente o botão e o script JavaScript.
+2. Extraia os dois arquivos para /home1/gust1922/gmaxcanais.com.br/gmax-auto/.
+3. Não substitua app.php, cron.php, gmax-publicador-cli.php ou telegram.php.
+4. Abra o painel e teste Copiar mensagem; confira no editor de texto se o conteúdo foi copiado.
+5. Para auditoria, use cron TEMPORÁRIO com o comando:
+/usr/local/bin/php /home1/gust1922/gmaxcanais.com.br/gmax-auto/gmax-auditoria-local-cli.php > /home1/gust1922/gmax-secrets/gmax-auditoria-local.log 2>&1
+Ajuste temporário * * * * *; remova imediatamente após criar o log.
+6. Verifique que Arquivo de ativacao = AUSENTE (BLOQUEADO).
+7. Preserve gmax-one-offer-test.lock, cron.php com slot(db(),false) e demais arquivos de prova.
+
+LIMITAÇÕES
+- O script de auditoria requer PHP CLI 8.1+, PDO SQLite, e o app.php já instalado.
+- A auditoria confirma apenas estrutura e configurações locais, não atualidade de preços nem validade comercial dos links.
+- O modo automático privado não é habilitado por este pacote; autorização separada será necessária.

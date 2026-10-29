@@ -1,0 +1,31 @@
+GMAX OFERTAS — PAINEL MERCADO LIVRE V1
+
+OBJETIVO
+Exibir produtos importados na tabela gmax_ml_offers sem alterar index.php,
+app.php, cron.php, importador, banco ou agendadores.
+
+INSTALAR (cPanel)
+1. Abra /home1/gust1922/gmaxcanais.com.br/gmax-auto/
+2. Envie APENAS mercadolivre.php.
+3. Acesse https://gmaxcanais.com.br/gmax-auto/ e entre com sua senha.
+4. Na mesma sessão, abra https://gmaxcanais.com.br/gmax-auto/mercadolivre.php
+5. Confira o produto Mercado Livre já importado.
+
+SEGURANÇA
+A página exige a sessão de login existente em index.php.
+Ela lê a tabela SQLite com a conexão db() de app.php.
+Nenhuma escrita no banco, nenhuma chamada Telegram e nenhuma ativação cron.
+Não existe funcionalidade de editar/importar pela página nesta versão.
+Se o site retornar "Acesso negado" ou redirecionar ao login, entre primeiro por index.php.
+Não inclua o arquivo de autorização gmax-publicacao-privada.php.
+
+OPCIONAL — ATALHO NO PAINEL PRINCIPAL
+Sem substituir o index.php atual, inclua após a seção "Visão geral"
+esta linha dentro da área autenticada:
+<p><a href="mercadolivre.php">Ver ofertas Mercado Livre</a></p>
+Faça backup antes de editar.
+
+LIMITES
+Preços vieram do CSV: não há atualização ao vivo nem garantia de desconto.
+A autenticação exige que index.php e esta página compartilhem a mesma sessão PHP.
+Mantenha os arquivos e scripts temporários fora da pasta pública, se não usados.

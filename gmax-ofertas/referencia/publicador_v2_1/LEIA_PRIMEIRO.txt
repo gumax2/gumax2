@@ -1,0 +1,11 @@
+GMAX Ofertas V2.1 — CORRECAO DE SEGURANCA
+
+1. Backup do gmax-publicador-cli.php instalado no cPanel.
+2. Extraia gmax-publicador-v2-1-cli.php na pasta gmax-auto.
+3. Nao crie cron e NAO crie o arquivo gmax-publicacao-privada.php.
+4. Nao mude slot(db(), false) do cron antigo.
+5. Esta revisao acrescenta: pausa global se houver dispatch attempted/uncertain; bloqueia item previamente despachado; pausa se envio confirmado ainda estiver pendente.
+6. Ainda falta validar no ambiente real: esquema do banco, conciliacao e precos/links atuais.
+7. O arquivo original e o novo usam o mesmo arquivo de habilitacao (que deve continuar ausente).
+
+Para substituir definitivamente, renomeie o arquivo original para gmax-publicador-cli.php.bak e renomeie o arquivo revisado para gmax-publicador-cli.php. Sem habilitacao, nenhum envio ocorre.

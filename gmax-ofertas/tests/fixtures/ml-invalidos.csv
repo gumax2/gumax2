@@ -1,0 +1,9 @@
+codigo_gmax;categoria;produto;url_original;url_afiliado;preco_original;preco_promocional;condicao_preco;verificado_em;observacoes
+ML-101;Casa;Produto com link comum (nao afiliado);;https://www.mercadolivre.com.br/algum-produto/p/MLB123456;99,90;79,90;Pix;2026-10-28;
+ML-102;Casa;Preco original menor que promocional;;https://meli.la/AbCd102;50,00;79,90;Pix;2026-10-28;
+ML-103;Casa;Preco com texto invalido;;https://meli.la/AbCd103;;abc;Pix;2026-10-28;
+ML-104;Casa;Link javascript;;javascript:alert(1);;10,00;Pix;2026-10-28;
+ML-105;Casa;Produto valido A;https://produto.mercadolivre.com.br/MLB-1111111111-produto-a-_JM;https://meli.la/AbCd105;199,90;119,90;Pix;2026-10-28;
+ML-106;Casa;Mesmo link afiliado da linha anterior;;https://meli.la/AbCd105;10,00;9,00;Pix;2026-10-28;
+ML-107;Casa;Data invalida;;https://meli.la/AbCd107;;10,00;Pix;28/13/2026;
+ML-108;Casa;<script>alert("xss")</script> Produto =1+1;;https://meli.la/AbCd108;;10,00;normal;2026-10-28;

@@ -1,0 +1,4 @@
+Options -Indexes
+<FilesMatch "^(app|cron)\.php$">
+ Require all denied
+</FilesMatch>
