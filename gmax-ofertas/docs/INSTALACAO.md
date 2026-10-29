@@ -1,4 +1,4 @@
-# Instalação no cPanel — GMAX Ofertas 3.0.1 P0 (atualização incremental)
+# Instalação no cPanel — GMAX Ofertas 3.0.2 P0 (atualização incremental)
 
 > **Situação:** o pacote foi conferido com a cópia dos arquivos instalados na HostGator (29/10/2026). **Só instale quando você autorizar.** A instalação **adiciona** arquivos e não substitui nenhum existente. Nenhum envio ao Telegram é ativado em nenhum passo.
 
@@ -29,7 +29,7 @@ O arquivo `opcional/gmax-publicador-cli.php` **não** é instalado agora (veja o
 ## 2. Enviar os arquivos
 
 1. Confirme que em `gmax-auto/` **não** existem `painel.php`, `gmax-admin-cli.php`, `gmax-diagnostico-esquema.php`, `gmax-lib` nem `gmax-assets`. Se existir algum, **pare**.
-2. **Upload** de `GMAX_Ofertas_3.0.1_P0_arquivos.zip` para `gmax-auto/` → botão direito → **Extract** para `/home1/gust1922/gmaxcanais.com.br/gmax-auto/`.
+2. **Upload** de `GMAX_Ofertas_3.0.2_P0_arquivos.zip` para `gmax-auto/` → botão direito → **Extract** para `/home1/gust1922/gmaxcanais.com.br/gmax-auto/`.
 3. Confira que os 5 itens novos estão direto em `gmax-auto/` e apague o ZIP enviado.
 
 ## 3. Diagnóstico do banco (só leitura, sem dados)

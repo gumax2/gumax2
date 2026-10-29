@@ -54,7 +54,8 @@ function t_copy_tree(string $from, string $to): void
 const T_PASSWORD = 'senha-de-teste-forte-123';
 
 /** Recria o banco no estado "produção declarada". */
-function t_seed(): PDO
+/** @param string $perfil 'declarado' (envio confirmado registrado) ou 'hostgator' (diagnóstico real de 30/10: 5 pendentes, sem gmax_dispatches, slots vazia) */
+function t_seed(string $perfil = 'declarado'): PDO
 {
     $app = t_app();
     @mkdir("$app/storage", 0700, true);
@@ -75,6 +76,11 @@ function t_seed(): PDO
     // Tabela e linha exatamente como o importador ML de referência cria.
     $pdo->exec('CREATE TABLE IF NOT EXISTS gmax_ml_offers (codigo_gmax TEXT PRIMARY KEY,categoria TEXT NOT NULL,produto TEXT NOT NULL,url_original TEXT,url_afiliado TEXT NOT NULL,preco_original_centavos INTEGER,preco_promocional_centavos INTEGER,condicao_preco TEXT,verificado_em TEXT,observacoes TEXT,status TEXT NOT NULL DEFAULT "aguardando_validacao",updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
     $pdo->exec("INSERT INTO gmax_ml_offers(codigo_gmax,categoria,produto,url_original,url_afiliado,preco_original_centavos,preco_promocional_centavos,condicao_preco,verificado_em,observacoes) VALUES('ML-001','Ferramentas','Parafusadeira Furadeira 48V Profissional - 2 baterias','','https://meli.la/1uPYV76',29990,10431,'Pix','2026-10-26','Valores de captura; revalidar')");
+    if ($perfil === 'hostgator') {
+        Gmax\Db::use($pdo);
+        Gmax\Time::freeze(null);
+        return $pdo;
+    }
     // Envio real de homologação já confirmado pelo V2.1 (primeira oferta).
     $pdo->exec('CREATE TABLE IF NOT EXISTS gmax_dispatches (slot TEXT PRIMARY KEY, item_id TEXT NOT NULL, status TEXT NOT NULL, http_code INTEGER, message_id INTEGER, response_note TEXT, started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT)');
     $first = (string)$pdo->query('SELECT item_id FROM offers ORDER BY created_at,item_id LIMIT 1')->fetchColumn();

@@ -112,7 +112,11 @@ final class Preflight
                 $add(($p & 0077) === 0 ? 'ok' : 'aviso', 'Permissão de telegram.php', sprintf('%04o', $p) . (($p & 0077) ? ' — recomendável 0600' : ''));
             }
         }
-        $add(is_file(Config::legacyActivationFile()) ? 'aviso' : 'ok', 'Ativação do publicador antigo', is_file(Config::legacyActivationFile()) ? 'EXISTE — V2.1 pode enviar; revise' : 'ausente (bloqueado)');
+        $legacyOn = is_file(Config::legacyActivationFile());
+        $paused = is_file(Config::pauseFile());
+        $add($legacyOn ? ($paused ? 'aviso' : 'falha') : 'ok', 'Ativação do publicador antigo', !$legacyOn ? 'ausente (bloqueado)'
+            : ($paused ? 'EXISTE, mas gmax-publicacao.pause está presente (envios do antigo bloqueados)'
+                : 'EXISTE e não há gmax-publicacao.pause: o publicador antigo pode ENVIAR nos horários fixos. Renomeie a ativação ou crie o arquivo de pausa antes de migrar'));
         $add(is_file(Config::activationFile()) ? 'aviso' : 'ok', 'Ativação da fila 3.0', is_file(Config::activationFile()) ? 'EXISTE — revise' : 'ausente (bloqueado)');
         try {
             $dir = Backup::dir();

@@ -145,6 +145,50 @@ test('Sem arquivo de ativação, ambas as versões do publicador apenas simulam'
     eq(1, (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax_dispatches'), 'nenhum registro novo');
 });
 
+echo "\n== Estado real informado pelo diagnóstico da HostGator (30/10/2026)\n";
+test('Ativação antiga presente SEM arquivo de pausa = FALHA na verificação (migração impedida)', function () use ($activate, $secrets) {
+    $pdo = t_seed('hostgator');
+    $activate();
+    $chk = array_values(array_filter(Gmax\Preflight::run($pdo), fn($r) => $r[1] === 'Ativação do publicador antigo'))[0];
+    eq('falha', $chk[0], $chk[2]);
+    touch("$secrets/gmax-publicacao.pause");
+    $chk = array_values(array_filter(Gmax\Preflight::run($pdo), fn($r) => $r[1] === 'Ativação do publicador antigo'))[0];
+    eq('aviso', $chk[0], 'com pausa vira aviso');
+    unlink("$secrets/gmax-publicacao.pause");
+    unlink("$secrets/gmax-publicacao-privada.php");
+});
+test('Arquivo de pausa manual bloqueia o publicador instalado mesmo com ativação válida', function () use ($run, $publisher, $activate, $secrets, $PROD) {
+    $pdo = t_seed('hostgator');
+    $activate();
+    touch("$secrets/gmax-publicacao.pause");
+    [$code, $out] = $run($publisher($PROD, 'pub-producao.php'));
+    eq(1, $code, $out);
+    ok(str_contains($out, 'pausa_ativa'), $out);
+    ok(!Db::tableExists($pdo, 'gmax_dispatches') || (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax_dispatches') === 0, 'nenhuma janela reservada');
+    unlink("$secrets/gmax-publicacao.pause");
+    unlink("$secrets/gmax-publicacao-privada.php");
+});
+test('Sem gmax_dispatches e com slots vazia: verificação, migração, painel e rollback funcionam', function () {
+    $pdo = t_seed('hostgator');
+    ok(!Db::tableExists($pdo, 'gmax_dispatches'), 'cenário sem gmax_dispatches');
+    $before = hash('sha256', json_encode([$pdo->query('SELECT * FROM offers ORDER BY item_id')->fetchAll(), $pdo->query('SELECT * FROM gmax_ml_offers')->fetchAll(), $pdo->query('SELECT * FROM users')->fetchAll(), $pdo->query('SELECT * FROM slots')->fetchAll()]));
+    eq([], array_values(array_filter(Gmax\Preflight::run($pdo), fn($r) => $r[0] === 'falha')), 'sem falhas');
+    $done = Migrator::up($pdo, 'teste');
+    eq(['shopee' => 5, 'mercadolivre' => 1], $done[0]['result']);
+    ok(!Db::tableExists($pdo, 'gmax_dispatches'), 'migração não cria gmax_dispatches');
+    eq(5, (int)Db::value($pdo, "SELECT COUNT(*) FROM offers WHERE status='pendente'"), '5 continuam pendentes');
+    eq([], Queue::unreconciled($pdo), 'sem pendências');
+    eq('1', Settings::get($pdo, 'publicacao_pausada'));
+    eq('0', Settings::get($pdo, 'automacao_comercial'));
+    $after = hash('sha256', json_encode([$pdo->query('SELECT * FROM offers ORDER BY item_id')->fetchAll(), $pdo->query('SELECT * FROM gmax_ml_offers')->fetchAll(), $pdo->query('SELECT * FROM users')->fetchAll(), $pdo->query('SELECT * FROM slots')->fetchAll()]));
+    eq($before, $after, 'dados antigos idênticos');
+    $links = $pdo->query("SELECT affiliate_url FROM offers ORDER BY item_id")->fetchAll(PDO::FETCH_COLUMN);
+    $copied = $pdo->query("SELECT affiliate_url FROM gmax3_catalog WHERE marketplace='shopee' ORDER BY external_id")->fetchAll(PDO::FETCH_COLUMN);
+    eq($links, $copied, 'links afiliados copiados sem alteração');
+    Migrator::down($pdo, 'teste');
+    eq($before, hash('sha256', json_encode([$pdo->query('SELECT * FROM offers ORDER BY item_id')->fetchAll(), $pdo->query('SELECT * FROM gmax_ml_offers')->fetchAll(), $pdo->query('SELECT * FROM users')->fetchAll(), $pdo->query('SELECT * FROM slots')->fetchAll()])), 'rollback preserva');
+});
+
 echo "\n== Diagnóstico de esquema\n";
 test('Diagnóstico exporta só o esquema: nenhum título, link, preço ou hash de senha; banco intacto', function () use ($run) {
     $pdo = t_seed();

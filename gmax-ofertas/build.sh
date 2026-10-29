@@ -2,7 +2,7 @@
 # Gera o pacote único de atualização P0: roda os testes, registra resultados e empacota.
 set -euo pipefail
 cd "$(dirname "$0")"
-NAME="GMAX_Ofertas_3.0.1_P0"
+NAME="GMAX_Ofertas_3.0.2_P0"
 DIST="dist/$NAME"
 rm -rf dist && mkdir -p "$DIST/desenvolvimento"
 
@@ -20,7 +20,7 @@ php tools/relatorio_testes.php > docs/TESTES.md
 
 echo "== Pacote"
 ( cd src && find gmax-auto -type f | sort > ../dist/lista.txt )
-( cd src/gmax-auto && zip -q -X -r "../../$DIST/GMAX_Ofertas_3.0.1_P0_arquivos.zip" painel.php gmax-admin-cli.php gmax-diagnostico-esquema.php gmax-lib gmax-assets )
+( cd src/gmax-auto && zip -q -X -r "../../$DIST/GMAX_Ofertas_3.0.2_P0_arquivos.zip" painel.php gmax-admin-cli.php gmax-diagnostico-esquema.php gmax-lib gmax-assets )
 {
   echo "GMAX Ofertas 3.0 P0 — MANIFESTO ($(date -u +%Y-%m-%dT%H:%MZ))"
   echo
@@ -42,7 +42,7 @@ echo "== Pacote"
   echo "ENVIOS: nenhum habilitado. Fila pausada; automação comercial desativada; nenhum Cron criado."
 } > "$DIST/MANIFESTO.txt"
 mkdir -p "$DIST/opcional" && cp src/opcional/gmax-publicador-cli.php "$DIST/opcional/"
-cp docs/COMPARATIVO_PRODUCAO.md docs/INSTALACAO.md docs/ROLLBACK.md docs/DIAGNOSTICO.md docs/LIMITACOES.md docs/TESTES.md "$DIST/"
+cp docs/MIGRACAO_HOSTGATOR.md docs/COMPARATIVO_PRODUCAO.md docs/INSTALACAO.md docs/ROLLBACK.md docs/DIAGNOSTICO.md docs/LIMITACOES.md docs/TESTES.md "$DIST/"
 cp docs/LEIA_PRIMEIRO.md "$DIST/00_LEIA_PRIMEIRO.md"
 mkdir -p "$DIST/capturas" && cp docs/capturas/*.png "$DIST/capturas/" 2>/dev/null || true
 cp -r tests referencia build.sh tools "$DIST/desenvolvimento/"
