@@ -10,6 +10,7 @@ declare(strict_types=1);
  *   listar                        Tarefas, próximas execuções e últimos resultados
  *   pausar | retomar              Pausa geral das automações
  *   aprovacao-automatica --autorizar AUTORIZO_APROVACAO_AUTOMATICA | --desativar
+ *   ml-oauth status | renovar | testar   Situação/renovação do token OAuth do Mercado Livre (sem exibir tokens)
  */
 // Aceita o binário CGI usado por alguns Crons de cPanel, mas nunca uma requisição web.
 if (PHP_SAPI !== 'cli' && !(str_starts_with(PHP_SAPI, 'cgi') && empty($_SERVER['REQUEST_METHOD']))) {
@@ -56,6 +57,19 @@ try {
         case 'retomar':
             Settings::set($pdo, 'automacoes_pausadas', '0', 'cli');
             $print('Automações retomadas (somente pesquisa, revisão e seleção; envios continuam bloqueados pelas travas próprias).');
+            break;
+        case 'ml-oauth':
+            $o = new Gmax\OAuth\MercadoLivreOAuth(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'));
+            $sub = $args[1] ?? 'status';
+            if ($sub === 'renovar') {
+                $print($o->accessToken(true) !== null ? 'Token renovado.' : 'Não foi possível renovar: reconecte em Integrações.');
+            } elseif ($sub === 'testar') {
+                $print((new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o))->probePermissions());
+            } else {
+                $st = $o->status();
+                unset($st['scope']);
+                $print($st);
+            }
             break;
         case 'aprovacao-automatica':
             if (in_array('--desativar', $args, true)) {

@@ -15,7 +15,7 @@ header('Cache-Control: no-store, private');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: no-referrer');
-header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self' https://auth.mercadolivre.com.br; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
 header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 
 Auth::start();
@@ -27,7 +27,7 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'automacoes', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'automacoes', 'integracoes', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
@@ -167,6 +167,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 };
                 View::flash(in_array($r['resultado'], ['concluido'], true) ? 'ok' : 'aviso', $msg);
                 gmax_redirect('automacoes');
+            case 'ml_oauth_start':
+                $url = (new Gmax\OAuth\MercadoLivreOAuth())->begin($_SESSION);
+                Audit::log($pdo, $actor, 'ml_oauth_iniciado', 'integracao', 'mercadolivre');
+                // Redirecionamento externo somente para o endereço fixo de autorização do Mercado Livre.
+                header('Location: ' . $url, true, 303);
+                exit;
+            case 'ml_oauth_disconnect':
+                if (gmax_post_str('confirm', 20) !== 'DESCONECTAR') {
+                    throw new RuntimeException('Digite DESCONECTAR para confirmar.');
+                }
+                $o = new Gmax\OAuth\MercadoLivreOAuth();
+                if ($o->appConfigured()) {
+                    $o->store()->delete();
+                }
+                Audit::log($pdo, $actor, 'ml_oauth_desconectado', 'integracao', 'mercadolivre');
+                View::flash('ok', 'Token do Mercado Livre removido do servidor. Para revogar também no Mercado Livre, remova o aplicativo em "Segurança > Aplicativos conectados" na sua conta.');
+                gmax_redirect('integracoes');
+            case 'ml_oauth_test':
+                $p = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre')))->probePermissions();
+                $_SESSION['gmax3_ml_probe'] = $p + ['em' => Time::nowSql()];
+                Audit::log($pdo, $actor, 'ml_oauth_testado', 'integracao', 'mercadolivre', ['conta' => $p['conta']['detalhe'], 'busca' => $p['busca']['detalhe']]);
+                gmax_redirect('integracoes');
             case 'auto_pause':
                 Settings::set($pdo, 'automacoes_pausadas', '1', $actor);
                 View::flash('ok', 'Todas as automações foram pausadas.');
@@ -494,7 +516,7 @@ if ($page === 'exportar') {
 $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
-$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
+$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'integracoes' => 'Integrações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
     'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';

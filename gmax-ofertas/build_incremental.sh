@@ -2,7 +2,7 @@
 # Pacote INCREMENTAL 3.0.3 (sobre a 3.0.2): roda todos os testes e empacota só os arquivos alterados/novos.
 set -euo pipefail
 cd "$(dirname "$0")"
-NAME="${NAME:-GMAX_Ofertas_3.1_incremental}"
+NAME="${NAME:-GMAX_Ofertas_3.1.1_incremental}"
 BASE_COMMIT="cd8ac74"   # pacote 3.0.2
 OUT="dist-inc/$NAME"
 rm -rf dist-inc && mkdir -p "$OUT"
@@ -13,6 +13,7 @@ php tests/http_test.php > dist-inc/t-http.txt 2>&1; H=$?
 php tests/compat_test.php > dist-inc/t-compat.txt 2>&1; C=$?
 php -d allow_url_fopen=0 tests/links_test.php > dist-inc/t-links.txt 2>&1; L=$?
 php -d allow_url_fopen=0 tests/automacoes_test.php > dist-inc/t-automacoes.txt 2>&1; A=$?
+php -d allow_url_fopen=0 tests/oauth_test.php > dist-inc/t-oauth.txt 2>&1; O=$?
 set -e
 tail -qn1 dist-inc/t-*.txt
 php tools/relatorio_testes.php > docs/TESTES.md
@@ -20,7 +21,7 @@ FILES=$(cd .. && git diff --name-only "$BASE_COMMIT" -- gmax-ofertas/src/gmax-au
 FILES=$(echo "$FILES" | sed 's#^gmax-ofertas/src/gmax-auto/##' | sort -u)
 ( cd src/gmax-auto && zip -q -X "../../$OUT/${NAME}_arquivos.zip" $FILES )
 {
-  echo "$NAME (sobre 3.0.2; inclui 3.0.3) — MANIFESTO ($(date -u +%Y-%m-%dT%H:%MZ))"
+  echo "$NAME (sobre 3.0.2; inclui 3.0.3 e 3.1) — MANIFESTO ($(date -u +%Y-%m-%dT%H:%MZ))"
   echo "Destino: /home1/gust1922/gmaxcanais.com.br/gmax-auto/"
   echo
   for f in $FILES; do
@@ -31,10 +32,11 @@ FILES=$(echo "$FILES" | sed 's#^gmax-ofertas/src/gmax-auto/##' | sort -u)
   echo "BANCO: migração 002 (somente tabelas novas, backup automático antes). ARQUIVOS ANTIGOS (app.php, index.php, cron.php, publicador...): não tocados."
   echo "ENVIOS: nenhum habilitado. Cron e credenciais: não alterados."
 } > "$OUT/MANIFESTO.txt"
-cp docs/ATUALIZACAO_3.1_AUTOMACOES.md "$OUT/00_LEIA_PRIMEIRO_INSTALACAO.md"
+cp docs/ATUALIZACAO_3.1.1_OAUTH_MERCADOLIVRE.md "$OUT/00_LEIA_PRIMEIRO_OAUTH_3.1.1.md"
+cp docs/ATUALIZACAO_3.1_AUTOMACOES.md "$OUT/01_INSTALACAO_3.1_AUTOMACOES.md"
 cp docs/LIMITACOES_APIS.md docs/ATUALIZACAO_3.0.3_LINKS_EM_LOTE.md docs/ROLLBACK.md "$OUT/"
 mkdir -p "$OUT/capturas" && cp docs/capturas/*automacoes*.png "$OUT/capturas/" 2>/dev/null || true
 cp docs/TESTES.md "$OUT/TESTES.md"
 ( cd dist-inc && zip -q -X -r "$NAME.zip" "$NAME" )
 ls -la dist-inc
-[ $U -eq 0 ] && [ $H -eq 0 ] && [ $C -eq 0 ] && [ $L -eq 0 ] && [ $A -eq 0 ] || { echo "ATENÇÃO: há testes falhando"; exit 1; }
+[ $U -eq 0 ] && [ $H -eq 0 ] && [ $C -eq 0 ] && [ $L -eq 0 ] && [ $A -eq 0 ] && [ $O -eq 0 ] || { echo "ATENÇÃO: há testes falhando"; exit 1; }

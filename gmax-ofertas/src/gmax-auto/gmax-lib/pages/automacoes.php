@@ -34,7 +34,7 @@ $heart = Db::one($pdo, "SELECT * FROM gmax3_heartbeats WHERE name='automacoes'")
       <?= View::actionButton('auto_pause', ['back' => 'automacoes'], 'Pausa geral das automações', 'btn btn-danger', 'Pausar todas as automações agendadas?') ?>
     <?php endif; ?>
     <?php if (!$paused && (!$heart || \Gmax\Time::hoursSince($heart['last_at']) > 0.5)): ?><span class="pill pill-warn">O Cron do executor não chama há mais de 30 min</span><?php endif; ?>
-    <span class="muted small">Cron: <?= $heart ? 'última chamada ' . View::e(Time::show($heart['last_at'])) . ' (' . View::e($heart['detail']) . ')' : 'ainda não configurado' ?></span>
+    <a class="small" href="painel.php?p=integracoes">Integrações (OAuth)</a> <span class="muted small">Cron: <?= $heart ? 'última chamada ' . View::e(Time::show($heart['last_at'])) . ' (' . View::e($heart['detail']) . ')' : 'ainda não configurado' ?></span>
   </div>
   <p class="muted small">As automações pesquisam, revisam e selecionam ofertas. <strong>Nenhuma delas envia mensagens</strong>: a publicação continua bloqueada pelas travas da fila (pausa de envios, autorização da automação comercial, arquivo de ativação e reconciliação). Aprovação automática: <strong><?= Settings::get($pdo, 'aprovacao_automatica', '0') === '1' ? 'AUTORIZADA (via linha de comando)' : 'desligada — aprovação manual' ?></strong>.</p>
 </section>

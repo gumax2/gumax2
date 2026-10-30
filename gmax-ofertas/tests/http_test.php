@@ -170,7 +170,7 @@ test('Páginas antigas continuam funcionando após a migração', function () {
     ok(str_contains($r['body'], 'Fone Bluetooth TWS Teste A'), 'index.php lista ofertas Shopee');
 });
 test('Todas as páginas do painel abrem sem erros', function () {
-    foreach (['painel', 'automacoes', 'ofertas', 'oferta', 'importar', 'links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema'] as $p) {
+    foreach (['painel', 'automacoes', 'integracoes', 'ofertas', 'oferta', 'importar', 'links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema'] as $p) {
         $r = http('GET', "painel.php?p=$p");
         eq(200, $r['status'], $p);
         no_php_errors($r, $p);
@@ -362,6 +362,37 @@ test('Central: execução manual, agendamento validado, pausa/retomada, modelo e
     eq('0', Db::value($pdo, "SELECT value FROM gmax3_settings WHERE key='aprovacao_automatica'"), 'aprovação automática não liga pela web');
     eq("garrafa\nfone", Db::value($pdo, "SELECT value FROM gmax3_settings WHERE key='termos_descoberta_shopee'"));
     eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('reservado','confirmado','incerto')"), 'nada enviado');
+});
+
+echo "\n== OAuth Mercado Livre pelo navegador\n";
+test('Integrações: conectar gera redirecionamento S256 com state; callback exige login e state válido', function () {
+    $secrets = t_sandbox() . '/gmax-secrets';
+    $r = http('GET', 'painel.php?p=integracoes');
+    no_php_errors($r, 'integracoes sem app');
+    ok(str_contains($r['body'], 'mercadolivre-app.php ausente'), 'aponta arquivo ausente');
+    file_put_contents("$secrets/mercadolivre-app.php", "<?php return ['client_id' => '1234567890123456', 'client_secret' => 'segredo-de-teste-muito-longo-123', 'redirect_uri' => 'https://gmaxcanais.com.br/gmax-auto/ml-oauth-callback.php'];");
+    $r = http('GET', 'painel.php?p=integracoes');
+    no_php_errors($r, 'integracoes com app');
+    ok(!str_contains($r['body'], 'segredo-de-teste-muito-longo-123'), 'segredo nunca aparece na tela');
+    ok(str_contains(header_value($r, 'Content-Security-Policy'), 'form-action \'self\' https://auth.mercadolivre.com.br'), 'CSP permite só o autorizador oficial');
+    $t = csrf($r['body']);
+    eq(303, http('POST', 'painel.php', ['action' => 'ml_oauth_start', 'csrf' => 'x', 'back' => 'integracoes'])['status']);
+    $r = http('POST', 'painel.php', ['action' => 'ml_oauth_start', 'csrf' => $t, 'back' => 'integracoes']);
+    $loc = header_value($r, 'Location');
+    ok(str_starts_with($loc, 'https://auth.mercadolivre.com.br/authorization?'), $loc);
+    parse_str((string)parse_url($loc, PHP_URL_QUERY), $q);
+    eq('S256', $q['code_challenge_method']);
+    ok(strlen($q['state']) >= 40, 'state forte');
+    $r = follow(http('GET', 'ml-oauth-callback.php?code=TG-abcdefgh&state=forjado'));
+    ok(str_contains($r['body'], 'State inválido'), 'state forjado recusado: ' . substr(strip_tags($r['body']), 0, 200));
+    global $jar;
+    $saved = $jar;
+    $jar = [];
+    $r = http('GET', 'ml-oauth-callback.php?code=TG-abcdefgh&state=' . urlencode($q['state']));
+    eq(403, $r['status'], 'callback sem login recusado');
+    $jar = $saved;
+    ok(!is_file("$secrets/mercadolivre-token.enc"), 'nenhum token gravado');
+    unlink("$secrets/mercadolivre-app.php");
 });
 
 echo "\n== Agendadores existentes e CLI (sem rede)\n";
