@@ -8,7 +8,7 @@ declare(strict_types=1);
  */
 require __DIR__ . '/gmax-lib/bootstrap.php';
 
-use Gmax\{Audit, Auth, Backup, Catalog, Db, Importer, Migrator, Money, Queue, Settings, Time, Url, View};
+use Gmax\{Audit, Auth, Backup, Catalog, Db, Importer, LinkImporter, LinkVerifier, Migrator, Money, Queue, Settings, Time, Url, View};
 
 header('Content-Type: text/html; charset=utf-8');
 header('Cache-Control: no-store, private');
@@ -27,7 +27,7 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
@@ -130,6 +130,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $r = Importer::revert($pdo, gmax_post_int('batch'), $actor);
                 View::flash($r['ignorados'] ? 'aviso' : 'ok', "Lote desfeito: {$r['removidos']} removido(s), {$r['restaurados']} restaurado(s)." . ($r['ignorados'] ? ' Não desfeitos: ' . implode('; ', $r['ignorados']) : ''));
                 gmax_redirect('lote', ['id' => gmax_post_int('batch')]);
+            case 'link_upload':
+                $f = $_FILES['arquivo'] ?? null;
+                if (!is_array($f) || ($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)$f['tmp_name'])) {
+                    throw new RuntimeException('Selecione um arquivo CSV ou XLSX válido.');
+                }
+                $id = LinkImporter::preview($pdo, (string)$f['tmp_name'], (string)$f['name'], $actor);
+                gmax_redirect('lote_links', ['id' => $id]);
+            case 'link_batch_verify':
+                $r = LinkImporter::verify($pdo, gmax_post_int('batch'), new LinkVerifier(), $actor);
+                View::flash($r['diverge'] ? 'aviso' : 'ok', "Verificação concluída: {$r['confere']} confere(m), {$r['diverge']} diverge(m) (bloqueados), {$r['indeterminado']} indeterminado(s).");
+                gmax_redirect('lote_links', ['id' => gmax_post_int('batch')]);
+            case 'link_batch_apply':
+                $r = LinkImporter::apply($pdo, gmax_post_int('batch'), !empty($_POST['replace']), $actor);
+                View::flash($r['ignorados'] ? 'aviso' : 'ok', "Links associados: {$r['aplicados']} novo(s), {$r['substituidos']} substituído(s). Backup prévio: {$r['backup']}. Nenhum produto foi aprovado ou publicado."
+                    . ($r['ignorados'] ? ' Não aplicados: ' . implode('; ', array_slice($r['ignorados'], 0, 10)) : ''));
+                gmax_redirect('lote_links', ['id' => gmax_post_int('batch')]);
+            case 'link_batch_discard':
+                LinkImporter::discard($pdo, gmax_post_int('batch'), $actor);
+                View::flash('ok', 'Prévia descartada; nenhum link foi alterado.');
+                gmax_redirect('links');
+            case 'link_batch_revert':
+                $r = LinkImporter::revert($pdo, gmax_post_int('batch'), $actor);
+                View::flash($r['ignorados'] ? 'aviso' : 'ok', "Lote desfeito: {$r['restaurados']} link(s) restaurado(s)." . ($r['ignorados'] ? ' Preservados: ' . implode('; ', $r['ignorados']) : ''));
+                gmax_redirect('lote_links', ['id' => gmax_post_int('batch')]);
             case 'offer_save':
                 $id = gmax_post_int('id');
                 [$data, $errors] = gmax_offer_form($pdo);
@@ -419,7 +443,7 @@ $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
 $titles = ['painel' => 'Visão geral', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
-    'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
+    'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';
 require __DIR__ . '/gmax-lib/pages/' . $page . '.php';

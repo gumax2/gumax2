@@ -299,6 +299,39 @@ test('Logout encerra a sessão', function () {
     $jar = $saved;
 });
 
+echo "\n== Links afiliados em lote pelo navegador\n";
+test('Importar links em lote: botão na aba, prévia, CSRF, aplicar e desfazer', function () {
+    $pdo = Db::get();
+    // O teste de logout encerrou a sessão anterior: entra de novo.
+    $t = csrf(http('GET', 'painel.php')['body']);
+    follow(http('POST', 'painel.php', ['action' => 'login', 'password' => T_PASSWORD, 'csrf' => $t]));
+    $r = http('GET', 'painel.php?p=links');
+    ok(str_contains($r['body'], 'Importar links em lote'), 'botão presente');
+    no_php_errors($r, 'links');
+    $file = file_get_contents(__DIR__ . '/fixtures/GMAX_18_Links_Recebidos_Para_Associacao.csv');
+    $r = follow(http('POST', 'painel.php', ['action' => 'link_upload', 'csrf' => 'invalido', 'back' => 'links'], ['arquivo' => ['GMAX_18.csv', $file]]));
+    ok(str_contains($r['body'], 'Sessão expirada ou formulário inválido'), 'CSRF exigido no upload');
+    $t = csrf(http('GET', 'painel.php?p=links')['body']);
+    $before = hash('sha256', json_encode($pdo->query('SELECT id, price_original_cents, price_promo_cents, payment_condition, availability, validation_status FROM gmax3_catalog ORDER BY id')->fetchAll()));
+    $r = follow(http('POST', 'painel.php', ['action' => 'link_upload', 'csrf' => $t, 'back' => 'links'], ['arquivo' => ['GMAX_18_Links_Recebidos_Para_Associacao.csv', $file]]));
+    no_php_errors($r, 'prévia de links');
+    ok(str_contains($r['body'], 'Verificar destino dos links') && str_contains($r['body'], 'Associar links'), 'prévia com ações');
+    preg_match('/name="batch" value="(\d+)"/', $r['body'], $m);
+    $batch = (int)$m[1];
+    // MLB4047815501 já recebeu https://meli.la/Mouse01 no teste anterior: aparece como alteração.
+    $b = Db::one($pdo, 'SELECT * FROM gmax3_import_batches WHERE id=?', [$batch]);
+    eq(17, (int)$b['inserted']);
+    eq(1, (int)$b['updated']);
+    $r = follow(http('POST', 'painel.php', ['action' => 'link_batch_apply', 'batch' => $batch, 'csrf' => $t, 'back' => 'lote_links']));
+    ok(str_contains($r['body'], 'Links associados: 17 novo(s), 0 substituído(s)'), substr(strip_tags($r['body']), 0, 300));
+    eq('https://meli.la/Mouse01', Db::value($pdo, "SELECT affiliate_url FROM gmax3_catalog WHERE external_id='item:MLB4047815501'"), 'sem autorização não substitui');
+    eq($before, hash('sha256', json_encode($pdo->query('SELECT id, price_original_cents, price_promo_cents, payment_condition, availability, validation_status FROM gmax3_catalog ORDER BY id')->fetchAll())), 'preço, condição, disponibilidade e estado intactos');
+    $r = follow(http('POST', 'painel.php', ['action' => 'link_batch_revert', 'batch' => $batch, 'csrf' => $t, 'back' => 'lote_links']));
+    ok(str_contains($r['body'], '17 link(s) restaurado(s)'), 'desfeito');
+    no_php_errors(http('GET', "painel.php?p=lote_links&id=$batch"), 'lote desfeito');
+    eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE affiliate_url LIKE 'https://meli.la/Gx%'"));
+});
+
 echo "\n== Agendadores existentes e CLI (sem rede)\n";
 $cli = static function (array $cmd) use ($env, $app): array {
     $p = proc_open(array_merge([PHP_BINARY, '-d', 'allow_url_fopen=0'], $cmd), [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $app, $env);

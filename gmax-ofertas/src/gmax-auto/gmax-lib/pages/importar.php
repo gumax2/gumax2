@@ -33,7 +33,7 @@ $batches = $pdo->query('SELECT * FROM gmax3_import_batches ORDER BY id DESC LIMI
     <tbody>
     <?php foreach ($batches as $b): ?>
       <tr>
-        <td><a href="<?= View::e(View::url('lote', ['id' => $b['id']])) ?>"><?= (int)$b['id'] ?></a></td>
+        <td><a href="<?= View::e(View::url($b['format'] === \Gmax\LinkImporter::FORMAT ? 'lote_links' : 'lote', ['id' => $b['id']])) ?>"><?= (int)$b['id'] ?></a></td>
         <td data-label="Arquivo"><?= View::e($b['filename']) ?></td>
         <td data-label="Formato"><?= View::e($b['format']) ?></td>
         <td data-label="Estado"><span class="badge st-<?= View::e($b['status']) ?>"><?= View::e($b['status']) ?></span></td>

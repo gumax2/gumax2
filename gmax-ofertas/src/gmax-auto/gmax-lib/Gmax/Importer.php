@@ -393,6 +393,9 @@ final class Importer
     {
         return Db::immediate($pdo, static function (PDO $pdo) use ($batchId, $actor) {
             $batch = Db::one($pdo, 'SELECT * FROM gmax3_import_batches WHERE id=?', [$batchId]) ?? throw new RuntimeException('Lote não encontrado');
+            if ($batch['format'] === LinkImporter::FORMAT) {
+                throw new RuntimeException('Lote de links: use a tela Links afiliados');
+            }
             if ($batch['status'] !== 'previa') {
                 throw new RuntimeException('Este lote já foi ' . $batch['status']);
             }
@@ -443,7 +446,7 @@ final class Importer
 
     public static function discard(PDO $pdo, int $batchId, string $actor): void
     {
-        $n = Db::run($pdo, "UPDATE gmax3_import_batches SET status='descartado' WHERE id=? AND status='previa'", [$batchId]);
+        $n = Db::run($pdo, "UPDATE gmax3_import_batches SET status='descartado' WHERE id=? AND status='previa' AND format<>?", [$batchId, LinkImporter::FORMAT]);
         if ($n !== 1) {
             throw new RuntimeException('Somente prévias podem ser descartadas');
         }
@@ -458,6 +461,9 @@ final class Importer
     {
         return Db::immediate($pdo, static function (PDO $pdo) use ($batchId, $actor) {
             $batch = Db::one($pdo, 'SELECT * FROM gmax3_import_batches WHERE id=?', [$batchId]) ?? throw new RuntimeException('Lote não encontrado');
+            if ($batch['format'] === LinkImporter::FORMAT) {
+                throw new RuntimeException('Lote de links: use a tela Links afiliados');
+            }
             if ($batch['status'] !== 'aplicado') {
                 throw new RuntimeException('Somente lotes aplicados podem ser desfeitos');
             }

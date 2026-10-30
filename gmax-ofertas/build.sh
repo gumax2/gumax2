@@ -14,6 +14,7 @@ set +e
 php -d allow_url_fopen=0 tests/run.php > dist/saida-testes-unidade.txt 2>&1; U=$?
 php tests/http_test.php > dist/saida-testes-http.txt 2>&1; H=$?
 php tests/compat_test.php > dist/saida-testes-compat.txt 2>&1; C=$?
+php -d allow_url_fopen=0 tests/links_test.php > dist/saida-testes-links.txt 2>&1; L=$?
 set -e
 tail -1 dist/saida-testes-unidade.txt; tail -1 dist/saida-testes-http.txt; tail -1 dist/saida-testes-compat.txt
 php tools/relatorio_testes.php > docs/TESTES.md
@@ -52,4 +53,4 @@ rm -f "$DIST/desenvolvimento/tests/"*.json
 ( cd dist && zip -q -X -r "$NAME.zip" "$NAME" )
 rm -f dist/lista.txt
 ls -la dist
-[ $U -eq 0 ] && [ $H -eq 0 ] && [ $C -eq 0 ] || { echo "ATENÇÃO: há testes falhando"; exit 1; }
+[ $U -eq 0 ] && [ $H -eq 0 ] && [ $C -eq 0 ] && [ $L -eq 0 ] || { echo "ATENÇÃO: há testes falhando"; exit 1; }

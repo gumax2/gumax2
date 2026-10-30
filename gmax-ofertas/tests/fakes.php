@@ -36,3 +36,19 @@ final class FakeHttp extends Gmax\Http
         return $this->response;
     }
 }
+
+/** HTTP falso para o verificador de links: mapa URL => resposta de probe. */
+final class FakeProbeHttp extends Gmax\Http
+{
+    public array $calls = [];
+
+    public function __construct(private array $map)
+    {
+    }
+
+    public function probe(string $url, int $timeout = 8): array
+    {
+        $this->calls[] = $url;
+        return $this->map[$url] ?? ['status' => 0, 'location' => null, 'error' => 'Falha de rede ou timeout'];
+    }
+}
