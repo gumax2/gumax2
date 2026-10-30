@@ -14,7 +14,26 @@ if (PHP_SAPI !== 'cli') {
 }
 require dirname(__DIR__) . '/bootstrap.php';
 
+umask(0077); // arquivos gerados (backup, integridade) nascem legíveis só pelo dono
 $cmd = $argv[1] ?? 'diagnostico';
+
+function gr_write(string $file, string $data): void
+{
+    if (file_put_contents($file . '.tmp', $data) === false || !rename($file . '.tmp', $file)) {
+        fwrite(STDERR, "Não foi possível gravar $file\n");
+        exit(1);
+    }
+}
+
+function gr_read_json(string $file): array
+{
+    $d = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+    if (!is_array($d) || !isset($d['tabelas'])) {
+        fwrite(STDERR, "Arquivo de integridade inválido: $file\n");
+        exit(1);
+    }
+    return $d;
+}
 $app = gr_app();
 $db = $app->db();
 
@@ -35,6 +54,7 @@ switch ($cmd) {
                 echo $d['faltando'] ? "  FALHA mapeamento: " . implode('; ', $d['faltando']) . "\n" : "  mapeamento ok\n";
             }
         }
+        echo "Pacotes com vencimento inválido (não recebem aviso): " . $app->panel()->invalidDueDates() . "\n";
         $pending = (new \GmaxRenov\Migrator($db, $app->clock()))->pending();
         echo "\nMigrações pendentes: " . ($pending ? implode(', ', $pending) : 'nenhuma') . "\n";
         if (!$pending) {
@@ -52,7 +72,11 @@ switch ($cmd) {
 
     case 'backup':
         $file = $argv[2] ?? (GR_ROOT . '/backup-gr-' . date('Ymd-His') . '.sql');
-        $fh = fopen($file, 'w');
+        $fh = fopen($file, 'x');
+        if (!$fh) {
+            fwrite(STDERR, "Não foi possível criar $file (já existe?)\n");
+            exit(1);
+        }
         fwrite($fh, "-- Backup das tabelas do módulo GMAX Renovações (gr_*) — " . date('c') . "\nSET NAMES utf8mb4;\n");
         foreach ($db->all("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'gr\\_%'") as $t) {
             $name = $t['TABLE_NAME'];
@@ -79,8 +103,7 @@ switch ($cmd) {
         // Retrato SEM dados pessoais (contagens, hashes, totais). Rode antes e depois da instalação.
         $file = $argv[2] ?? (GR_ROOT . '/integridade-' . date('Ymd-His') . '.json');
         $snap = (new \GmaxRenov\Integrity($db))->snapshot();
-        file_put_contents($file, json_encode($snap, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        chmod($file, 0600);
+        gr_write($file, json_encode($snap, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
         foreach ($snap['tabelas'] as $t => $i) {
             echo str_pad($t, 18) . ($i['existe'] ? $i['linhas'] . ' linhas' : 'não existe') . "\n";
         }
@@ -92,14 +115,18 @@ switch ($cmd) {
             echo "Uso: integridade-comparar antes.json depois.json\n";
             exit(1);
         }
-        $r = \GmaxRenov\Integrity::compare(json_decode(file_get_contents($argv[2]), true), json_decode(file_get_contents($argv[3]), true));
+        $r = \GmaxRenov\Integrity::compare(gr_read_json($argv[2]), gr_read_json($argv[3]));
         echo implode("\n", $r['linhas']), "\n", $r['iguais'] ? "RESULTADO: dados do painel preservados.\n" : "RESULTADO: HÁ DIFERENÇAS — não prossiga; veja BACKUP_E_RECUPERACAO.md.\n";
         exit($r['iguais'] ? 0 : 3);
 
     case 'menu':
         // php renovacoes-admin.php menu verificar|aplicar|remover /caminho/public_html/painel/index.html
-        $mode = $argv[2] ?? 'verificar';
+        $mode = $argv[2] ?? '';
         $file = $argv[3] ?? '';
+        if (!in_array($mode, ['verificar', 'aplicar', 'remover'], true)) {
+            echo "Uso: menu verificar|aplicar|remover /caminho/painel/index.html\n";
+            exit(1);
+        }
         if (!is_file($file)) {
             echo "Informe o caminho do index.html do painel.\n";
             exit(1);
@@ -125,8 +152,17 @@ switch ($cmd) {
             break;
         }
         $bak = $file . '.antes-renovacoes-' . date('Ymd-His');
-        copy($file, $bak);
-        file_put_contents($file, $new);
+        if (!copy($file, $bak) || hash_file('sha256', $bak) !== hash('sha256', $html)) {
+            fwrite(STDERR, "Cópia de segurança falhou; nada foi alterado.\n");
+            exit(1);
+        }
+        @chmod($bak, 0644);
+        $tmp = $file . '.renovacoes-tmp';
+        if (file_put_contents($tmp, $new) === false || !@chmod($tmp, fileperms($file) & 0777) || !rename($tmp, $file)) {
+            @unlink($tmp);
+            fwrite(STDERR, "Falha ao gravar; o index.html original foi mantido.\n");
+            exit(1);
+        }
         echo "Gravado. Cópia de segurança: $bak\n";
         break;
 

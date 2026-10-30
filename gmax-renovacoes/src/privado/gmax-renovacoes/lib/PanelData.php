@@ -125,7 +125,19 @@ final class PanelData
             $this->baseSelect() . ' WHERE ' . $this->dueExpr() . ' BETWEEN ? AND ? ORDER BY vencimento, cliente_nome, pacote_id',
             [$from, $to]
         );
-        return array_map([$this, 'normalize'], $rows);
+        // Datas de texto inválidas (ex.: 2026-02-30) ficam fora; são contadas por invalidDueDates().
+        return array_values(array_filter(array_map([$this, 'normalize'], $rows), static fn($r) => $r['vencimento'] !== null));
+    }
+
+    /** Quantidade de pacotes com vencimento inválido (não recebem aviso). Não devolve dados pessoais. */
+    public function invalidDueDates(): int
+    {
+        $n = 0;
+        $st = $this->db->pdo->query('SELECT ' . $this->dueExpr() . ' AS v FROM ' . Db::ident($this->p['tabela']) . ' p');
+        while (($v = $st->fetchColumn()) !== false) {
+            $n += self::validYmd($v) === null ? 1 : 0;
+        }
+        return $n;
     }
 
     public function package(string $id): ?array

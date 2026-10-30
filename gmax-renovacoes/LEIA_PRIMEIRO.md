@@ -9,7 +9,7 @@ Módulo adicional para o painel **GMAX — Central de Gestão** (`/painel/`), in
 | Item | Estado |
 |---|---|
 | Leitura de clientes e pacotes reais (`clients`, `client_plans.due_date`, `client_exclusions`, `price_cents`) | **pronto**, testado em banco descartável com a estrutura real |
-| Sessão do painel (`gmax_session`, `admin`, `csrf`, expiração 3600 s, HTTPS) | **pronto**, testado com o `api.php` real em servidor local |
+| Sessão do painel (`gmax_session`, `admin`, `csrf`, expiração 3600 s, HTTPS) | **pronto**, testado com o `api.php` real em servidor local (89/89 em 30/10/2026, duas execuções completas) |
 | Preservação dos dados (clientes, pacotes, vencimentos, preços, custos, financeiro, exclusões) | **verificada em banco descartável** com dados fictícios. **Na produção, só depois do comparativo de integridade** do passo 5 da instalação |
 | Regras, fila, agendador, revalidação, webhook, aba Renovações | **pronto e testado** |
 | Envio pelo WhatsApp | **simulado**. O simulado **não prova entrega real** |

@@ -1,6 +1,7 @@
 <?php
 /**
- * Gera as capturas de tela da aba Renovações em docs/capturas/ (celular-*.png e desktop-*.png).
+ * Gera as capturas de tela em docs/capturas/: menu do painel GMAX real com o link Renovações e as 4 abas
+ * (celular-*.png e desktop-*.png). Base do painel: env GR_PAINEL_BASE.
  * Uso: php tests/web/capturar.php
  * Banco de teste novo (grtest_*), dados fictícios, provedor simulado, servidor PHP embutido temporário.
  */
@@ -19,7 +20,8 @@ try {
     $r = $http->api('executar_agora', ['ignorar_horario' => true]);
     echo 'executar_agora: HTTP ' . $r['status'] . ' ' . $r['body'] . "\n";
     $out = dirname(__DIR__, 2) . '/docs/capturas';
-    $cmd = 'node ' . escapeshellarg(__DIR__ . '/capturas.js') . ' ' . escapeshellarg($web->base) . ' ' . escapeshellarg($out) . ' 2>&1';
+    $cmd = 'node ' . escapeshellarg(__DIR__ . '/capturas.js') . ' ' . escapeshellarg($web->base) . ' ' . escapeshellarg($out)
+        . ' ' . escapeshellarg(GrWeb::ADMIN_USER) . ' ' . escapeshellarg(GrWeb::ADMIN_PASS) . ' 2>&1';
     $lines = [];
     exec($cmd, $lines, $code);
     $rel = json_decode((string)end($lines), true);

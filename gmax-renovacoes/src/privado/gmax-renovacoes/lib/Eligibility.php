@@ -25,6 +25,7 @@ final class Eligibility
         'valor_invalido' => 'Valor do pacote zerado ou inválido',
         'fora_do_dia' => 'Data prevista já passou (não envia atrasado)',
         'somente_teste' => 'Bloqueado: modo de teste interno (só números de teste)',
+        'enviado_manual' => 'Você já enviou este aviso manualmente',
     ];
 
     public static function label(?string $code): string

@@ -38,7 +38,8 @@ final class Api
             case 'salvar_config': return $this->saveConfig($in);
             case 'consentimento': return $this->consent($in);
             case 'pausa_cliente':
-                if (!$this->app->panel()->client((string)($in['cliente_id'] ?? ''))) {
+                $cl = $this->app->panel()->client((string)($in['cliente_id'] ?? ''));
+                if (!$cl || $cl['excluido_flag']) {
                     throw new \InvalidArgumentException('Cliente não encontrado.');
                 }
                 $this->contacts->setPaused((string)($in['cliente_id'] ?? ''), !empty($in['pausado']), (string)($in['motivo'] ?? ''));
@@ -117,6 +118,9 @@ final class Api
         // Agrupa por cliente + vencimento (mesma regra do envio).
         $groups = [];
         foreach ($pkgs as $p) {
+            if ($p['cliente_excluido'] || !$p['cliente_existe']) {
+                continue; // excluídos ficam ocultos, como no painel
+            }
             $groups[$p['cliente_id'] . '|' . $p['vencimento']][] = $p;
         }
         $out = ['proximos' => [], 'hoje' => [], 'vencidos' => []];
@@ -154,7 +158,7 @@ final class Api
                     'motivo_texto' => Eligibility::label($reason),
                     'lembrete' => $rem ? [
                         'status' => $rem['msg_status'] ?? $rem['status'],
-                        'status_texto' => $rem['msg_status'] ? Statuses::LABELS[$rem['msg_status']] : ['pendente' => 'Aguardando envio', 'ignorado' => 'Não será enviado', 'cancelado' => 'Cancelado'][$rem['status']] ?? $rem['status'],
+                        'status_texto' => $rem['msg_status'] ? Statuses::label($rem['msg_status'], $mode) : ['pendente' => 'Aguardando envio', 'ignorado' => 'Não será enviado', 'cancelado' => 'Cancelado'][$rem['status']] ?? $rem['status'],
                         'motivo' => Eligibility::label($rem['motivo']),
                         'mensagem_id' => $rem['mensagem_id'] ? (int)$rem['mensagem_id'] : null,
                     ] : null,
@@ -192,6 +196,7 @@ final class Api
             'proximos' => count($out['proximos']),
             'hoje' => count($out['hoje']),
             'vencidos' => count($out['vencidos']),
+            'datas_invalidas' => $this->app->panel()->invalidDueDates(),
             'falhas_hoje' => (int)$db->value("SELECT COUNT(*) FROM gr_mensagens WHERE status IN ('falhou','incerto') AND data_prevista=?", [$today]),
         ];
         $out['estado'] = $this->state();
@@ -250,7 +255,7 @@ final class Api
                 $r['cliente'] = $names[$cid];
             }
             $r['telefone'] = Format::maskPhone($r['telefone']);
-            $r['status_texto'] = Statuses::LABELS[$r['status']] ?? $r['status'];
+            $r['status_texto'] = Statuses::label($r['status'], $r['modo']);
             $r['vencimento_br'] = Format::date($r['vencimento']);
         }
         return ['itens' => $rows, 'status_disponiveis' => Statuses::LABELS];
@@ -265,7 +270,7 @@ final class Api
         }
         unset($m['lease_token']);
         $m['telefone'] = Format::maskPhone($m['telefone']);
-        $m['status_texto'] = Statuses::LABELS[$m['status']] ?? $m['status'];
+        $m['status_texto'] = Statuses::label($m['status'], $m['modo']);
         $m['eventos'] = $db->all('SELECT tipo, status, detalhe, ocorrido_em, registrado_em FROM gr_eventos WHERE mensagem_id=? ORDER BY id', [$id]);
         $m['lembretes'] = $db->all('SELECT pacote_id, snap_pacote, snap_valor_centavos, status, motivo FROM gr_lembretes WHERE mensagem_id=?', [$id]);
         foreach ($m['lembretes'] as &$l) {
@@ -303,7 +308,7 @@ final class Api
     {
         $id = (string)($in['cliente_id'] ?? '');
         $client = $this->app->panel()->client($id);
-        if (!$client) {
+        if (!$client || $client['excluido_flag']) { // cliente excluído no painel: nada a registrar
             throw new \InvalidArgumentException('Cliente não encontrado.');
         }
         if (($in['acao'] ?? '') === 'conceder') {

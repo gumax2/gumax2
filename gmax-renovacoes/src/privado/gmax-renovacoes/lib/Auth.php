@@ -112,7 +112,7 @@ final class Auth
     {
         $u = (string)$this->cfg['url_login'];
         // Somente caminho relativo/local (evita redirecionamento aberto por configuração errada).
-        return preg_match('~^(\./|/(?!/))~', $u) ? $u : './';
+        return preg_match('~^(\./|/(?![/\\\\]))[^\\\\\s]*$~', $u) ? $u : './';
     }
 
     public static function securityHeaders(): void

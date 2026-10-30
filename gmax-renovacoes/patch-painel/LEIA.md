@@ -6,9 +6,9 @@ A única mudança em arquivo existente do painel é **acrescentar** ao `painel/i
    ```html
    <link rel="stylesheet" href="renovacoes-assets/menu.css?v=1">
    ```
-2. no menu, logo antes de `</nav>` (depois do botão "Configurações"):
+2. no menu, logo depois do botão "Clientes" (fica visível sem rolar no iPhone):
    ```html
-   <a class="nav gr-menu-link" href="renovacoes.php"><span>⏰</span>Renovações</a>
+   <a class="nav gr-menu-link" href="renovacoes.php"><span>↻</span>Renovações</a>
    ```
 
 Não são alterados: `api.php`, `assets/app.js` (continua `?v=vencimentos-3`), `style.css`, `plans.css`, `pwa.js`, `manifest.webmanifest`, `.htaccess`. Como o `app.js` não muda, não existe o risco de um `index.html` novo carregar um `app.js` antigo do cache. O link é um `<a>` sem `data-page`, então o controlador de abas do `app.js` não o captura. A página `renovacoes.php` fica na mesma pasta e no mesmo escopo do PWA (`/painel/`).

@@ -83,6 +83,7 @@ final class Engine
         $res = ['executado' => true, 'modo' => $this->app->effectiveMode()];
         try {
             $res['recuperados_incertos'] = $this->recoverStale();
+            $res['respostas_apagadas_90d'] = $this->purgeOld();
             $res['expirados'] = $this->expireOld();
             if (!$s->get('ativo')) {
                 $res['motivo'] = 'Módulo desativado.';
@@ -109,6 +110,22 @@ final class Engine
             throw $e;
         }
         return $res;
+    }
+
+    private function sentManuallyInAnyMode(string $pkgId, string $due, string $stage): bool
+    {
+        return (bool)$this->db->value(
+            "SELECT 1 FROM gr_lembretes l JOIN gr_mensagens m ON m.id = l.mensagem_id
+             WHERE l.pacote_id = ? AND l.vencimento = ? AND l.etapa = ? AND m.status = 'manual' LIMIT 1",
+            [$pkgId, $due, $stage]
+        );
+    }
+
+    /** Retenção (LGPD): respostas recebidas dos clientes são apagadas após 90 dias. */
+    public function purgeOld(): int
+    {
+        $limit = $this->app->clock()->now()->modify('-90 days')->format('Y-m-d H:i:s');
+        return $this->db->exec("DELETE FROM gr_eventos WHERE tipo = 'recebida' AND registrado_em < ?", [$limit]);
     }
 
     /** Envios que ficaram "enviando" (processo caiu no meio) viram "incerto". */
@@ -195,6 +212,9 @@ final class Engine
                 continue;
             }
             $reason = Eligibility::check($p, $contacts[$p['cliente_id']] ?? [], null, $opts);
+            if ($reason === null && $this->sentManuallyInAnyMode($p['pacote_id'], $p['vencimento'], $st['codigo'])) {
+                $reason = 'enviado_manual'; // você já mandou este aviso pelo WhatsApp (mesmo se registrado em simulação)
+            }
             $inserted = $this->db->exec(
                 'INSERT IGNORE INTO gr_lembretes (modo, pacote_id, cliente_id, vencimento, etapa, data_prevista, status, motivo,
                    snap_pacote, snap_valor_centavos, snap_pontos, snap_ciclo, criado_em, atualizado_em)

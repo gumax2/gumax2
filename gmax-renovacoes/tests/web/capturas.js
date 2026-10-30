@@ -5,7 +5,9 @@
  *  - rolagem horizontal em 390px (scrollWidth <= largura);
  *  - diálogos inesperados (alert de XSS);
  *  - respostas HTTP >= 400 durante o uso.
- * Uso: node tests/web/capturas.js <baseUrl> <pastaSaida>
+ * Antes, faz o login REAL pelo formulário do painel (index.html/app.js/api.php), captura o menu com o link
+ * "Renovações" e clica nele (sessão compartilhada).
+ * Uso: node tests/web/capturas.js <baseUrl> <pastaSaida> <usuario> <senha>
  * Saída: uma linha JSON com o relatório (última linha do stdout).
  */
 'use strict';
@@ -15,8 +17,10 @@ const fs = require('fs');
 
 const base = process.argv[2];
 const outDir = process.argv[3];
-if (!base || !outDir) {
-  console.error('uso: node capturas.js <baseUrl> <pastaSaida>');
+const usuario = process.argv[4];
+const senha = process.argv[5];
+if (!base || !outDir || !usuario || !senha) {
+  console.error('uso: node capturas.js <baseUrl> <pastaSaida> <usuario> <senha>');
   process.exit(2);
 }
 fs.mkdirSync(outDir, { recursive: true });
@@ -40,10 +44,15 @@ const ABAS = [
     for (const [nomePerfil, opts] of Object.entries(PERFIS)) {
       const ctx = await browser.newContext({ ...opts, locale: 'pt-BR', timezoneId: 'America/Sao_Paulo', colorScheme: 'dark' });
       const page = await ctx.newPage();
-      const r = { console: [], pageErrors: [], dialogs: [], http: [], abas: {} };
+      const r = { console: [], pageErrors: [], dialogs: [], http: [], abas: {}, painel: { consoleErros: [], link: null, chegouNaAba: false } };
       relatorio.perfis[nomePerfil] = r;
-      page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { r.console.push(m.type() + ': ' + m.text()); } });
-      page.on('pageerror', (e) => r.pageErrors.push(String(e)));
+      let noPainel = true; // erros da página do painel ficam separados dos da aba Renovações
+      page.on('console', (m) => {
+        if (m.type() === 'error' || m.type() === 'warning') {
+          (noPainel ? r.painel.consoleErros : r.console).push(m.type() + ': ' + m.text());
+        }
+      });
+      page.on('pageerror', (e) => (noPainel ? r.painel.consoleErros : r.pageErrors).push(String(e)));
       page.on('dialog', async (d) => {
         if (d.type() === 'alert') { r.dialogs.push(d.type() + ': ' + d.message()); }
         await d.accept();
@@ -56,8 +65,45 @@ const ABAS = [
         });
       });
 
-      await page.goto(base + '/login.php');
-      await page.goto(base + '/painel/renovacoes.php', { waitUntil: 'networkidle' });
+      // Login real pelo formulário do painel.
+      await page.goto(base + '/painel/', { waitUntil: 'networkidle' });
+      await page.waitForSelector('#auth-form', { state: 'visible', timeout: 10000 });
+      await page.fill('#auth-form input[name=username]', usuario);
+      await page.fill('#auth-form input[name=password]', senha);
+      await Promise.all([
+        page.waitForResponse((x) => x.url().includes('action=login')),
+        page.click('#auth-form button[type=submit]'),
+      ]);
+      await page.waitForSelector('#shell:not(.hidden)', { timeout: 10000 });
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(300);
+      const link = await page.$('a.gr-menu-link');
+      if (link) {
+        r.painel.link = await page.evaluate((el) => {
+          const b = el.getBoundingClientRect();
+          const nav = el.closest('nav').getBoundingClientRect();
+          return { texto: el.textContent.trim(), href: el.getAttribute('href'), x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height),
+            visivelSemRolar: b.width > 0 && b.left >= nav.left - 1 && b.right <= Math.min(nav.right, window.innerWidth) + 1 && b.top >= 0 && b.bottom <= window.innerHeight,
+            estiloIgualAosBotoes: getComputedStyle(el).fontSize === getComputedStyle(el.closest('nav').querySelector('button.nav')).fontSize };
+        }, link);
+      }
+      r.painel.scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+      await page.screenshot({ path: path.join(outDir, nomePerfil + '-painel-menu.png') });
+      if (link && nomePerfil === 'celular' && !r.painel.link.visivelSemRolar) {
+        await link.evaluate((el) => el.scrollIntoView({ inline: 'end', block: 'nearest' }));
+        await page.waitForTimeout(200);
+        await page.screenshot({ path: path.join(outDir, 'celular-painel-menu-rolado.png') });
+      }
+      if (link) {
+        await Promise.all([page.waitForNavigation(), link.click()]);
+        noPainel = false;
+        await page.waitForSelector('#gr-resumo .gr-card', { timeout: 10000 });
+        r.painel.chegouNaAba = page.url().endsWith('/painel/renovacoes.php');
+      } else {
+        noPainel = false;
+        await page.goto(base + '/painel/renovacoes.php');
+      }
+      await page.waitForLoadState('networkidle');
 
       for (const aba of ABAS) {
         const api = { visao: 'painel', historico: 'historico', clientes: 'clientes', config: 'config' }[aba.tab];

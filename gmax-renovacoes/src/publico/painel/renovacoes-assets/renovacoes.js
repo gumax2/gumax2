@@ -118,7 +118,8 @@
         '<div class="gr-card"><span class="gr-muted">Vencem hoje</span><b>' + r.hoje + '</b></div>' +
         '<div class="gr-card"><span class="gr-muted">Próximos 7 dias</span><b>' + r.proximos + '</b></div>' +
         '<div class="gr-card"><span class="gr-muted">Vencidos (15 dias)</span><b>' + r.vencidos + '</b></div>' +
-        '<div class="gr-card"><span class="gr-muted">Falhas/incertos hoje</span><b>' + r.falhas_hoje + '</b></div>';
+        '<div class="gr-card"><span class="gr-muted">Falhas/incertos hoje</span><b>' + r.falhas_hoje + '</b></div>' +
+        (r.datas_invalidas ? '<div class="gr-card"><span class="gr-muted">Pacotes com vencimento inválido (sem aviso — corrija no painel)</span><b>' + r.datas_invalidas + '</b></div>' : '');
       ['hoje', 'proximos', 'vencidos'].forEach(function (k) {
         $('#gr-' + k).innerHTML = d[k].length ? d[k].map(renderGroup).join('') : '<div class="gr-empty">Nada aqui.</div>';
       });
@@ -134,7 +135,7 @@
     return '<div class="gr-item"><div class="gr-item-head"><strong>' + esc(m.cliente) + '</strong><span class="gr-badges">' +
       (m.modo === 'simulacao' ? badge('sim', 'SIMULAÇÃO') + ' ' : '') + badge(m.status, m.status_texto) + '</span></div>' +
       '<div class="gr-muted">' + esc(m.pacotes || '') + ' · venc. ' + esc(m.vencimento_br) + ' · etapa ' + esc(m.etapa) + ' · ' + esc(m.telefone) + '</div>' +
-      '<div class="gr-muted">Criada ' + esc(dt(m.criado_em)) + (m.enviado_em ? ' · aceita ' + esc(dt(m.enviado_em)) : '') + (m.entregue_em ? ' · entregue ' + esc(dt(m.entregue_em)) : '') + (m.lido_em ? ' · lida ' + esc(dt(m.lido_em)) : '') + ' · tentativas ' + esc(m.tentativas) + '</div>' +
+      '<div class="gr-muted">Criada ' + esc(dt(m.criado_em)) + (m.enviado_em ? (m.modo === 'simulacao' ? ' · simulada ' : ' · aceita ') + esc(dt(m.enviado_em)) : '') + (m.entregue_em ? ' · entregue ' + esc(dt(m.entregue_em)) : '') + (m.lido_em ? ' · lida ' + esc(dt(m.lido_em)) : '') + ' · tentativas ' + esc(m.tentativas) + '</div>' +
       err + '<div class="gr-actions"><button class="gr-btn gr-btn-sec gr-btn-sm" data-msg="' + m.id + '">Detalhes</button></div></div>';
   }
 

@@ -20,6 +20,15 @@ final class Statuses
         'manual' => 'Enviado manualmente (registro seu)',
     ];
 
+    /** Rótulo honesto: no modo simulação nada saiu do servidor. */
+    public static function label(string $status, ?string $mode = null): string
+    {
+        if ($mode === 'simulacao' && in_array($status, ['aceito', 'entregue', 'lido', 'incerto', 'enviando'], true)) {
+            return 'Simulado — nada foi enviado';
+        }
+        return self::LABELS[$status] ?? $status;
+    }
+
     private const RANK = ['aguardando' => 0, 'enviando' => 1, 'incerto' => 2, 'aceito' => 3, 'entregue' => 4, 'lido' => 5];
 
     /** Converte o status do webhook da Meta para o nosso vocabulário. */

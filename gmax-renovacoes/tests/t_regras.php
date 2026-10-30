@@ -990,3 +990,90 @@ test('migrações e SQL de instalação: só CREATE TABLE IF NOT EXISTS gr_* e I
     }
     check(!preg_match('/\b(DROP|TRUNCATE|DELETE|ALTER|UPDATE|REPLACE)\b/i', $sql), 'sem comandos destrutivos');
 });
+
+echo "Correções da revisão de segurança — rodada 2\n";
+
+test('R2-1: banco com a versão antiga (IDs numéricos) é recusado sem alterar nada', function (T $t) {
+    $db = $t->app->db();
+    $db->pdo->exec('ALTER TABLE gr_contatos MODIFY cliente_id BIGINT NOT NULL'); // simula instalação 1.0.0
+    $db->pdo->exec("UPDATE gr_migracoes SET checksum = REPEAT('0', 64) WHERE versao = '001'");
+    $failed = false;
+    try {
+        (new Migrator($db, $t->clock))->migrate();
+    } catch (RuntimeException $e) {
+        $failed = strpos($e->getMessage(), 'gr_contatos.cliente_id') !== false;
+    }
+    check($failed, 'migração recusada apontando a coluna');
+});
+
+test('R2-2: envio manual registrado em simulação impede o envio automático no modo real', function (T $t) {
+    $c = $t->client('Manual Sim');
+    $t->consent($c);
+    $t->package($c, 'P', '2026-11-13', '10.00');
+    $t->clock->set('2026-11-10 08:00:00');
+    (new Engine($t->app))->manualForPending($c, '2026-11-13', 'antes'); // modo efetivo: simulação
+    $app = new \GmaxRenov\App($t->config(['provedor' => ['driver' => 'meta_cloud']]), $t->clock);
+    $s = $app->settings();
+    $s->set('modo', 'real');
+    $s->set('pagamento_confirmado', true);
+    $s->set('somente_numeros_teste', false);
+    $s->set('modelos', ['antes' => ['individual' => 'a', 'grupo' => 'b'], 'dia' => ['individual' => 'c', 'grupo' => 'd'], 'depois' => ['individual' => 'e', 'grupo' => 'f']]);
+    $prov = new SimulatedProvider(); // substitui o real: nenhuma rede no teste
+    $app->setProvider($prov);
+    $t->clock->set('2026-11-10 09:30:00');
+    (new Engine($app))->run('teste');
+    eq(0, count($prov->sent), 'nada enviado no modo real');
+    eq('enviado_manual', $app->db()->value("SELECT motivo FROM gr_lembretes WHERE modo='real'"), 'motivo registrado');
+});
+
+test('R2-3: vencimento inválido no painel não derruba a aba e é contado', function (T $t) {
+    $c = $t->client('Data Ruim');
+    $t->package($c, 'Ok', '2026-11-12', '10.00');
+    $t->package($c, 'Ruim', '2026-11-3x', '10.00');
+    $t->package($c, 'Fev30', '2026-02-30', '10.00');
+    $r = (new \GmaxRenov\Api($t->app))->handle('painel', []);
+    eq(2, $r['resumo']['datas_invalidas'], 'duas datas inválidas contadas');
+    eq(1, $r['resumo']['proximos'], 'pacote válido listado');
+});
+
+test('R2-4: simulação nunca aparece como "Aceito pelo provedor"', function (T $t) {
+    $c = $t->client('Rotulo');
+    $t->consent($c);
+    $t->package($c, 'P', '2026-11-13', '10.00');
+    $t->run();
+    $h = (new \GmaxRenov\Api($t->app))->handle('historico', []);
+    eq('Simulado — nada foi enviado', $h['itens'][0]['status_texto'], 'rótulo honesto');
+    eq('Aceito pelo provedor', \GmaxRenov\Statuses::label('aceito', 'real'), 'modo real mantém o rótulo');
+});
+
+test('CLI: integridade antes/depois + migrar + comparar, e menu recusa modo inválido', function (T $t) {
+    $db = $t->app->db();
+    foreach ($db->all("SELECT TABLE_NAME t FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'gr\\_%'") as $r) {
+        $db->pdo->exec('DROP TABLE `' . $r['t'] . '`');
+    }
+    $c = $t->client('CLI');
+    $t->renew($c, $t->package($c, 'P', '2026-11-13', '35.00'), '2026-11-13', 3500);
+    $cfg = $t->writeConfig();
+    $dir = sys_get_temp_dir() . '/gr-cli-' . $t->dbName;
+    @mkdir($dir, 0700);
+    $admin = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(GR_TEST_SRC . '/bin/renovacoes-admin.php');
+    $env = 'GR_CONFIG=' . escapeshellarg($cfg) . ' ';
+    exec($env . "$admin integridade $dir/antes.json 2>&1", $o1, $c1);
+    exec($env . "$admin migrar 2>&1", $o2, $c2);
+    exec($env . "$admin migrar 2>&1", $o3, $c3);
+    exec($env . "$admin integridade $dir/depois.json 2>&1", $o4, $c4);
+    exec($env . "$admin integridade-comparar $dir/antes.json $dir/depois.json 2>&1", $o5, $c5);
+    eq([0, 0, 0, 0, 0], [$c1, $c2, $c3, $c4, $c5], 'comandos ok: ' . implode(' | ', array_merge($o2, $o5)));
+    check(strpos(implode("\n", $o5), 'dados do painel preservados') !== false, 'comparativo aprovado');
+    eq('600', substr(sprintf('%o', fileperms("$dir/antes.json")), -3), 'arquivo com permissão 600');
+    $idx = "$dir/index.html";
+    file_put_contents($idx, '<html><head></head><body><nav><button data-page="a" class="nav">A</button></nav></body></html>');
+    exec($env . "$admin menu aplicr " . escapeshellarg($idx) . ' 2>&1', $o6, $c6);
+    eq(1, $c6, 'modo com erro de digitação recusado');
+    check(strpos(file_get_contents($idx), 'renovacoes') === false, 'index.html intocado');
+    exec($env . "$admin menu aplicar " . escapeshellarg($idx) . ' 2>&1', $o7, $c7);
+    eq(0, $c7, 'aplicado');
+    check(count(glob("$idx.antes-renovacoes-*")) === 1, 'cópia de segurança criada');
+    array_map('unlink', glob("$dir/*"));
+    rmdir($dir);
+});
