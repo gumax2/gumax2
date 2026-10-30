@@ -1,7 +1,8 @@
 <?php
 /**
- * Mini-framework de testes (sem dependências). Cada teste recebe um banco MariaDB NOVO
- * com o esquema fictício do painel + migrações do módulo. Nenhuma chamada de rede é feita.
+ * Mini-framework de testes (sem dependências). Cada teste recebe um banco MariaDB NOVO e DESCARTÁVEL (grtest_*)
+ * com a ESTRUTURA REAL do painel GMAX (clients, client_plans, client_exclusions, entries, entry_plans...)
+ * + migrações do módulo. Os registros de teste são fictícios e só existem nesse banco. Nenhuma chamada de rede.
  */
 declare(strict_types=1);
 
@@ -37,7 +38,7 @@ final class T
         $this->dbName = 'grtest_' . bin2hex(random_bytes(4));
         $this->root->exec("CREATE DATABASE `{$this->dbName}` CHARACTER SET utf8mb4");
         $this->root->exec("USE `{$this->dbName}`");
-        foreach (array_filter(array_map('trim', explode(';', preg_replace('/^--.*$/m', '', file_get_contents(__DIR__ . '/fixtures/painel_ficticio.sql'))))) as $sql) {
+        foreach (array_filter(array_map('trim', explode(';', preg_replace('/^--.*$/m', '', file_get_contents(__DIR__ . '/fixtures/painel_gmax_schema.sql'))))) as $sql) {
             $this->root->exec($sql);
         }
         $this->clock = new FixedClock($now);
@@ -55,11 +56,8 @@ final class T
         return array_replace_recursive([
             'fuso' => 'America/Sao_Paulo',
             'db' => ['host' => self::env('GR_TEST_HOST', 'localhost'), 'nome' => $this->dbName, 'usuario' => self::env('GR_TEST_USER', 'grtest'), 'senha' => self::env('GR_TEST_PASS', 'grtest')],
-            'auth' => ['chave_sessao' => 'gr_teste_logado'],
-            'esquema' => [
-                'clientes' => ['tabela' => 'clientes', 'id' => 'id', 'nome' => 'nome', 'telefone' => 'telefone', 'status' => 'status', 'status_ativos' => ['ativo'], 'excluido' => 'excluido_em'],
-                'pacotes' => ['tabela' => 'pacotes', 'id' => 'id', 'cliente_id' => 'cliente_id', 'nome' => 'nome', 'pontos' => 'pontos', 'servico' => 'servico', 'ciclo' => 'ciclo', 'preco' => 'preco_total', 'vencimento' => 'vencimento', 'status' => 'status', 'status_ativos' => ['ativo']],
-            ],
+            'auth' => ['exigir_https' => false], // demais valores: padrão do painel GMAX (gmax_session, admin, csrf, 3600 s)
+            'esquema' => [], // padrão = painel GMAX (clients, client_plans, client_exclusions)
             'provedor' => ['driver' => 'simulado', 'meta' => ['app_secret' => 'segredo-teste', 'verify_token' => 'verifica-teste', 'phone_number_id' => '123', 'access_token' => 'EAAtestetokenfalso123456']],
             'pasta_logs' => sys_get_temp_dir() . '/gr-test-logs',
             'permitir_relogio_teste' => true,
@@ -79,21 +77,49 @@ final class T
         return $this->app->db()->pdo;
     }
 
-    public function client(string $name, ?string $phone = '31999990001', array $f = []): int
+    private const STATUS = ['ativo' => 'active', 'pausado' => 'paused', 'arquivado' => 'archived'];
+    private const MESES = ['mensal' => 1, 'trimestral' => 3, 'semestral' => 6, 'anual' => 12];
+
+    /** Cliente fictício no formato real (id texto de 32 caracteres, como o api.php gera). */
+    public function client(string $name, ?string $phone = '31999990001', array $f = []): string
     {
-        $st = $this->pdo()->prepare('INSERT INTO clientes (nome, telefone, status, excluido_em) VALUES (?,?,?,?)');
-        $st->execute([$name, $phone, $f['status'] ?? 'ativo', $f['excluido_em'] ?? null]);
-        return (int)$this->pdo()->lastInsertId();
+        $id = bin2hex(random_bytes(16));
+        $st = $this->pdo()->prepare('INSERT INTO clients (id,name,phone,user_code,service,months,points,price_cents,cost_cents,due_date,status,notes,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        // due_date/price do cliente são legados: valores propositalmente diferentes para provar que não são usados.
+        $st->execute([$id, $name, $phone ?? '', 'COD-CLIENTE-SECRETO', 'IPTV', 1, 1, 99900, 100, '2026-01-01', self::STATUS[$f['status'] ?? 'ativo'] ?? ($f['status'] ?? 'active'), 'obs', date('c')]);
+        if (!empty($f['excluido_em'])) {
+            $this->exclude($id, $f['excluido_em']);
+        }
+        return $id;
     }
 
-    public function package(int $clientId, string $name, string $due, string $price, array $f = []): int
+    public function exclude(string $clientId, string $at = '2026-11-01T10:00:00-03:00'): void
     {
-        $st = $this->pdo()->prepare('INSERT INTO pacotes (cliente_id, nome, pontos, servico, ciclo, preco_total, custo_total, vencimento, status, senha_acesso, url_lista) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-        $st->execute([$clientId, $name, $f['pontos'] ?? 1, $f['servico'] ?? 'Lista', $f['ciclo'] ?? 'mensal', $price, $f['custo'] ?? '10.00', $due, $f['status'] ?? 'ativo', 'SENHA-SECRETA-123', 'http://lista.exemplo/abc.m3u']);
-        return (int)$this->pdo()->lastInsertId();
+        $this->pdo()->prepare('INSERT INTO client_exclusions (client_id, deleted_at) VALUES (?,?)')->execute([$clientId, $at]);
     }
 
-    public function consent(int $clientId, string $phone = '31999990001'): void
+    /** Pacote fictício em client_plans; $price em reais ("120.00") vira price_cents (TOTAL do pacote). */
+    public function package(string $clientId, string $name, string $due, string $price, array $f = []): string
+    {
+        $id = bin2hex(random_bytes(16));
+        $st = $this->pdo()->prepare('INSERT INTO client_plans (id,client_id,label,user_code,service,months,points,price_cents,cost_cents,due_date,status,notes,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $st->execute([$id, $clientId, $name, 'ACESSO-SECRETO-123', $f['servico'] ?? 'IPTV', self::MESES[$f['ciclo'] ?? 'mensal'] ?? 1, $f['pontos'] ?? 1,
+            \GmaxRenov\Format::toCents($price), \GmaxRenov\Format::toCents($f['custo'] ?? '10.00'), $due,
+            self::STATUS[$f['status'] ?? 'ativo'] ?? ($f['status'] ?? 'active'), 'lista http://lista.exemplo/abc.m3u senha SENHA-SECRETA-123', date('c')]);
+        return $id;
+    }
+
+    /** Renovação como o painel faz (api.php action=entry com new_due_date): receita + entry_plans + novo due_date só do pacote. */
+    public function renew(string $clientId, string $planId, string $newDue, int $cents = 1000): void
+    {
+        $g = bin2hex(random_bytes(16));
+        $this->pdo()->prepare('INSERT INTO entries (id,group_id,client_id,kind,amount_cents,date,description,created_at) VALUES (?,?,?,?,?,?,?,?)')
+            ->execute([bin2hex(random_bytes(16)), $g, $clientId, 'revenue', $cents, '2026-11-10', 'Renovação', date('c')]);
+        $this->pdo()->prepare('INSERT INTO entry_plans (group_id, plan_id) VALUES (?,?)')->execute([$g, $planId]);
+        $this->pdo()->prepare('UPDATE client_plans SET due_date=? WHERE id=? AND client_id=?')->execute([$newDue, $planId, $clientId]);
+    }
+
+    public function consent(string $clientId, string $phone = '31999990001'): void
     {
         (new Contacts($this->app->db(), $this->clock))->grant($clientId, \GmaxRenov\Format::phone($phone), 'teste');
     }
@@ -116,14 +142,12 @@ final class T
         return $this->app->db()->all('SELECT * FROM gr_lembretes ORDER BY id');
     }
 
+    /** Retrato de integridade das tabelas do painel (mesma ferramenta usada na instalação). */
     public function financialChecksum(): string
     {
-        $out = [];
-        foreach (['clientes', 'pacotes', 'recebimentos', 'custos'] as $t) {
-            $rows = $this->pdo()->query("SELECT * FROM `$t` ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
-            $out[$t] = $rows;
-        }
-        return hash('sha256', json_encode($out));
+        $snap = (new \GmaxRenov\Integrity($this->app->db()))->snapshot();
+        unset($snap['gerado_em']);
+        return hash('sha256', json_encode($snap));
     }
 
     public function drop(): void

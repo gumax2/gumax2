@@ -23,6 +23,9 @@ function gr_json(int $code, array $data): void
 try {
     $app = gr_app();
     $auth = new Auth($app->config['auth'] ?? []);
+    if (!$auth->httpsOk()) {
+        gr_json(403, ['erro' => 'Acesse o painel por HTTPS.']);
+    }
     $auth->start();
     if (!$auth->loggedIn()) {
         gr_json(401, ['erro' => 'Sessão expirada. Entre no painel novamente.']);

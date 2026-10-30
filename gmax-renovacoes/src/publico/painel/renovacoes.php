@@ -14,6 +14,12 @@ Auth::securityHeaders();
 try {
     $app = gr_app();
     $auth = new Auth($app->config['auth'] ?? []);
+    if (!$auth->httpsOk()) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Acesse o painel por HTTPS.';
+        exit;
+    }
     $auth->start();
     if (!$auth->loggedIn()) {
         header('Location: ' . $auth->loginUrl());
@@ -35,7 +41,11 @@ $v = rawurlencode(GR_VERSION);
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="csrf-token" content="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+<meta name="theme-color" content="#101319">
 <title>Renovações — GMAX Central de Gestão</title>
+<link rel="icon" href="assets/favicon.svg">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/gmax-app-180.png">
 <link rel="stylesheet" href="renovacoes-assets/renovacoes.css?v=<?= $v ?>">
 </head>
 <body>

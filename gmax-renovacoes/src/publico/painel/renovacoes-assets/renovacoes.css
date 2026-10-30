@@ -1,29 +1,26 @@
 /* GMAX Renovações — ajuste as variáveis abaixo para casar com as cores do painel. */
 :root {
-  --gr-bg: #0f1420;
-  --gr-surface: #182032;
-  --gr-surface-2: #212b42;
-  --gr-text: #e8ecf4;
-  --gr-muted: #98a3b8;
-  --gr-border: #2c3754;
-  --gr-accent: #3b82f6;
-  --gr-ok: #22c55e;
-  --gr-warn: #f59e0b;
-  --gr-bad: #ef4444;
-  --gr-info: #38bdf8;
+  /* Mesma paleta do painel GMAX (assets/style.css) */
+  color-scheme: dark;
+  --gr-bg: #101319;
+  --gr-surface: #191d25;
+  --gr-surface-2: #20252e;
+  --gr-text: #f3f5f7;
+  --gr-muted: #a0a8b8;
+  --gr-border: #30353f;
+  --gr-accent: #c9f566;
+  --gr-accent-text: #1a2410;
+  --gr-ok: #c9f566;
+  --gr-warn: #f5c566;
+  --gr-bad: #ff9292;
+  --gr-info: #79d8ed;
   --gr-radius: 12px;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --gr-bg: #f3f5f9; --gr-surface: #ffffff; --gr-surface-2: #eef1f6; --gr-text: #172033;
-    --gr-muted: #5b6577; --gr-border: #d8dee8;
-  }
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--gr-bg); color: var(--gr-text);
-  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.45 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + 24px) env(safe-area-inset-left);
 }
 main { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
@@ -58,7 +55,7 @@ h2 { font-size: 16px; margin: 22px 0 10px; }
 
 .gr-badge { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; background: var(--gr-surface-2); color: var(--gr-muted); white-space: nowrap; }
 .gr-badge.aguardando, .gr-badge.pendente, .gr-badge.enviando { color: var(--gr-info); }
-.gr-badge.aceito { color: var(--gr-accent); }
+.gr-badge.aceito { color: var(--gr-info); }
 .gr-badge.entregue, .gr-badge.lido, .gr-badge.concedido { color: var(--gr-ok); }
 .gr-badge.falhou, .gr-badge.revogado { color: var(--gr-bad); }
 .gr-badge.incerto, .gr-badge.ignorado, .gr-badge.manual { color: var(--gr-warn); }
@@ -66,15 +63,15 @@ h2 { font-size: 16px; margin: 22px 0 10px; }
 .gr-badge.sim { background: var(--gr-warn); color: #000; }
 
 .gr-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
-.gr-btn { background: var(--gr-accent); color: #fff; border: 0; border-radius: 10px; padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer; min-height: 40px; }
+.gr-btn { background: var(--gr-accent); color: var(--gr-accent-text); border: 0; border-radius: 10px; padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer; min-height: 40px; }
 .gr-btn:disabled { opacity: .5; cursor: default; }
 .gr-btn-sec { background: var(--gr-surface-2); color: var(--gr-text); border: 1px solid var(--gr-border); }
-.gr-btn-bad { background: var(--gr-bad); }
+.gr-btn-bad { background: #44282e; color: var(--gr-bad); }
 .gr-btn-sm { padding: 5px 10px; min-height: 32px; font-size: 13px; }
 .gr-check { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; }
 
 input[type=text], input[type=search], input[type=time], input[type=number], select, textarea {
-  background: var(--gr-surface); color: var(--gr-text); border: 1px solid var(--gr-border);
+  background: #131820; color: var(--gr-text); border: 1px solid var(--gr-border);
   border-radius: 10px; padding: 9px 11px; font: inherit; font-size: 16px; /* 16px evita zoom no iPhone */ width: 100%;
 }
 textarea { min-height: 170px; resize: vertical; font-size: 15px; }

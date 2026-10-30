@@ -2,7 +2,8 @@
 /**
  * Migração 001 — tabelas próprias do módulo (prefixo gr_).
  * Aditiva: só cria tabelas novas com IF NOT EXISTS. NÃO altera tabelas do painel
- * (clientes, pacotes, recebimentos, custos).
+ * (clients, client_plans, client_exclusions, entries, entry_plans, settings...).
+ * IDs de cliente/pacote são texto (o painel usa VARCHAR(36)).
  */
 return [
     'versao' => '001',
@@ -16,7 +17,7 @@ return [
 
         // Consentimento e pausa por cliente (cliente_id = id da tabela de clientes do painel; sem FK para não tocar nela).
         "CREATE TABLE IF NOT EXISTS gr_contatos (
-            cliente_id BIGINT NOT NULL PRIMARY KEY,
+            cliente_id VARCHAR(64) NOT NULL PRIMARY KEY,
             consentimento VARCHAR(12) NOT NULL DEFAULT 'nenhum',
             telefone_consentido VARCHAR(20) NULL,
             consentimento_origem VARCHAR(120) NULL,
@@ -30,7 +31,7 @@ return [
 
         "CREATE TABLE IF NOT EXISTS gr_consentimento_log (
             id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            cliente_id BIGINT NOT NULL,
+            cliente_id VARCHAR(64) NOT NULL,
             acao VARCHAR(20) NOT NULL,
             telefone VARCHAR(20) NULL,
             origem VARCHAR(120) NULL,
@@ -43,8 +44,8 @@ return [
         "CREATE TABLE IF NOT EXISTS gr_lembretes (
             id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             modo VARCHAR(10) NOT NULL,
-            pacote_id BIGINT NOT NULL,
-            cliente_id BIGINT NOT NULL,
+            pacote_id VARCHAR(64) NOT NULL,
+            cliente_id VARCHAR(64) NOT NULL,
             vencimento DATE NOT NULL,
             etapa VARCHAR(10) NOT NULL,
             data_prevista DATE NOT NULL,
@@ -67,7 +68,7 @@ return [
             id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             modo VARCHAR(10) NOT NULL,
             ref VARCHAR(40) NOT NULL,
-            cliente_id BIGINT NOT NULL,
+            cliente_id VARCHAR(64) NOT NULL,
             telefone VARCHAR(20) NOT NULL,
             etapa VARCHAR(10) NOT NULL,
             vencimento DATE NOT NULL,

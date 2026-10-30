@@ -20,6 +20,22 @@ final class Db
 
     public static function fromConfig(array $c): self
     {
+        if (!empty($c['config_painel'])) {
+            // Reutiliza as credenciais do config.php privado do painel (nada é copiado para cá).
+            $file = (string)$c['config_painel'];
+            if (!is_file($file)) {
+                throw new \RuntimeException('config_painel não encontrado: confira o caminho no config.php do módulo.');
+            }
+            $pc = (static fn(string $f) => require $f)($file);
+            if (!is_array($pc) || empty($pc['dsn'])) {
+                throw new \RuntimeException('config_painel sem "dsn".');
+            }
+            $pdo = new PDO((string)$pc['dsn'], $pc['db_user'] ?? null, $pc['db_password'] ?? null, [PDO::ATTR_TIMEOUT => 10]);
+            if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $pdo->exec('SET NAMES utf8mb4'); // só nesta conexão do módulo
+            }
+            return new self($pdo);
+        }
         $dsn = sprintf(
             'mysql:host=%s;port=%d;dbname=%s;charset=%s',
             $c['host'] ?? 'localhost',

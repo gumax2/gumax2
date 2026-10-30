@@ -193,10 +193,10 @@
         var cs = c.consentimento === 'concedido' ? badge('concedido', 'autorizado em ' + dt(c.consentimento_em)) : badge(c.consentimento, c.consentimento === 'revogado' ? 'revogado' : 'sem autorização');
         var warn = !c.telefone_valido ? ' ' + badge('falhou', 'telefone inválido') : (c.telefone_mudou ? ' ' + badge('incerto', 'telefone mudou — reautorizar') : '');
         var btns = c.consentimento === 'concedido'
-          ? '<button class="gr-btn gr-btn-sec gr-btn-sm" data-consent="revogar" data-id="' + c.id + '">Revogar autorização</button>'
-          : '<button class="gr-btn gr-btn-sm" data-consent="conceder" data-id="' + c.id + '"' + (c.telefone_valido ? '' : ' disabled') + '>Registrar autorização</button>';
-        btns += '<button class="gr-btn gr-btn-sec gr-btn-sm" data-pause="' + (c.pausado ? 0 : 1) + '" data-id="' + c.id + '">' + (c.pausado ? 'Retomar lembretes' : 'Pausar lembretes') + '</button>';
-        btns += '<button class="gr-btn gr-btn-sec gr-btn-sm" data-clihist="' + c.id + '">Registro</button>';
+          ? '<button class="gr-btn gr-btn-sec gr-btn-sm" data-consent="revogar" data-id="' + esc(c.id) + '">Revogar autorização</button>'
+          : '<button class="gr-btn gr-btn-sm" data-consent="conceder" data-id="' + esc(c.id) + '"' + (c.telefone_valido ? '' : ' disabled') + '>Registrar autorização</button>';
+        btns += '<button class="gr-btn gr-btn-sec gr-btn-sm" data-pause="' + (c.pausado ? 0 : 1) + '" data-id="' + esc(c.id) + '">' + (c.pausado ? 'Retomar lembretes' : 'Pausar lembretes') + '</button>';
+        btns += '<button class="gr-btn gr-btn-sec gr-btn-sm" data-clihist="' + esc(c.id) + '">Registro</button>';
         return '<div class="gr-item"><div class="gr-item-head"><strong>' + esc(c.nome) + '</strong><span>' + cs + warn + (c.pausado ? ' ' + badge('ignorado', 'pausado') : '') + (c.ativo ? '' : ' ' + badge('cancelado', 'inativo no painel')) + '</span></div>' +
           '<div class="gr-muted">' + esc(c.telefone) + (c.consentimento_origem ? ' · origem: ' + esc(c.consentimento_origem) : '') + '</div>' +
           '<div class="gr-actions">' + btns + '</div></div>';
@@ -343,7 +343,7 @@
       post('registrar_manual', JSON.parse(t.dataset.manual)).then(function () { toast('Envio manual registrado.'); loadDashboard(); }).catch(function (e) { toast(e.message, true); });
     }
     if (t.dataset.consent) {
-      var cid = parseInt(t.dataset.id, 10);
+      var cid = t.dataset.id;
       if (t.dataset.consent === 'conceder') {
         var origem = prompt('Como o cliente autorizou receber lembretes? (ex.: "respondeu SIM no WhatsApp em 30/10/2026")');
         if (!origem) { return; }
@@ -354,7 +354,7 @@
       }
     }
     if (t.dataset.pause !== undefined && t.dataset.id) {
-      post('pausa_cliente', { cliente_id: parseInt(t.dataset.id, 10), pausado: t.dataset.pause === '1' }).then(function () { loadClients(); }).catch(function (e) { toast(e.message, true); });
+      post('pausa_cliente', { cliente_id: t.dataset.id, pausado: t.dataset.pause === '1' }).then(function () { loadClients(); }).catch(function (e) { toast(e.message, true); });
     }
     if (t.dataset.clihist) {
       api('cliente_historico', { id: t.dataset.clihist }).then(function (d) {

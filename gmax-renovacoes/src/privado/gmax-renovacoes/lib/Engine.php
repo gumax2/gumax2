@@ -155,7 +155,7 @@ final class Engine
         );
         $n = 0;
         foreach ($rows as $r) {
-            $pkg = $this->app->panel()->package((int)$r['pacote_id']);
+            $pkg = $this->app->panel()->package((string)$r['pacote_id']);
             if ($pkg === null || $pkg['vencimento'] !== $r['vencimento']) {
                 $n += $this->cancelReminder((int)$r['id'], $pkg === null ? 'pacote_inexistente' : 'renovado');
                 if ($r['mensagem_id']) {
@@ -235,7 +235,7 @@ final class Engine
             [$mode, $today]
         );
         foreach ($groups as $g) {
-            if ($this->buildMessage($mode, (int)$g['cliente_id'], $g['vencimento'], $g['etapa'])) {
+            if ($this->buildMessage($mode, (string)$g['cliente_id'], $g['vencimento'], $g['etapa'])) {
                 $out['mensagens_criadas']++;
             }
         }
@@ -260,7 +260,7 @@ final class Engine
     /**
      * Agrupa os lembretes pendentes de um cliente/vencimento/etapa numa única mensagem (após revalidar).
      */
-    public function buildMessage(string $mode, int $clientId, string $due, string $stage, string $initialStatus = 'aguardando'): ?int
+    public function buildMessage(string $mode, string $clientId, string $due, string $stage, string $initialStatus = 'aguardando'): ?int
     {
         return $this->db->tx(function (Db $db) use ($mode, $clientId, $due, $stage, $initialStatus) {
             $rows = $db->all(
@@ -303,10 +303,10 @@ final class Engine
         $opts = $this->eligibilityOpts($mode);
         $today = $this->today();
         foreach ($rows as $r) {
-            $pkg = $this->app->panel()->package((int)$r['pacote_id']);
-            $contact = $this->contacts->get((int)$r['cliente_id']);
+            $pkg = $this->app->panel()->package((string)$r['pacote_id']);
+            $contact = $this->contacts->get((string)$r['cliente_id']);
             $reason = $r['data_prevista'] !== $today ? 'fora_do_dia' : Eligibility::check($pkg, $contact, $r['vencimento'], $opts);
-            if ($reason === null && (int)$pkg['cliente_id'] !== (int)$r['cliente_id']) {
+            if ($reason === null && (string)$pkg['cliente_id'] !== (string)$r['cliente_id']) {
                 $reason = 'cliente_inexistente'; // pacote foi transferido para outro cliente
             }
             if ($reason !== null) {
@@ -577,7 +577,7 @@ final class Engine
         $ref = 'grt' . bin2hex(random_bytes(10));
         $msgId = $this->db->insert(
             "INSERT INTO gr_mensagens (modo, ref, cliente_id, telefone, etapa, vencimento, data_prevista, corpo, modelo_nome, modelo_parametros,
-               status, provedor, tentativas, lease_token, lease_ate, criado_em, atualizado_em, status_em) VALUES (?,?,0,?,?,?,?,?,?,?,'enviando',?,1,?,?,?,?,?)",
+               status, provedor, tentativas, lease_token, lease_ate, criado_em, atualizado_em, status_em) VALUES (?,?,'',?,?,?,?,?,?,?,'enviando',?,1,?,?,?,?,?)",
             [$mode, $ref, $phone, $stage, $items[0]['vencimento'], $this->today(), '[TESTE] ' . $built['corpo'], $tpl ?: null,
              json_encode($built['parametros'], JSON_UNESCAPED_UNICODE), $provider->name(), $token,
              $this->app->clock()->now()->modify('+5 minutes')->format('Y-m-d H:i:s'), $now, $now, $now]
@@ -598,16 +598,16 @@ final class Engine
     {
         // Vencimento coerente com a etapa: "antes" = hoje + N, "dia" = hoje, "depois" = hoje − N.
         $due = $now->modify(($stageDays > 0 ? '-' : '+') . abs($stageDays) . ' days')->format('Y-m-d');
-        $base = ['cliente_id' => 0, 'cliente_nome' => 'Cliente Teste', 'telefone' => $phone, 'servico' => 'Lista', 'vencimento' => $due];
-        $items = [$base + ['pacote_id' => 0, 'pacote_nome' => 'Pacote Família', 'pontos' => 4, 'ciclo' => 'Trimestral', 'valor_centavos' => 12000]];
+        $base = ['cliente_id' => '', 'cliente_nome' => 'Cliente Teste', 'telefone' => $phone, 'servico' => 'Lista', 'vencimento' => $due];
+        $items = [$base + ['pacote_id' => 'exemplo-1', 'pacote_nome' => 'Pacote Família', 'pontos' => 4, 'ciclo' => 'Trimestral', 'valor_centavos' => 12000]];
         if ($group) {
-            $items[] = $base + ['pacote_id' => 0, 'pacote_nome' => 'Pacote Quarto', 'pontos' => 1, 'ciclo' => 'Mensal', 'valor_centavos' => 3500];
+            $items[] = $base + ['pacote_id' => 'exemplo-2', 'pacote_nome' => 'Pacote Quarto', 'pontos' => 1, 'ciclo' => 'Mensal', 'valor_centavos' => 3500];
         }
         return $items;
     }
 
     /** Registra envio manual de lembretes ainda pendentes (impede o envio automático do mesmo aviso). */
-    public function manualForPending(int $clientId, string $due, string $stage): ?int
+    public function manualForPending(string $clientId, string $due, string $stage): ?int
     {
         $mode = $this->app->effectiveMode();
         $today = $this->today();

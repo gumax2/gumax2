@@ -25,7 +25,7 @@ final class Contacts
         return $this->clock->now()->format('Y-m-d H:i:s');
     }
 
-    public function get(int $clientId): array
+    public function get(string $clientId): array
     {
         return $this->db->one('SELECT * FROM gr_contatos WHERE cliente_id = ?', [$clientId]) ?? [
             'cliente_id' => $clientId, 'consentimento' => 'nenhum', 'telefone_consentido' => null,
@@ -42,12 +42,12 @@ final class Contacts
         $in = implode(',', array_fill(0, count($ids), '?'));
         $out = [];
         foreach ($this->db->all("SELECT * FROM gr_contatos WHERE cliente_id IN ($in)", array_values($ids)) as $r) {
-            $out[(int)$r['cliente_id']] = $r;
+            $out[(string)$r['cliente_id']] = $r;
         }
         return $out;
     }
 
-    public function grant(int $clientId, string $phoneE164, string $origin, string $note = ''): void
+    public function grant(string $clientId, string $phoneE164, string $origin, string $note = ''): void
     {
         $now = $this->now();
         $this->db->tx(function (Db $db) use ($clientId, $phoneE164, $origin, $note, $now) {
@@ -62,7 +62,7 @@ final class Contacts
         });
     }
 
-    public function revoke(int $clientId, string $origin, string $note = ''): void
+    public function revoke(string $clientId, string $origin, string $note = ''): void
     {
         $now = $this->now();
         $this->db->tx(function (Db $db) use ($clientId, $origin, $note, $now) {
@@ -80,7 +80,7 @@ final class Contacts
     {
         $variants = Format::phoneVariants($phoneE164);
         $in = implode(',', array_fill(0, count($variants), '?'));
-        $ids = array_map('intval', array_column(
+        $ids = array_map('strval', array_column(
             $this->db->all("SELECT cliente_id FROM gr_contatos WHERE telefone_consentido IN ($in) AND consentimento = 'concedido'", $variants),
             'cliente_id'
         ));
@@ -90,7 +90,7 @@ final class Contacts
         return $ids;
     }
 
-    public function setPaused(int $clientId, bool $paused, string $reason = ''): void
+    public function setPaused(string $clientId, bool $paused, string $reason = ''): void
     {
         $now = $this->now();
         $this->db->exec(
@@ -101,12 +101,12 @@ final class Contacts
         $this->logAction($clientId, $paused ? 'pausado' : 'retomado', null, 'painel', $reason);
     }
 
-    public function history(int $clientId): array
+    public function history(string $clientId): array
     {
         return $this->db->all('SELECT acao, telefone, origem, observacao, registrado_em FROM gr_consentimento_log WHERE cliente_id = ? ORDER BY id DESC LIMIT 50', [$clientId]);
     }
 
-    private function logAction(int $clientId, string $action, ?string $phone, string $origin, string $note): void
+    private function logAction(string $clientId, string $action, ?string $phone, string $origin, string $note): void
     {
         $this->db->exec(
             'INSERT INTO gr_consentimento_log (cliente_id, acao, telefone, origem, observacao, registrado_em) VALUES (?,?,?,?,?,?)',

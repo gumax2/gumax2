@@ -70,8 +70,12 @@ test('ciclos trimestral e anual informam o valor do ciclo', function (T $t) {
     $t->run();
     $m = $t->messages();
     eq(2, count($m), 'uma mensagem por cliente');
-    check(strpos($m[0]['corpo'], 'trimestral') !== false && strpos($m[0]['corpo'], 'R$ 300,00') !== false, 'trimestral R$ 300,00');
-    check(strpos($m[1]['corpo'], 'anual') !== false && strpos($m[1]['corpo'], 'R$ 1.000,00') !== false, 'anual R$ 1.000,00');
+    $by = [];
+    foreach ($m as $x) {
+        $by[strpos($x['corpo'], 'Plano Tri') !== false ? 'tri' : 'anual'] = $x['corpo'];
+    }
+    check(strpos($by['tri'], '3 pontos, trimestral') !== false && strpos($by['tri'], 'R$ 300,00') !== false, 'trimestral (months=3) R$ 300,00');
+    check(strpos($by['anual'], 'anual') !== false && strpos($by['anual'], 'R$ 1.000,00') !== false, 'anual (months=12) R$ 1.000,00');
 });
 
 test('mensagens não contêm senha nem URL da lista', function (T $t) {
@@ -97,7 +101,7 @@ test('renovação entre a geração e o envio cancela só aquele pacote', functi
     eq(0, count($t->messages()), 'nada enviado durante a pausa');
     eq(2, count(array_filter($t->reminders(), fn($r) => $r['status'] === 'pendente')), 'dois lembretes pendentes');
     // Você registra a renovação no painel: vencimento vai para 13/12.
-    $t->pdo()->exec("UPDATE pacotes SET vencimento='2026-12-13' WHERE id=$p1");
+    $t->pdo()->exec("UPDATE client_plans SET due_date='2026-12-13' WHERE id='$p1'");
     $t->app->settings()->set('pausa_global', false);
     $t->run('2026-11-10 10:00:00');
     $m = $t->messages();
@@ -114,7 +118,7 @@ test('renovação durante espera de nova tentativa cancela a mensagem', function
     $t->app->setProvider(new SimulatedProvider([new SendResult(SendResult::TRANSIENT, null, '130429', 'limite')]));
     $t->run();
     eq('aguardando', $t->messages()[0]['status'], 'aguardando nova tentativa');
-    $t->pdo()->exec("UPDATE pacotes SET vencimento='2026-12-13' WHERE id=$p");
+    $t->pdo()->exec("UPDATE client_plans SET due_date='2026-12-13' WHERE id='$p'");
     $prov = new SimulatedProvider();
     $t->app->setProvider($prov);
     $t->run('2026-11-10 10:30:00');
@@ -129,7 +133,7 @@ test('renovação de um pacote não cancela avisos de outro pacote do cliente', 
     $p2 = $t->package($c, 'P2', '2026-11-10', '40.00'); // vence hoje
     $t->app->settings()->set('pausa_global', true);
     $t->run();
-    $t->pdo()->exec("UPDATE pacotes SET vencimento='2026-12-13' WHERE id=$p1");
+    $t->pdo()->exec("UPDATE client_plans SET due_date='2026-12-13' WHERE id='$p1'");
     $t->app->settings()->set('pausa_global', false);
     $t->run('2026-11-10 10:00:00');
     $m = $t->messages();
@@ -182,7 +186,7 @@ test('cliente pausado no módulo e cliente excluído entre geração e envio', f
     $t->package($b, 'PB', '2026-11-13', '10.00');
     $t->app->settings()->set('pausa_global', true);
     $t->run();
-    $t->pdo()->exec("UPDATE clientes SET excluido_em='2026-11-10 09:40:00' WHERE id=$b");
+    $t->exclude($b, '2026-11-10T09:40:00-03:00');
     $t->app->settings()->set('pausa_global', false);
     $t->run('2026-11-10 09:50:00');
     eq(0, count($t->messages()), 'nenhuma mensagem');
@@ -222,7 +226,7 @@ test('telefone inválido ou alterado após autorização bloqueia', function (T 
     $b = $t->client('Tel Mudou', '31999990002');
     $t->consent($a, '31999990001'); // autorização registrada com outro número
     $t->consent($b, '31999990002');
-    $t->pdo()->exec("UPDATE clientes SET telefone='31988887777' WHERE id=$b");
+    $t->pdo()->exec("UPDATE clients SET phone='31988887777' WHERE id='$b'");
     $t->package($a, 'PA', '2026-11-13', '10.00');
     $t->package($b, 'PB', '2026-11-13', '10.00');
     $t->run();
@@ -266,8 +270,9 @@ test('virada de mês e de ano', function (T $t) {
     $t->run('2027-01-01 09:30:00'); // vence P Ano; 1 dia após P Mes
     $m = $t->messages();
     eq(3, count($m), 'três mensagens');
-    eq(['2027-01-01', '2027-01-01', '2026-12-31'], array_column($m, 'vencimento'), 'vencimentos');
-    eq(['antes', 'dia', 'depois'], array_column($m, 'etapa'), 'etapas');
+    $pairs = array_map(fn($x) => $x['vencimento'] . ' ' . $x['etapa'], $m);
+    sort($pairs);
+    eq(['2026-12-31 depois', '2027-01-01 antes', '2027-01-01 dia'], $pairs, 'vencimentos e etapas');
     check(strpos($m[0]['corpo'], '01/01/2027') !== false, 'data formatada');
 }, '2026-12-29 09:30:00');
 
@@ -648,7 +653,7 @@ test('modo real com "somente números de teste" bloqueia clientes', function (T 
     (new Engine($app))->run('teste');
     eq(1, count($prov->sent), 'só o contato interno');
     eq('5531999990009', $prov->sent[0]->to, 'número de teste');
-    eq('somente_teste', $app->db()->value("SELECT motivo FROM gr_lembretes WHERE pacote_id=(SELECT id FROM pacotes WHERE nome='PA')"), 'cliente bloqueado');
+    eq('somente_teste', $app->db()->value('SELECT motivo FROM gr_lembretes WHERE pacote_id=?', [$app->db()->value("SELECT id FROM client_plans WHERE label='PA'")]), 'cliente bloqueado');
 });
 
 test('mensagem de teste exige número da lista interna', function (T $t) {
@@ -695,22 +700,24 @@ test('histórico financeiro e cadastros preservados (somente leitura)', function
     $t->consent($c);
     $p1 = $t->package($c, 'P1', '2026-11-13', '120.00', ['pontos' => 4, 'custo' => '70.00']);
     $p2 = $t->package($c, 'P2', '2026-11-10', '35.00');
-    $t->pdo()->exec("INSERT INTO recebimentos (cliente_id, pacote_id, valor, recebido_em) VALUES ($c,$p1,120.00,'2026-10-13'),($c,$p2,35.00,'2026-10-10')");
-    $t->pdo()->exec("INSERT INTO custos (pacote_id, descricao, valor, data) VALUES ($p1,'Painel fornecedor',70.00,'2026-10-13')");
-    $profit = fn() => $t->pdo()->query('SELECT (SELECT SUM(valor) FROM recebimentos) - (SELECT SUM(valor) FROM custos)')->fetchColumn();
-    $before = $t->financialChecksum();
-    $profitBefore = $profit();
+    $t->renew($c, $p2, '2026-11-10', 3500); // lançamento real com entry_plans
+    $pdo = $t->pdo();
+    $pdo->exec("INSERT INTO entries (id,group_id,client_id,kind,amount_cents,date,description,created_at) VALUES ('e-c','g-c','$c','cost',7000,'2026-10-13','Custo','x'),('e-x','g-x',NULL,'expense',3000,'2026-10-01','Despesa','x')");
+    $pdo->exec("INSERT INTO settings (id,target_cents,default_price_cents,default_cost_cents) VALUES (1,100000,3500,1000)");
+    $before = (new \GmaxRenov\Integrity($t->app->db()))->snapshot();
     $t->run();
     $t->run('2026-11-10 12:00:00');
-    $e = new Engine($t->app);
     $t->app->settings()->set('numeros_teste', ['31999990001']);
-    $e->sendTest('31999990001', 'antes');
+    (new Engine($t->app))->sendTest('31999990001', 'antes');
     (new Contacts($t->app->db(), $t->clock))->revoke($c, 'painel');
     $t->run('2026-11-11 09:30:00');
-    eq($before, $t->financialChecksum(), 'clientes, pacotes, recebimentos e custos idênticos');
-    eq($profitBefore, $profit(), 'lucro inalterado');
-    eq(2, (int)$t->pdo()->query('SELECT COUNT(*) FROM recebimentos')->fetchColumn(), 'nenhuma receita registrada pelo envio');
-    eq('2026-11-13', $t->pdo()->query("SELECT vencimento FROM pacotes WHERE id=$p1")->fetchColumn(), 'vencimento não prorrogado');
+    (new Migrator($t->app->db(), $t->clock))->migrate();
+    $after = (new \GmaxRenov\Integrity($t->app->db()))->snapshot();
+    $cmp = \GmaxRenov\Integrity::compare($before, $after);
+    check($cmp['iguais'], 'retratos iguais: ' . implode(' | ', $cmp['linhas']));
+    eq(3500 - 7000 - 3000, $after['financeiro']['lucro_centavos'], 'lucro inalterado');
+    eq(3, $after['tabelas']['entries']['linhas'], 'nenhuma receita registrada pelo envio');
+    eq('2026-11-13', $pdo->query("SELECT due_date FROM client_plans WHERE id='$p1'")->fetchColumn(), 'vencimento não prorrogado');
 });
 
 test('código do módulo não escreve em tabelas do painel', function (T $t) {
@@ -816,4 +823,155 @@ test('prévias usam a data coerente com cada etapa', function (T $t) {
     check(strpos($r['corpo'], 'foi ontem, 09/11/2026') !== false, 'depois: ontem');
     $r = $api->handle('previa', ['etapa' => 'antes', 'variante' => 'individual', 'texto' => $tx['antes']['individual']]);
     check(strpos($r['corpo'], 'vence em 13/11/2026, daqui a 3 dias') !== false, 'antes: +3');
+});
+
+echo "Integração com a estrutura real do painel GMAX\n";
+
+test('instalação em banco com dados existentes: estrutura, IDs, conteúdo e totais idênticos; reaplicar não muda nada', function (T $t) {
+    $db = $t->app->db();
+    // Simula banco em uso ANTES do módulo: remove as tabelas gr_* criadas pelo harness.
+    foreach ($db->all("SELECT TABLE_NAME t FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'gr\\_%'") as $r) {
+        $db->pdo->exec('DROP TABLE `' . $r['t'] . '`');
+    }
+    for ($i = 0; $i < 30; $i++) {
+        $c = $t->client("Cliente $i", '3199999' . str_pad((string)$i, 4, '0', STR_PAD_LEFT), ['status' => ['ativo', 'pausado', 'arquivado'][$i % 3]]);
+        for ($j = 0; $j <= $i % 4; $j++) {
+            $p = $t->package($c, "P$j", '2026-11-' . str_pad((string)(10 + $j), 2, '0', STR_PAD_LEFT), (string)(30 + $j * 5) . '.00', ['pontos' => $j + 1, 'ciclo' => ['mensal', 'trimestral', 'semestral', 'anual'][$j]]);
+            if ($j === 0) {
+                $t->renew($c, $p, '2026-11-10', 3000);
+            }
+        }
+        if ($i % 7 === 0) {
+            $t->exclude($c);
+        }
+    }
+    $t->pdo()->exec("INSERT INTO settings (id,target_cents,default_price_cents,default_cost_cents) VALUES (1,100000,3500,1000)");
+    $integ = new \GmaxRenov\Integrity($db);
+    $before = $integ->snapshot();
+    $m = new Migrator($db, $t->clock);
+    eq(['001_inicial'], $m->migrate(), 'migração aplicada');
+    $after1 = $integ->snapshot();
+    eq([], $m->migrate(), 'reaplicar: nada a fazer');
+    (new Migrator($db, $t->clock))->migrate();
+    $after2 = $integ->snapshot();
+    foreach ([$after1, $after2] as $k => $snap) {
+        $cmp = \GmaxRenov\Integrity::compare($before, $snap);
+        check($cmp['iguais'], "retrato $k igual ao anterior: " . implode(' | ', $cmp['linhas']));
+    }
+    eq(30, $after2['tabelas']['clients']['linhas'], '30 clientes');
+    eq(5, $after2['tabelas']['client_exclusions']['linhas'], 'exclusões preservadas');
+    eq(8, (int)$db->value("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'gr\\_%'"), 'só 8 tabelas gr_* novas');
+    eq(0, (int)$db->value('SELECT COUNT(*) FROM gr_contatos'), 'nenhum cliente autorizado automaticamente');
+    $json = json_encode($after2);
+    check(strpos($json, 'Cliente 1') === false && strpos($json, '31999990') === false, 'retrato sem dados pessoais');
+});
+
+test('cliente com 4 pacotes: renovar 1 pelo fluxo do painel altera só os avisos desse pacote', function (T $t) {
+    $c = $t->client('Quatro Pacotes');
+    $t->consent($c);
+    $ids = [];
+    foreach (['A', 'B', 'C', 'D'] as $i => $n) {
+        $ids[$n] = $t->package($c, "Pacote $n", $i < 2 ? '2026-11-13' : '2026-11-10', '25.00');
+    }
+    $t->app->settings()->set('pausa_global', true);
+    $t->run();
+    eq(4, count(array_filter($t->reminders(), fn($r) => $r['status'] === 'pendente')), '4 lembretes pendentes (2 antes, 2 no dia)');
+    $t->renew($c, $ids['A'], '2026-12-13'); // receita + entry_plans + due_date só do pacote A
+    $t->app->settings()->set('pausa_global', false);
+    $t->run('2026-11-10 10:00:00');
+    $byPkg = [];
+    foreach ($t->reminders() as $r) {
+        $byPkg[$r['pacote_id']] = $r['status'] . ($r['motivo'] ? ':' . $r['motivo'] : '');
+    }
+    eq('cancelado:renovado', $byPkg[$ids['A']], 'A cancelado');
+    eq('em_mensagem', $byPkg[$ids['B']], 'B enviado');
+    eq('em_mensagem', $byPkg[$ids['C']], 'C enviado');
+    eq('em_mensagem', $byPkg[$ids['D']], 'D enviado');
+    $m = $t->messages();
+    eq(2, count($m), 'duas mensagens: B (3 dias antes) e C+D agrupados (vence hoje)');
+    $bodies = implode("\n", array_column($m, 'corpo'));
+    check(strpos($bodies, 'Pacote A') === false, 'pacote renovado não aparece');
+});
+
+test('recebimento SEM nova data não conta como renovação; dados legados do cliente são ignorados', function (T $t) {
+    $c = $t->client('Legado'); // clients.due_date=2026-01-01 e price=999,00 (legados)
+    $t->consent($c);
+    $p = $t->package($c, 'Pacote Real', '2026-11-13', '35.00');
+    $t->pdo()->exec("INSERT INTO entries (id,group_id,client_id,kind,amount_cents,date,description,created_at) VALUES ('e1','g1','$c','revenue',3500,'2026-11-10','Pix','x')");
+    $t->pdo()->exec("INSERT INTO entry_plans (group_id, plan_id) VALUES ('g1','$p')");
+    $t->pdo()->exec("UPDATE clients SET due_date='2026-11-13' WHERE id='$c'");
+    $t->run();
+    $m = $t->messages();
+    eq(1, count($m), 'aviso mantido (vencimento do pacote não mudou)');
+    check(strpos($m[0]['corpo'], 'R$ 35,00') !== false && strpos($m[0]['corpo'], '999') === false, 'valor do pacote, não o legado do cliente');
+    $c2 = $t->client('Só Legado', '31999990002');
+    $t->consent($c2, '31999990002');
+    $t->package($c2, 'Outro', '2026-12-20', '35.00');
+    $t->pdo()->exec("UPDATE clients SET due_date='2026-11-13' WHERE id='$c2'");
+    $t->run('2026-11-10 10:00:00');
+    eq(1, count($t->messages()), 'clients.due_date legado não gera aviso');
+});
+
+test('preço e telefone alterados entre geração e envio: revalidação usa os dados atuais', function (T $t) {
+    $a = $t->client('Preço Muda', '31999990001');
+    $b = $t->client('Fone Muda', '31999990002');
+    $t->consent($a, '31999990001');
+    $t->consent($b, '31999990002');
+    $pa = $t->package($a, 'PA', '2026-11-13', '35.00');
+    $t->package($b, 'PB', '2026-11-13', '35.00');
+    $t->app->settings()->set('pausa_global', true);
+    $t->run();
+    $t->pdo()->exec("UPDATE client_plans SET price_cents=4200 WHERE id='$pa'");
+    $t->pdo()->exec("UPDATE clients SET phone='31988880000' WHERE id='$b'");
+    $t->app->settings()->set('pausa_global', false);
+    $t->run('2026-11-10 10:00:00');
+    $m = $t->messages();
+    eq(1, count($m), 'só o cliente com telefone inalterado');
+    check(strpos($m[0]['corpo'], 'R$ 42,00') !== false, 'preço atualizado na mensagem');
+    eq('telefone_mudou', $t->app->db()->value("SELECT motivo FROM gr_lembretes WHERE cliente_id=?", [$b]), 'telefone mudou exige nova autorização');
+});
+
+test('cliente excluído (client_exclusions) nunca é selecionado nem listado; restauração é do painel', function (T $t) {
+    $c = $t->client('Na Lixeira');
+    $t->consent($c);
+    $t->package($c, 'P', '2026-11-13', '35.00');
+    $t->exclude($c);
+    $t->run();
+    eq(0, count($t->messages()), 'sem mensagem');
+    eq('cliente_excluido', $t->reminders()[0]['motivo'], 'motivo');
+    $list = (new \GmaxRenov\Api($t->app))->handle('clientes', []);
+    eq(0, count($list['itens']), 'fora da lista de autorizações');
+    eq(1, (int)$t->pdo()->query('SELECT COUNT(*) FROM client_exclusions')->fetchColumn(), 'continua excluído');
+});
+
+test('patch do menu: insere, recusa repetir, reverte byte a byte e recusa index desconhecido', function (T $t) {
+    $base = getenv('GR_PAINEL_BASE') ?: '/tmp/claude-0/-home-user-gumax2/4551f546-0fe0-5e94-ba09-9252bba9ea1c/scratchpad/base/gmax-base-painel';
+    $file = $base . '/painel/index.html';
+    $html = is_file($file) ? file_get_contents($file)
+        : '<html><head></head><body><nav><button data-page="overview" class="nav active">Visão</button><button data-page="settings" class="nav">Config</button></nav></body></html>';
+    $p = \GmaxRenov\PanelMenuPatch::plan($html);
+    check($p['ok'], 'aplicável');
+    check(strpos($p['novo'], 'href="renovacoes.php"') !== false && strpos($p['novo'], 'menu.css?v=1') !== false, 'link e css');
+    check(strpos($p['novo'], 'app.js?v=vencimentos-3') === strpos($html, 'app.js?v=vencimentos-3') || strpos($html, 'app.js') === false || strpos($p['novo'], 'app.js?v=vencimentos-3') !== false, 'app.js intocado');
+    eq(false, \GmaxRenov\PanelMenuPatch::plan($p['novo'])['ok'], 'não aplica duas vezes');
+    eq($html, \GmaxRenov\PanelMenuPatch::revert($p['novo']), 'reversão exata');
+    eq(false, \GmaxRenov\PanelMenuPatch::plan('<html><head></head><body>sem menu</body></html>')['ok'], 'index desconhecido: não altera');
+});
+
+test('controle negativo: a verificação de integridade detecta 1 centavo, 1 exclusão e 1 coluna nova', function (T $t) {
+    $c = $t->client('Controle');
+    $p = $t->package($c, 'P', '2026-11-13', '35.00');
+    $i = new \GmaxRenov\Integrity($t->app->db());
+    $base = $i->snapshot();
+    $t->pdo()->exec("UPDATE client_plans SET price_cents=price_cents+1 WHERE id='$p'");
+    eq(false, \GmaxRenov\Integrity::compare($base, $i->snapshot())['iguais'], '1 centavo detectado');
+    $t->pdo()->exec("UPDATE client_plans SET price_cents=price_cents-1 WHERE id='$p'");
+    eq(true, \GmaxRenov\Integrity::compare($base, $i->snapshot())['iguais'], 'volta a ficar igual');
+    $t->exclude($c);
+    eq(false, \GmaxRenov\Integrity::compare($base, $i->snapshot())['iguais'], 'exclusão detectada');
+    $t->pdo()->exec("DELETE FROM client_exclusions");
+    $t->pdo()->exec("ALTER TABLE clients ADD COLUMN extra INT NULL");
+    $r = \GmaxRenov\Integrity::compare($base, $i->snapshot());
+    eq(false, $r['iguais'], 'mudança de estrutura detectada');
+    check(strpos(implode(' ', $r['linhas']), 'estrutura mudou') !== false, 'motivo informado');
 });

@@ -31,17 +31,17 @@ final class Api
             case 'historico': return $this->history($in);
             case 'mensagem': return $this->message((int)($in['id'] ?? 0));
             case 'clientes': return $this->clients($in);
-            case 'cliente_historico': return ['itens' => $this->contacts->history((int)($in['id'] ?? 0))];
+            case 'cliente_historico': return ['itens' => $this->contacts->history((string)($in['id'] ?? ''))];
             case 'recebidas': return ['itens' => $this->app->db()->all("SELECT tipo, detalhe, registrado_em FROM gr_eventos WHERE tipo IN ('recebida','descadastro') ORDER BY id DESC LIMIT 30")];
             case 'config': return $this->config();
             case 'previa': return $this->preview($in);
             case 'salvar_config': return $this->saveConfig($in);
             case 'consentimento': return $this->consent($in);
             case 'pausa_cliente':
-                if (!$this->app->panel()->client((int)($in['cliente_id'] ?? 0))) {
+                if (!$this->app->panel()->client((string)($in['cliente_id'] ?? ''))) {
                     throw new \InvalidArgumentException('Cliente não encontrado.');
                 }
-                $this->contacts->setPaused((int)($in['cliente_id'] ?? 0), !empty($in['pausado']), (string)($in['motivo'] ?? ''));
+                $this->contacts->setPaused((string)($in['cliente_id'] ?? ''), !empty($in['pausado']), (string)($in['motivo'] ?? ''));
                 return ['ok' => true];
             case 'pausa_global':
                 $this->app->settings()->set('pausa_global', !empty($in['pausado']));
@@ -54,7 +54,7 @@ final class Api
             case 'resolver':
                 return ['ok' => true, 'status' => $this->engine->resolve((int)($in['id'] ?? 0), (string)($in['decisao'] ?? ''))];
             case 'registrar_manual':
-                $id = $this->engine->manualForPending((int)($in['cliente_id'] ?? 0), (string)($in['vencimento'] ?? ''), (string)($in['etapa'] ?? ''));
+                $id = $this->engine->manualForPending((string)($in['cliente_id'] ?? ''), (string)($in['vencimento'] ?? ''), (string)($in['etapa'] ?? ''));
                 if (!$id) {
                     throw new \InvalidArgumentException('Nenhum lembrete pendente elegível para registrar.');
                 }
@@ -230,7 +230,7 @@ final class Api
         }
         if (!empty($in['cliente_id'])) {
             $where[] = 'm.cliente_id = ?';
-            $p[] = (int)$in['cliente_id'];
+            $p[] = (string)$in['cliente_id'];
         }
         $page = min(1000, max(0, (int)($in['pagina'] ?? 0)));
         $rows = $db->all(
@@ -242,8 +242,8 @@ final class Api
         );
         $names = [];
         foreach ($rows as &$r) {
-            $cid = (int)$r['cliente_id'];
-            if ($cid === 0) {
+            $cid = (string)$r['cliente_id'];
+            if ($cid === '') {
                 $r['cliente'] = 'Teste interno';
             } else {
                 $names[$cid] ??= ($this->app->panel()->client($cid)['nome'] ?? '(cliente excluído)');
@@ -278,13 +278,13 @@ final class Api
     private function clients(array $in): array
     {
         $rows = $this->app->panel()->clients(mb_substr(trim((string)($in['q'] ?? '')), 0, 80), 50, min(1000, max(0, (int)($in['pagina'] ?? 0))) * 50);
-        $contacts = $this->contacts->many(array_map('intval', array_column($rows, 'id')));
+        $contacts = $this->contacts->many(array_map('strval', array_column($rows, 'id')));
         $out = [];
         foreach ($rows as $r) {
-            $c = $contacts[(int)$r['id']] ?? [];
+            $c = $contacts[(string)$r['id']] ?? [];
             $phone = Format::phone($r['telefone']);
             $out[] = [
-                'id' => (int)$r['id'],
+                'id' => (string)$r['id'],
                 'nome' => $r['nome'],
                 'telefone' => Format::maskPhone($phone),
                 'telefone_valido' => $phone !== null,
@@ -301,7 +301,7 @@ final class Api
 
     private function consent(array $in): array
     {
-        $id = (int)($in['cliente_id'] ?? 0);
+        $id = (string)($in['cliente_id'] ?? '');
         $client = $this->app->panel()->client($id);
         if (!$client) {
             throw new \InvalidArgumentException('Cliente não encontrado.');

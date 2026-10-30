@@ -75,7 +75,62 @@ switch ($cmd) {
         }
         break;
 
+    case 'integridade':
+        // Retrato SEM dados pessoais (contagens, hashes, totais). Rode antes e depois da instalação.
+        $file = $argv[2] ?? (GR_ROOT . '/integridade-' . date('Ymd-His') . '.json');
+        $snap = (new \GmaxRenov\Integrity($db))->snapshot();
+        file_put_contents($file, json_encode($snap, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        chmod($file, 0600);
+        foreach ($snap['tabelas'] as $t => $i) {
+            echo str_pad($t, 18) . ($i['existe'] ? $i['linhas'] . ' linhas' : 'não existe') . "\n";
+        }
+        echo "Retrato gravado em $file\n";
+        break;
+
+    case 'integridade-comparar':
+        if (!isset($argv[2], $argv[3])) {
+            echo "Uso: integridade-comparar antes.json depois.json\n";
+            exit(1);
+        }
+        $r = \GmaxRenov\Integrity::compare(json_decode(file_get_contents($argv[2]), true), json_decode(file_get_contents($argv[3]), true));
+        echo implode("\n", $r['linhas']), "\n", $r['iguais'] ? "RESULTADO: dados do painel preservados.\n" : "RESULTADO: HÁ DIFERENÇAS — não prossiga; veja BACKUP_E_RECUPERACAO.md.\n";
+        exit($r['iguais'] ? 0 : 3);
+
+    case 'menu':
+        // php renovacoes-admin.php menu verificar|aplicar|remover /caminho/public_html/painel/index.html
+        $mode = $argv[2] ?? 'verificar';
+        $file = $argv[3] ?? '';
+        if (!is_file($file)) {
+            echo "Informe o caminho do index.html do painel.\n";
+            exit(1);
+        }
+        $html = file_get_contents($file);
+        if ($mode === 'remover') {
+            $new = \GmaxRenov\PanelMenuPatch::revert($html);
+            if ($new === $html) {
+                echo "Nada a remover.\n";
+                break;
+            }
+        } else {
+            $plan = \GmaxRenov\PanelMenuPatch::plan($html);
+            if (!$plan['ok']) {
+                echo $plan['motivo'], "\n";
+                exit(1);
+            }
+            $new = $plan['novo'];
+        }
+        echo \GmaxRenov\PanelMenuPatch::diff($html, $new), "\n";
+        if ($mode === 'verificar') {
+            echo "(somente verificação; nada foi gravado)\n";
+            break;
+        }
+        $bak = $file . '.antes-renovacoes-' . date('Ymd-His');
+        copy($file, $bak);
+        file_put_contents($file, $new);
+        echo "Gravado. Cópia de segurança: $bak\n";
+        break;
+
     default:
-        echo "Comandos: diagnostico | migrar | backup [arquivo] | status\n";
+        echo "Comandos: diagnostico | migrar | integridade [arq] | integridade-comparar a b | menu verificar|aplicar|remover index.html | backup [arq] | status\n";
         exit(1);
 }
