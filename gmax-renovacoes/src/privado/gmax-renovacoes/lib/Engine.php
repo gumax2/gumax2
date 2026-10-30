@@ -501,14 +501,14 @@ final class Engine
                 if ($m['status'] !== 'incerto') {
                     throw new \InvalidArgumentException('Só é possível confirmar mensagens com resultado incerto.');
                 }
-                $this->db->exec("UPDATE gr_mensagens SET status='aceito', status_em=?, atualizado_em=? WHERE id=? AND status='incerto'", [$now, $now, $msgId]);
+                $this->mustChange($this->db->exec("UPDATE gr_mensagens SET status='aceito', status_em=?, atualizado_em=? WHERE id=? AND status='incerto'", [$now, $now, $msgId]));
                 $this->event($msgId, 'manual', 'aceito', 'Você confirmou que a mensagem foi enviada (entrega não confirmada pelo provedor).');
                 return 'aceito';
             case 'marcar_falhou':
                 if (!in_array($m['status'], ['incerto'], true)) {
                     throw new \InvalidArgumentException('Só é possível marcar como falha mensagens com resultado incerto.');
                 }
-                $this->db->exec("UPDATE gr_mensagens SET status='falhou', erro_codigo='manual', status_em=?, atualizado_em=? WHERE id=? AND status='incerto'", [$now, $now, $msgId]);
+                $this->mustChange($this->db->exec("UPDATE gr_mensagens SET status='falhou', erro_codigo='manual', status_em=?, atualizado_em=? WHERE id=? AND status='incerto'", [$now, $now, $msgId]));
                 $this->event($msgId, 'manual', 'falhou', 'Você marcou a mensagem como não enviada.');
                 return 'falhou';
             case 'reenviar':
@@ -518,7 +518,7 @@ final class Engine
                 if ($m['data_prevista'] !== $this->today()) {
                     throw new \InvalidArgumentException('Reenvio só no dia previsto. Lembretes antigos não são reenviados.');
                 }
-                $this->db->exec("UPDATE gr_mensagens SET status='aguardando', proxima_tentativa_em=NULL, atualizado_em=? WHERE id=? AND status IN ('incerto','falhou')", [$now, $msgId]);
+                $this->mustChange($this->db->exec("UPDATE gr_mensagens SET status='aguardando', proxima_tentativa_em=NULL, atualizado_em=? WHERE id=? AND status IN ('incerto','falhou')", [$now, $msgId]));
                 $this->event($msgId, 'manual', 'aguardando', 'Reenvio solicitado por você.');
                 return $this->attempt($msgId, true);
             case 'cancelar':
@@ -526,16 +526,24 @@ final class Engine
                     throw new \InvalidArgumentException('Só é possível cancelar mensagens aguardando envio.');
                 }
                 $this->cancelMessage($msgId, 'manual', 'Cancelada por você.');
+                $this->mustChange($this->db->value('SELECT status FROM gr_mensagens WHERE id=?', [$msgId]) === 'cancelado' ? 1 : 0);
                 return 'cancelado';
             case 'registrar_manual':
                 if (!in_array($m['status'], ['aguardando', 'incerto', 'falhou'], true)) {
                     throw new \InvalidArgumentException('Estado não permite registrar envio manual.');
                 }
-                $this->db->exec("UPDATE gr_mensagens SET status='manual', status_em=?, atualizado_em=? WHERE id=? AND status=?", [$now, $now, $msgId, $m['status']]);
+                $this->mustChange($this->db->exec("UPDATE gr_mensagens SET status='manual', status_em=?, atualizado_em=? WHERE id=? AND status=?", [$now, $now, $msgId, $m['status']]));
                 $this->event($msgId, 'manual', 'manual', 'Você registrou que enviou manualmente pelo WhatsApp.');
                 return 'manual';
         }
         throw new \InvalidArgumentException('Ação inválida.');
+    }
+
+    private function mustChange(int $rows): void
+    {
+        if ($rows === 0) {
+            throw new \InvalidArgumentException('O estado da mensagem mudou enquanto você decidia. Recarregue e confira.');
+        }
     }
 
     /**
@@ -593,7 +601,31 @@ final class Engine
     /** Registra envio manual de lembretes ainda pendentes (impede o envio automático do mesmo aviso). */
     public function manualForPending(int $clientId, string $due, string $stage): ?int
     {
-        $id = $this->buildMessage($this->app->effectiveMode(), $clientId, $due, $stage, 'manual');
+        $mode = $this->app->effectiveMode();
+        $today = $this->today();
+        $st = null;
+        foreach (Stages::all($this->app->settings()) as $s) {
+            if ($s['codigo'] === $stage && $s['ativo']) {
+                $st = $s;
+            }
+        }
+        $expectedDue = $st ? $this->app->clock()->now()->modify(($st['dias'] >= 0 ? '-' : '+') . abs($st['dias']) . ' days')->format('Y-m-d') : null;
+        if ($expectedDue !== $due) {
+            throw new \InvalidArgumentException('Este aviso não é de hoje.');
+        }
+        // Cria os lembretes do dia se o agendador ainda não gerou (ex.: antes das 09h), para o automático não repetir.
+        $now = $this->now();
+        foreach ($this->app->panel()->packagesDueOn([$due]) as $p) {
+            if ($p['cliente_id'] !== $clientId) {
+                continue;
+            }
+            $this->db->exec(
+                'INSERT IGNORE INTO gr_lembretes (modo, pacote_id, cliente_id, vencimento, etapa, data_prevista, status, snap_pacote, snap_valor_centavos, snap_pontos, snap_ciclo, criado_em, atualizado_em)
+                 VALUES (?,?,?,?,?,?,\'pendente\',?,?,?,?,?,?)',
+                [$mode, $p['pacote_id'], $clientId, $due, $stage, $today, mb_substr($p['pacote_nome'], 0, 190), $p['valor_centavos'], $p['pontos'], $p['ciclo'], $now, $now]
+            );
+        }
+        $id = $this->buildMessage($mode, $clientId, $due, $stage, 'manual');
         if ($id) {
             $this->event($id, 'manual', 'manual', 'Você registrou que enviou manualmente pelo WhatsApp.');
         }

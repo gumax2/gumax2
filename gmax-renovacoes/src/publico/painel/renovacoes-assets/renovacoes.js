@@ -92,9 +92,9 @@
       (g.itens.length > 1 ? '<div class="gr-muted gr-mt6">Total do grupo: <b>' + esc(g.total) + '</b> (mesma data → uma única mensagem)</div>' : '');
     if (g.previa) {
       h += '<details><summary>Prévia da mensagem</summary><div class="gr-preview">' + esc(g.previa) + '</div>';
-      if (g.link_manual) {
+      if (g.link_manual && !g.ja_enviado) {
         h += '<div class="gr-actions"><a class="gr-btn gr-btn-sec gr-btn-sm" target="_blank" rel="noopener" href="' + esc(g.link_manual) + '">Abrir WhatsApp com mensagem pronta (envio MANUAL)</a>';
-        if (g.etapa_hoje) {
+        if (g.etapa_hoje && !(g.itens[0].lembrete && g.itens[0].lembrete.mensagem_id)) {
           h += '<button class="gr-btn gr-btn-sec gr-btn-sm" data-manual="' + esc(JSON.stringify({ cliente_id: g.cliente_id, vencimento: g.vencimento, etapa: g.etapa_hoje.codigo })) + '">Registrar que enviei manualmente</button>';
         }
         h += '</div><div class="gr-muted">O botão só abre o WhatsApp com o texto pronto: você precisa tocar em Enviar. Não é envio automático. Registrar o envio manual evita que o automático mande o mesmo aviso.</div>';
@@ -132,7 +132,14 @@
   }
 
   function loadHistory(append) {
-    if (!append) { state.histPage = 0; }
+    if (!append) {
+      state.histPage = 0;
+      api('recebidas').then(function (d) {
+        $('#gr-recv').innerHTML = d.itens.map(function (e) {
+          return '<div class="gr-item"><span class="gr-muted">' + esc(e.registrado_em) + '</span> ' + badge(e.tipo === 'descadastro' ? 'revogado' : 'aceito', e.tipo === 'descadastro' ? 'descadastro' : 'recebida') + '<br>' + esc(e.detalhe) + '</div>';
+        }).join('') || '<div class="gr-empty">Nenhuma resposta registrada.</div>';
+      }).catch(function () {});
+    }
     return api('historico', { status: $('#gr-hist-status').value, pagina: state.histPage }).then(function (d) {
       var sel = $('#gr-hist-status');
       if (sel.options.length === 1) {

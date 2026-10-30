@@ -12,6 +12,11 @@ if (!defined('GR_ROOT')) {
 }
 define('GR_VERSION', '1.0.0');
 
+if (PHP_SAPI !== 'cli') {
+    // Nunca exibir avisos do PHP na web (revelariam caminhos privados); tudo vai para o log.
+    ini_set('display_errors', '0');
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'GmaxRenov\\';
     if (strncmp($class, $prefix, strlen($prefix)) !== 0) {

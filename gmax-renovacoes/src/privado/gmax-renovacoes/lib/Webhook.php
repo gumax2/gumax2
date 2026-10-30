@@ -11,12 +11,17 @@ namespace GmaxRenov;
 final class Webhook
 {
     private App $app;
-    private Db $db;
+    private ?Db $db = null;
 
     public function __construct(App $app)
     {
+        // Banco só é aberto depois da assinatura válida (protege as conexões compartilhadas com o painel).
         $this->app = $app;
-        $this->db = $app->db();
+    }
+
+    private function db(): Db
+    {
+        return $this->db ??= $this->app->db();
     }
 
     private function meta(): array
@@ -53,7 +58,7 @@ final class Webhook
             return [413, 'too large'];
         }
         if (!$this->validSignature($raw, $signature)) {
-            $this->app->log()->error('Webhook com assinatura inválida rejeitado.');
+            $this->logThrottled('Webhook com assinatura inválida rejeitado.');
             return [401, 'invalid signature'];
         }
         $data = json_decode($raw, true);
@@ -73,6 +78,11 @@ final class Webhook
                     continue;
                 }
                 $v = $change['value'] ?? [];
+                $expected = (string)($this->meta()['phone_number_id'] ?? '');
+                $got = (string)($v['metadata']['phone_number_id'] ?? '');
+                if ($expected !== '' && $got !== '' && $got !== $expected) {
+                    continue; // evento de outro número do mesmo app
+                }
                 foreach ((array)($v['statuses'] ?? []) as $st) {
                     $this->onStatus($st, $stats);
                 }
@@ -101,11 +111,11 @@ final class Webhook
         }
         $dedup = hash('sha256', 'st|' . $pid . '|' . $st['status'] . '|' . ($st['timestamp'] ?? '') . '|' . ($st['errors'][0]['code'] ?? ''));
 
-        $msg = $this->db->one("SELECT id, provedor_msg_id FROM gr_mensagens WHERE provedor='meta_cloud' AND provedor_msg_id=?", [$pid]);
+        $msg = $this->db()->one("SELECT id, provedor_msg_id FROM gr_mensagens WHERE provedor='meta_cloud' AND provedor_msg_id=?", [$pid]);
         if (!$msg && !empty($st['biz_opaque_callback_data'])) {
-            $msg = $this->db->one('SELECT id, provedor_msg_id FROM gr_mensagens WHERE ref=?', [(string)$st['biz_opaque_callback_data']]);
+            $msg = $this->db()->one('SELECT id, provedor_msg_id FROM gr_mensagens WHERE ref=?', [(string)$st['biz_opaque_callback_data']]);
             if ($msg && !$msg['provedor_msg_id']) {
-                $this->db->exec('UPDATE gr_mensagens SET provedor_msg_id=? WHERE id=? AND provedor_msg_id IS NULL', [$pid, $msg['id']]);
+                $this->db()->exec('UPDATE gr_mensagens SET provedor_msg_id=? WHERE id=? AND provedor_msg_id IS NULL', [$pid, $msg['id']]);
             }
         }
         $engine = new Engine($this->app);
@@ -126,7 +136,7 @@ final class Webhook
     public function applyStatus(int $msgId, string $status, ?string $err, ?string $ts): void
     {
         for ($i = 0; $i < 3; $i++) {
-            $m = $this->db->one('SELECT status FROM gr_mensagens WHERE id=?', [$msgId]);
+            $m = $this->db()->one('SELECT status FROM gr_mensagens WHERE id=?', [$msgId]);
             if (!$m) {
                 return;
             }
@@ -150,7 +160,7 @@ final class Webhook
             $params[] = $msgId;
             $params[] = $m['status'];
             // Atualização condicional: se outro callback mudou o status no meio, tenta de novo.
-            if ($this->db->exec("UPDATE gr_mensagens SET status=?, status_em=?, atualizado_em=?$extra WHERE id=? AND status=?", $params)) {
+            if ($this->db()->exec("UPDATE gr_mensagens SET status=?, status_em=?, atualizado_em=?$extra WHERE id=? AND status=?", $params)) {
                 return;
             }
         }
@@ -159,16 +169,35 @@ final class Webhook
     private function onInbound(array $in, array &$stats): void
     {
         $from = Format::phone((string)($in['from'] ?? '')) ?? preg_replace('/\D/', '', (string)($in['from'] ?? ''));
+        $type = (string)($in['type'] ?? '');
         $text = (string)($in['text']['body'] ?? $in['button']['text'] ?? $in['interactive']['button_reply']['title'] ?? '');
-        if ($from === '' || !Contacts::isOptOut($text)) {
-            return; // não guardamos o conteúdo de outras mensagens
+        if ($from === '') {
+            return;
         }
         $dedup = hash('sha256', 'in|' . ($in['id'] ?? ''));
         $engine = new Engine($this->app);
-        if (!$engine->event(null, 'descadastro', null, 'Pedido de descadastramento recebido de ' . Format::maskPhone($from), $dedup)) {
+        $optOut = Contacts::isOptOut($text);
+        // Registra respostas (texto curto e telefone mascarado) para você ver comprovantes e pedidos na aba.
+        $summary = $text !== '' ? mb_substr(preg_replace('/\s+/u', ' ', $text), 0, 160) : '[' . ($type ?: 'mensagem') . ']';
+        if (!$engine->event(null, $optOut ? 'descadastro' : 'recebida', null, Format::maskPhone($from) . ': ' . $summary, $dedup)) {
+            return; // repetido
+        }
+        if (!$optOut) {
             return;
         }
-        $ids = (new Contacts($this->db, $this->app->clock()))->revokeByPhone($from, 'whatsapp (resposta SAIR)');
+        $ids = (new Contacts($this->db(), $this->app->clock()))->revokeByPhone($from, 'whatsapp (resposta SAIR)');
+        if (!$ids) {
+            $engine->event(null, 'descadastro', null, 'Descadastro sem correspondência: nenhum cliente autorizado com ' . Format::maskPhone($from) . '. Confira manualmente.');
+        }
         $stats['descadastros'] += count($ids);
+    }
+
+    private function logThrottled(string $msg): void
+    {
+        $flag = rtrim((string)($this->app->config['pasta_logs'] ?? (GR_ROOT . '/logs')), '/') . '/.webhook-invalido';
+        if (!is_file($flag) || filemtime($flag) < time() - 60) {
+            @touch($flag);
+            $this->app->log()->error($msg . ' (registro limitado a 1 por minuto)');
+        }
     }
 }

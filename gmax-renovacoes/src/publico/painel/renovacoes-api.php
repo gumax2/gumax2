@@ -43,7 +43,7 @@ try {
             gr_json(400, ['erro' => 'Requisição inválida.']);
         }
     } elseif ($action === 'previa' && $method === 'POST') {
-        if (!$auth->checkCsrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null)) {
+        if (!Auth::sameOrigin() || !$auth->checkCsrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null)) {
             gr_json(403, ['erro' => 'Falha de verificação de segurança (CSRF).']);
         }
         $in = json_decode((string)file_get_contents('php://input', false, null, 0, 256 * 1024), true) ?: [];

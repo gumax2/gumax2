@@ -348,10 +348,15 @@ test('agendamento repetido não reenvia', function (T $t) {
 
 test('trava impede execução simultânea no mesmo processo de teste', function (T $t) {
     $other = new PDO('mysql:host=' . T::env('GR_TEST_HOST', 'localhost') . ';dbname=' . $t->dbName, T::env('GR_TEST_USER', 'grtest'), T::env('GR_TEST_PASS', 'grtest'));
-    eq('1', (string)$other->query("SELECT GET_LOCK('" . Engine::LOCK . "', 0)")->fetchColumn(), 'outro trabalhador segura a trava');
+    $lock = $t->app->db()->lockName(Engine::LOCK);
+    check(strpos($lock, $t->dbName) !== false, 'nome da trava inclui o banco (MySQL compartilhado)');
+    eq('1', (string)$other->query("SELECT GET_LOCK('" . $lock . "', 0)")->fetchColumn(), 'outro trabalhador segura a trava');
     $r = $t->run();
     eq(false, $r['executado'], 'segunda execução sai sem fazer nada');
-    $other->query("SELECT RELEASE_LOCK('" . Engine::LOCK . "')");
+    $other->query("SELECT RELEASE_LOCK('" . $lock . "')");
+    // A mesma trava em OUTRO banco (outra instalação no mesmo servidor) não bloqueia esta.
+    $other->query("SELECT GET_LOCK('" . Engine::LOCK . ":outro_banco', 0)");
+    eq(true, $t->run()['executado'], 'trava de outro banco não interfere');
 });
 
 $concurrency = function (bool $withLock) {
@@ -575,7 +580,7 @@ test('descadastro por resposta SAIR revoga a autorização', function (T $t) {
     (new Webhook($t->app))->handlePost($raw, $sig); // repetido
     eq('revogado', (new Contacts($t->app->db(), $t->clock))->get($c)['consentimento'], 'revogado');
     eq(1, (int)$t->app->db()->value("SELECT COUNT(*) FROM gr_consentimento_log WHERE acao='revogado'"), 'registrado uma vez');
-    eq(false, Contacts::isOptOut('quero sair do grupo da família'), 'frase comum não descadastra');
+    eq(false, Contacts::isOptOut('pode me mandar a chave pix de novo?'), 'frase comum não descadastra');
 });
 
 test('classificação de respostas da Meta', function (T $t) {
@@ -717,4 +722,68 @@ test('código do módulo não escreve em tabelas do painel', function (T $t) {
         $src = file_get_contents($f->getPathname());
         check(!preg_match('/(?<!KEY )(INSERT\s+(IGNORE\s+)?INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE)\s+`?(?!gr_)[a-z]/i', $src, $mm), 'escrita fora de gr_* em ' . $f->getFilename() . ': ' . ($mm[0] ?? ''));
     }
+});
+
+echo "Correções da revisão de segurança\n";
+
+test('descadastro: wa_id sem o 9º dígito, frases curtas, outro número ignorado, respostas registradas', function (T $t) {
+    $c = $t->client('Nove');
+    $t->consent($c); // 5531999990001
+    $mk = fn(string $from, string $text, string $id, string $pnid = '123') => ['entry' => [['changes' => [['field' => 'messages', 'value' => [
+        'metadata' => ['phone_number_id' => $pnid], 'messages' => [['from' => $from, 'id' => $id, 'type' => 'text', 'text' => ['body' => $text]]]]]]]]];
+    $hook = new Webhook($t->app);
+    [$raw, $sig] = signed($t, $mk('553199990001', 'Quero sair', 'w1', '999'));
+    $hook->handlePost($raw, $sig);
+    eq('concedido', (new Contacts($t->app->db(), $t->clock))->get($c)['consentimento'], 'evento de outro phone_number_id ignorado');
+    [$raw, $sig] = signed($t, $mk('553199990001', 'segue o comprovante do pix', 'w2'));
+    $hook->handlePost($raw, $sig);
+    eq('concedido', (new Contacts($t->app->db(), $t->clock))->get($c)['consentimento'], 'mensagem comum não descadastra');
+    eq(1, (int)$t->app->db()->value("SELECT COUNT(*) FROM gr_eventos WHERE tipo='recebida'"), 'resposta registrada');
+    [$raw, $sig] = signed($t, $mk('553199990001', 'Não quero mais receber', 'w3'));
+    $hook->handlePost($raw, $sig);
+    eq('revogado', (new Contacts($t->app->db(), $t->clock))->get($c)['consentimento'], 'revogado mesmo com wa_id sem o 9');
+    check(Contacts::isOptOut('quero sair'), '"quero sair"');
+    check(Contacts::isOptOut('PARE'), '"PARE"');
+    check(!Contacts::isOptOut('Vou sair de casa agora e depois te mando o comprovante do pagamento, ok?'), 'frase longa não');
+    eq(['5531999990001', '553199990001'], Format::phoneVariants('5531999990001'), 'variantes do celular');
+});
+
+test('registrar envio manual antes das 09h impede o envio automático', function (T $t) {
+    $c = $t->client('Manual Cedo');
+    $t->consent($c);
+    $t->package($c, 'P', '2026-11-13', '10.00');
+    $t->clock->set('2026-11-10 08:00:00');
+    $id = (new Engine($t->app))->manualForPending($c, '2026-11-13', 'antes');
+    check($id > 0, 'registrado');
+    $t->run('2026-11-10 09:30:00');
+    eq(['manual'], array_column($t->messages(), 'status'), 'nenhum envio automático');
+    eq(0, count($t->provider->sent), 'provedor não chamado');
+});
+
+test('decisão manual recusada se o estado mudou no meio', function (T $t) {
+    $c = $t->client('Corrida');
+    $t->consent($c);
+    $t->package($c, 'P', '2026-11-13', '10.00');
+    $t->app->setProvider(new SimulatedProvider([new SendResult(SendResult::UNCERTAIN, null, 'rede_28', 'timeout')]));
+    $t->run();
+    $id = (int)$t->messages()[0]['id'];
+    $t->pdo()->exec("UPDATE gr_mensagens SET status='entregue' WHERE id=$id"); // callback chegou antes
+    $failed = false;
+    try {
+        (new Engine($t->app))->resolve($id, 'marcar_falhou');
+    } catch (InvalidArgumentException $e) {
+        $failed = true;
+    }
+    check($failed, 'recusado');
+    eq('entregue', $t->messages()[0]['status'], 'status preservado');
+});
+
+test('instruções de pagamento e rodapé não aceitam links nem senhas', function (T $t) {
+    $api = new \GmaxRenov\Api($t->app);
+    $r = $api->handle('salvar_config', ['instrucoes_pagamento' => 'Pague em bit.ly/abc']);
+    eq(false, $r['ok'], 'link encurtado recusado');
+    $r = $api->handle('salvar_config', ['rodape' => 'Sua senha continua a mesma']);
+    eq(false, $r['ok'], 'senha recusada');
+    $r = $api->handle('salvar_config', ['instrucoes_pagamento' => 'Pix (chave e-mail): gumaxskins@gmail.com']);
+    eq(true, $r['ok'], 'e-mail como chave aceito');
 });

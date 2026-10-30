@@ -8,6 +8,7 @@ use PDO;
 final class Db
 {
     public PDO $pdo;
+    private ?string $lockDb = null;
 
     public function __construct(PDO $pdo)
     {
@@ -88,19 +89,26 @@ final class Db
     /** Trava nomeada do MySQL (liberada automaticamente se a conexão cair). */
     public function getLock(string $name, int $timeout = 0): bool
     {
-        return (int)$this->value('SELECT GET_LOCK(?, ?)', [$name, $timeout]) === 1;
+        return (int)$this->value('SELECT GET_LOCK(?, ?)', [$this->lockName($name), $timeout]) === 1;
     }
 
     public function releaseLock(string $name): void
     {
-        $this->value('SELECT RELEASE_LOCK(?)', [$name]);
+        $this->value('SELECT RELEASE_LOCK(?)', [$this->lockName($name)]);
+    }
+
+    /** GET_LOCK vale para o servidor MySQL inteiro (compartilhado na hospedagem): inclui o nome do banco. */
+    public function lockName(string $name): string
+    {
+        $this->lockDb ??= (string)$this->value('SELECT DATABASE()');
+        return substr($name . ':' . $this->lockDb, 0, 64);
     }
 
     /** Aspas em identificadores vindos do mapeamento do config (validados). */
     public static function ident(string $name): string
     {
         if (!preg_match('/^[A-Za-z0-9_]{1,64}$/', $name)) {
-            throw new \InvalidArgumentException('Identificador inválido no mapeamento: ' . $name);
+            throw new \RuntimeException('Identificador inválido no mapeamento do config.php: ' . $name); // vai para o log, não para o navegador
         }
         return '`' . $name . '`';
     }

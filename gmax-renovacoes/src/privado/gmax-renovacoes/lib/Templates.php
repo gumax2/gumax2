@@ -103,6 +103,19 @@ final class Templates
         return mb_substr($s, 0, 1000);
     }
 
+    /** Links e senhas/códigos de acesso não podem ir nas mensagens (vale para textos, instruções e rodapé). */
+    public static function forbiddenContent(string $text): array
+    {
+        $errors = [];
+        if (preg_match('~https?://|www\.|wa\.me/|\.m3u|\b[a-z0-9-]+(\.[a-z0-9-]+)+/\S~i', $text)) {
+            $errors[] = 'Não inclua links/URLs nas mensagens.';
+        }
+        if (preg_match('/\b(senha|password|usu[aá]rio e senha|c[oó]digo de acesso)\b/iu', $text)) {
+            $errors[] = 'Não inclua senhas ou códigos de acesso nas mensagens.';
+        }
+        return $errors;
+    }
+
     /**
      * Valida um texto editável. Retorna lista de erros (vazia = ok).
      */
@@ -115,12 +128,7 @@ final class Templates
         if (mb_strlen($text) > 1024) {
             $errors[] = 'Texto muito longo (máximo 1024 caracteres, limite do corpo de modelos do WhatsApp).';
         }
-        if (preg_match('~https?://|www\.|wa\.me/|\.m3u~i', $text)) {
-            $errors[] = 'Não inclua links/URLs nas mensagens.';
-        }
-        if (preg_match('/\b(senha|password|usu[aá]rio e senha|c[oó]digo de acesso)\b/iu', $text)) {
-            $errors[] = 'Não inclua senhas ou códigos de acesso nas mensagens.';
-        }
+        $errors = array_merge($errors, self::forbiddenContent($text));
         preg_match_all('/\{([a-z_]+)\}/', $text, $m);
         foreach (array_unique($m[1]) as $f) {
             if (!in_array($f, self::FIELDS, true)) {

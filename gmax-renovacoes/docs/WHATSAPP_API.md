@@ -79,7 +79,8 @@ Regras da Meta que o módulo já respeita: parâmetros **sem quebra de linha** (
 
 - Só recebe lembrete quem tem autorização registrada na aba **Autorizações** (com a origem: ex. "respondeu SIM no WhatsApp em 30/10/2026"). A autorização fica vinculada ao telefone; se o telefone mudar no cadastro, é preciso registrar de novo.
 - Sugestão para obter a autorização pelo próprio app: *"Podemos te avisar por WhatsApp quando seu pacote estiver perto de vencer? Responda SIM para receber. Você pode pedir para parar a qualquer momento respondendo SAIR."*
-- **Revogação:** pelo botão na aba, ou automaticamente quando o cliente responde **SAIR / PARAR / STOP / CANCELAR / DESCADASTRAR** (via webhook). Tudo fica registrado com data em `gr_consentimento_log`.
+- **Revogação:** pelo botão na aba, ou automaticamente quando o cliente responde uma mensagem curta com **SAIR / PARAR / PARE / STOP / DESCADASTRAR** ou "não quero mais receber" (via webhook). Tudo fica registrado com data em `gr_consentimento_log`. Respostas dos clientes (ex.: comprovantes) aparecem em Histórico → "Respostas recebidas" — no número só da API não há aplicativo para lê-las.
+- O **rodapé de descadastro precisa estar no texto aprovado de cada modelo**: no envio real, só o modelo aprovado chega ao cliente.
 - Pausa por cliente (sem revogar) e pausa global também ficam na aba.
 
 ## 6. Webhook

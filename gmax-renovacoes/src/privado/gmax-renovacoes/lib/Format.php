@@ -77,6 +77,18 @@ final class Format
         return $d;
     }
 
+    /** Variações do mesmo celular brasileiro: com e sem o 9º dígito (a Meta pode enviar o wa_id sem ele). */
+    public static function phoneVariants(string $e164): array
+    {
+        $v = [$e164];
+        if (preg_match('/^55(\d{2})9(\d{8})$/', $e164, $m)) {
+            $v[] = '55' . $m[1] . $m[2];
+        } elseif (preg_match('/^55(\d{2})([6-9]\d{7})$/', $e164, $m)) {
+            $v[] = '55' . $m[1] . '9' . $m[2];
+        }
+        return $v;
+    }
+
     public static function maskPhone(?string $e164): string
     {
         if (!$e164) {

@@ -60,7 +60,11 @@ const ABAS = [
       await page.goto(base + '/painel/renovacoes.php', { waitUntil: 'networkidle' });
 
       for (const aba of ABAS) {
-        await page.click('.gr-tabs button[data-tab="' + aba.tab + '"]');
+        const api = { visao: 'painel', historico: 'historico', clientes: 'clientes', config: 'config' }[aba.tab];
+        await Promise.all([
+          page.waitForResponse((x) => x.url().includes('acao=' + api)),
+          page.click('.gr-tabs button[data-tab="' + aba.tab + '"]'),
+        ]);
         await page.waitForSelector(aba.pronto, { timeout: 10000 });
         await page.waitForLoadState('networkidle');
         await page.waitForTimeout(aba.tab === 'config' ? 900 : 200); // prévias da config têm debounce de 350 ms
@@ -78,8 +82,11 @@ const ABAS = [
 
       if (nomePerfil === 'celular') {
         // Detalhe de uma mensagem do histórico (diálogo).
-        await page.click('.gr-tabs button[data-tab="historico"]');
-        await page.waitForSelector('#gr-hist .gr-item, #gr-hist .gr-empty');
+        await Promise.all([
+          page.waitForResponse((x) => x.url().includes('acao=historico')),
+          page.click('.gr-tabs button[data-tab="historico"]'),
+        ]);
+        await page.waitForTimeout(200);
         if (await page.$('#gr-hist button[data-msg]')) {
           await page.click('#gr-hist button[data-msg]');
           await page.waitForSelector('#gr-dialog[open]');
@@ -89,15 +96,18 @@ const ABAS = [
           await page.click('#gr-dialog form button');
         }
         // Prévia expandida de um grupo nos Vencimentos.
-        await page.click('.gr-tabs button[data-tab="visao"]');
-        await page.waitForSelector('#gr-proximos .gr-item');
-        await page.waitForLoadState('networkidle');
+        await Promise.all([
+          page.waitForResponse((x) => x.url().includes('acao=painel')),
+          page.click('.gr-tabs button[data-tab="visao"]'),
+        ]);
+        await page.waitForTimeout(300);
         const det = await page.$('#gr-proximos details');
         if (det) {
-          await det.evaluate((d) => { d.open = true; d.scrollIntoView(); });
+          await det.evaluate((d) => { d.open = true; });
           await page.waitForTimeout(150);
           r.abas.vencimentos_previa = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
-          await page.screenshot({ path: path.join(outDir, 'celular-vencimentos-previa.png') });
+          const item = await det.evaluateHandle((d) => d.closest('.gr-item'));
+          await item.asElement().screenshot({ path: path.join(outDir, 'celular-vencimentos-previa.png') });
         }
         // Botão "Executar agora" (POST com CSRF feito pelo próprio JS da página).
         await page.check('#gr-run-ignore');
@@ -107,6 +117,7 @@ const ABAS = [
         ]);
         r.executarAgora = { status: resp.status(), corpo: (await resp.text()).slice(0, 500) };
         await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(800);
         r.executarAgora.saida = await page.textContent('#gr-run-out');
         r.executarAgora.toast = await page.textContent('#gr-toast');
       }

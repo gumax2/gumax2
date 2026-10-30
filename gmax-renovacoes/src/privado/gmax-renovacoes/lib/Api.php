@@ -31,12 +31,13 @@ final class Api
             case 'mensagem': return $this->message((int)($in['id'] ?? 0));
             case 'clientes': return $this->clients($in);
             case 'cliente_historico': return ['itens' => $this->contacts->history((int)($in['id'] ?? 0))];
+            case 'recebidas': return ['itens' => $this->app->db()->all("SELECT tipo, detalhe, registrado_em FROM gr_eventos WHERE tipo IN ('recebida','descadastro') ORDER BY id DESC LIMIT 30")];
             case 'config': return $this->config();
             case 'previa': return $this->preview($in);
             case 'salvar_config': return $this->saveConfig($in);
             case 'consentimento': return $this->consent($in);
             case 'pausa_cliente':
-                $this->contacts->setPaused((int)$in['cliente_id'], !empty($in['pausado']), (string)($in['motivo'] ?? ''));
+                $this->contacts->setPaused((int)($in['cliente_id'] ?? 0), !empty($in['pausado']), (string)($in['motivo'] ?? ''));
                 return ['ok' => true];
             case 'pausa_global':
                 $this->app->settings()->set('pausa_global', !empty($in['pausado']));
@@ -47,9 +48,9 @@ final class Api
                 $s->set('pagamento_confirmado_em', $this->app->clock()->now()->format('Y-m-d H:i:s'));
                 return ['ok' => true];
             case 'resolver':
-                return ['ok' => true, 'status' => $this->engine->resolve((int)$in['id'], (string)$in['decisao'])];
+                return ['ok' => true, 'status' => $this->engine->resolve((int)($in['id'] ?? 0), (string)($in['decisao'] ?? ''))];
             case 'registrar_manual':
-                $id = $this->engine->manualForPending((int)$in['cliente_id'], (string)$in['vencimento'], (string)$in['etapa']);
+                $id = $this->engine->manualForPending((int)($in['cliente_id'] ?? 0), (string)($in['vencimento'] ?? ''), (string)($in['etapa'] ?? ''));
                 if (!$id) {
                     throw new \InvalidArgumentException('Nenhum lembrete pendente elegível para registrar.');
                 }
@@ -65,7 +66,14 @@ final class Api
     private function dashboard(): array
     {
         $s = $this->app->settings();
-        $this->engine->sweep();
+        $db0 = $this->app->db();
+        if ($db0->getLock(Engine::LOCK, 0)) { // não concorre com o agendador
+            try {
+                $this->engine->sweep();
+            } finally {
+                $db0->releaseLock(Engine::LOCK);
+            }
+        }
         $now = $this->app->clock()->now();
         $today = $now->format('Y-m-d');
         $pkgs = $this->app->panel()->packagesDueBetween($now->modify('-15 days')->format('Y-m-d'), $now->modify('+7 days')->format('Y-m-d'));
@@ -140,6 +148,7 @@ final class Api
                 'previa' => $preview['corpo'] ?? null,
                 'previa_etapa' => $previewStage['codigo'] ?? null,
                 // Link para envio MANUAL pelo WhatsApp (você precisa tocar em enviar no aplicativo).
+                'ja_enviado' => (bool)array_filter($rows, static fn($r) => in_array($r['lembrete']['status'] ?? '', ['enviando', 'aceito', 'entregue', 'lido', 'manual', 'incerto'], true)),
                 'link_manual' => ($phone && $preview) ? 'https://wa.me/' . $phone . '?text=' . rawurlencode($preview['corpo']) : null,
                 'consentimento' => $contact['consentimento'] ?? 'nenhum',
                 'pausado' => !empty($contact['pausado']),
@@ -191,7 +200,7 @@ final class Api
             $where[] = 'm.cliente_id = ?';
             $p[] = (int)$in['cliente_id'];
         }
-        $page = max(0, (int)($in['pagina'] ?? 0));
+        $page = min(1000, max(0, (int)($in['pagina'] ?? 0)));
         $rows = $db->all(
             'SELECT m.id, m.modo, m.cliente_id, m.telefone, m.etapa, m.vencimento, m.data_prevista, m.status, m.provedor, m.tentativas,
                     m.erro_codigo, m.erro_detalhe, m.criado_em, m.enviado_em, m.entregue_em, m.lido_em, m.status_em,
@@ -236,7 +245,7 @@ final class Api
 
     private function clients(array $in): array
     {
-        $rows = $this->app->panel()->clients(trim((string)($in['q'] ?? '')), 50, max(0, (int)($in['pagina'] ?? 0)) * 50);
+        $rows = $this->app->panel()->clients(mb_substr(trim((string)($in['q'] ?? '')), 0, 80), 50, min(1000, max(0, (int)($in['pagina'] ?? 0))) * 50);
         $contacts = $this->contacts->many(array_map('intval', array_column($rows, 'id')));
         $out = [];
         foreach ($rows as $r) {
@@ -362,10 +371,16 @@ final class Api
         $instr = str_replace("\r\n", "\n", (string)($in['instrucoes_pagamento'] ?? $s->get('instrucoes_pagamento')));
         $pix = trim((string)($in['chave_pix'] ?? $s->get('chave_pix')));
         $rodape = trim((string)($in['rodape'] ?? $s->get('rodape')));
-        foreach (['Instruções de pagamento' => $instr, 'Rodapé' => $rodape, 'Chave Pix' => $pix] as $label => $val) {
-            if (preg_match('~https?://|www\.~i', $val)) {
-                $errors[] = "$label: não inclua links.";
+        foreach (['Instruções de pagamento' => $instr, 'Rodapé' => $rodape] as $label => $val) {
+            foreach (Templates::forbiddenContent($val) as $e) {
+                $errors[] = "$label: $e";
             }
+        }
+        if (preg_match('~https?://|www\.|/~i', $pix)) {
+            $errors[] = 'Chave Pix: não inclua links.';
+        }
+        if (mb_strlen($instr) > 300) {
+            $errors[] = 'Instruções de pagamento: até 300 caracteres.';
         }
         if ($pix === '' || mb_strlen($pix) > 140) {
             $errors[] = 'Chave Pix obrigatória (até 140 caracteres).';

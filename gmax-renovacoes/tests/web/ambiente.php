@@ -127,6 +127,8 @@ final class GrWeb
     public static function seed(T $t, bool $xss = false): array
     {
         $ids = [];
+        // Autorizações registradas "agora" (relógio real), como na web.
+        $t->clock->set((new DateTimeImmutable('now', new DateTimeZone('America/Sao_Paulo')))->modify('-2 days')->format('Y-m-d H:i:s'));
         // Cliente com dois pacotes no mesmo vencimento (+3 → etapa "antes" hoje) e um terceiro em outra data.
         $ids['ana'] = $t->client('Ana Souza', '31988887777');
         $t->consent($ids['ana'], '31988887777');

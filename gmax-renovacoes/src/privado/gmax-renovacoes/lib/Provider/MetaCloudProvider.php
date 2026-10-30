@@ -80,8 +80,8 @@ final class MetaCloudProvider implements Provider
             CURLOPT_POSTFIELDS => $json,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT => (int)($this->cfg['timeout_conexao'] ?? 5),
-            CURLOPT_TIMEOUT => (int)($this->cfg['timeout_total'] ?? 20),
+            CURLOPT_CONNECTTIMEOUT => max(1, min(30, (int)($this->cfg['timeout_conexao'] ?? 5))),
+            CURLOPT_TIMEOUT => max(5, min(120, (int)($this->cfg['timeout_total'] ?? 20))), // menor que o lease de 5 min
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
         ]);

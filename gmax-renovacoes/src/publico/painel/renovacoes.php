@@ -11,14 +11,21 @@ require $grDir . '/bootstrap.php';
 use GmaxRenov\Auth;
 
 Auth::securityHeaders();
-$app = gr_app();
-$auth = new Auth($app->config['auth'] ?? []);
-$auth->start();
-if (!$auth->loggedIn()) {
-    header('Location: ' . $auth->loginUrl());
+try {
+    $app = gr_app();
+    $auth = new Auth($app->config['auth'] ?? []);
+    $auth->start();
+    if (!$auth->loggedIn()) {
+        header('Location: ' . $auth->loginUrl());
+        exit;
+    }
+    $csrf = $auth->csrfToken();
+} catch (\Throwable $e) {
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'Renovações: erro de configuração. Rode "php bin/renovacoes-admin.php diagnostico" no servidor.';
     exit;
 }
-$csrf = $auth->csrfToken();
 $v = rawurlencode(GR_VERSION);
 ?><!doctype html>
 <html lang="pt-BR">
@@ -65,6 +72,7 @@ $v = rawurlencode(GR_VERSION);
       <select id="gr-hist-status"><option value="">Todos os status</option></select>
       <button id="gr-hist-reload" class="gr-btn gr-btn-sec">Atualizar</button>
     </div>
+    <details id="gr-recv-box"><summary>Respostas recebidas dos clientes (via API)</summary><div id="gr-recv" class="gr-list"></div></details>
     <div id="gr-hist" class="gr-list"></div>
     <div class="gr-actions"><button id="gr-hist-more" class="gr-btn gr-btn-sec">Carregar mais</button></div>
   </section>

@@ -78,8 +78,10 @@ final class Contacts
     /** Descadastramento pelo próprio cliente (resposta "SAIR"): revoga todos os clientes com esse telefone. */
     public function revokeByPhone(string $phoneE164, string $origin): array
     {
+        $variants = Format::phoneVariants($phoneE164);
+        $in = implode(',', array_fill(0, count($variants), '?'));
         $ids = array_map('intval', array_column(
-            $this->db->all("SELECT cliente_id FROM gr_contatos WHERE telefone_consentido = ? AND consentimento = 'concedido'", [$phoneE164]),
+            $this->db->all("SELECT cliente_id FROM gr_contatos WHERE telefone_consentido IN ($in) AND consentimento = 'concedido'", $variants),
             'cliente_id'
         ));
         foreach ($ids as $id) {
@@ -112,9 +114,20 @@ final class Contacts
         );
     }
 
+    /**
+     * Pedido de descadastro: mensagem curta (até 60 caracteres) com a palavra-chave como palavra inteira,
+     * ou "não quero (mais) receber". Frases longas não disparam (evita falso positivo).
+     */
     public static function isOptOut(string $text): bool
     {
-        $t = mb_strtoupper(trim(preg_replace('/[^\p{L}\s]/u', '', $text) ?? ''));
-        return in_array($t, self::OPT_OUT_WORDS, true);
+        $t = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
+        if ($t === '' || mb_strlen($t) > 60) {
+            return false;
+        }
+        $t = mb_strtoupper(strtr($t, ['ã' => 'a', 'Ã' => 'A', 'á' => 'a', 'Á' => 'A']));
+        if (in_array(trim(preg_replace('/[^\p{L} ]/u', '', $t) ?? ''), self::OPT_OUT_WORDS, true)) {
+            return true;
+        }
+        return (bool)preg_match('/\b(SAIR|PARAR|PARE|STOP|DESCADASTRAR|DESCADASTRE)\b|\bNAO QUERO (MAIS )?RECEBER\b/u', $t);
     }
 }
