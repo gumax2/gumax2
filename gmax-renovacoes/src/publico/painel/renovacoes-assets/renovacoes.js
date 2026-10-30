@@ -14,6 +14,12 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  // "2026-10-30 09:06:11" → "30/10/2026 09:06"
+  function dt(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?/.exec(v || '');
+    return m ? m[3] + '/' + m[2] + '/' + m[1] + (m[4] ? ' ' + m[4] + ':' + m[5] : '') : (v || '');
+  }
+  var REM_LABELS = { pendente: 'aguardando', em_mensagem: 'na mensagem', cancelado: 'cancelado', ignorado: 'não enviado' };
   function badge(status, text) { return '<span class="gr-badge ' + esc(status) + '">' + esc(text || status) + '</span>'; }
 
   function toast(msg, bad) {
@@ -54,7 +60,7 @@
     if (st.modo_efetivo === 'simulacao') {
       h += '<div class="gr-banner sim">MODO SIMULAÇÃO — nenhuma mensagem real é enviada aos clientes.';
       if (st.bloqueios_envio_real && st.bloqueios_envio_real.length) {
-        h += '<small>Para envio real falta: ' + st.bloqueios_envio_real.map(esc).join(' · ') + '</small>';
+        h += '<details><summary>O que falta para o envio real (' + st.bloqueios_envio_real.length + ')</summary><small>' + st.bloqueios_envio_real.map(esc).join('<br>') + '</small></details>';
       }
       h += '</div>';
     } else {
@@ -117,17 +123,18 @@
         $('#gr-' + k).innerHTML = d[k].length ? d[k].map(renderGroup).join('') : '<div class="gr-empty">Nada aqui.</div>';
       });
       var last = d.estado.ultima_execucao;
-      $('#gr-run-out').textContent = last ? 'Última execução (' + last.origem + '): ' + last.iniciado_em + (d.estado.ultimo_cron ? ' · último cron: ' + d.estado.ultimo_cron : ' · cron ainda não rodou') : 'O agendador ainda não rodou.';
+      $('#gr-run-out').textContent = (state.runMsg ? state.runMsg + ' · ' : '') + (last ? 'Última execução (' + last.origem + '): ' + dt(last.iniciado_em) + (d.estado.ultimo_cron ? ' · último cron: ' + dt(d.estado.ultimo_cron) : ' · cron ainda não rodou') : 'O agendador ainda não rodou.');
+      state.runMsg = '';
     }).catch(function (e) { toast(e.message, true); });
   }
 
   // ---------- Histórico ----------
   function renderMsg(m) {
     var err = m.erro_detalhe && (m.status === 'falhou' || m.status === 'incerto' || m.status === 'cancelado') ? '<div class="gr-muted">Motivo: ' + esc(m.erro_detalhe) + '</div>' : '';
-    return '<div class="gr-item"><div class="gr-item-head"><strong>' + esc(m.cliente) + '</strong>' +
-      (m.modo === 'simulacao' ? badge('sim', 'SIMULAÇÃO') : '') + ' ' + badge(m.status, m.status_texto) + '</div>' +
+    return '<div class="gr-item"><div class="gr-item-head"><strong>' + esc(m.cliente) + '</strong><span class="gr-badges">' +
+      (m.modo === 'simulacao' ? badge('sim', 'SIMULAÇÃO') + ' ' : '') + badge(m.status, m.status_texto) + '</span></div>' +
       '<div class="gr-muted">' + esc(m.pacotes || '') + ' · venc. ' + esc(m.vencimento_br) + ' · etapa ' + esc(m.etapa) + ' · ' + esc(m.telefone) + '</div>' +
-      '<div class="gr-muted">Criada ' + esc(m.criado_em) + (m.enviado_em ? ' · aceita ' + esc(m.enviado_em) : '') + (m.entregue_em ? ' · entregue ' + esc(m.entregue_em) : '') + (m.lido_em ? ' · lida ' + esc(m.lido_em) : '') + ' · tentativas ' + esc(m.tentativas) + '</div>' +
+      '<div class="gr-muted">Criada ' + esc(dt(m.criado_em)) + (m.enviado_em ? ' · aceita ' + esc(dt(m.enviado_em)) : '') + (m.entregue_em ? ' · entregue ' + esc(dt(m.entregue_em)) : '') + (m.lido_em ? ' · lida ' + esc(dt(m.lido_em)) : '') + ' · tentativas ' + esc(m.tentativas) + '</div>' +
       err + '<div class="gr-actions"><button class="gr-btn gr-btn-sec gr-btn-sm" data-msg="' + m.id + '">Detalhes</button></div></div>';
   }
 
@@ -136,7 +143,7 @@
       state.histPage = 0;
       api('recebidas').then(function (d) {
         $('#gr-recv').innerHTML = d.itens.map(function (e) {
-          return '<div class="gr-item"><span class="gr-muted">' + esc(e.registrado_em) + '</span> ' + badge(e.tipo === 'descadastro' ? 'revogado' : 'aceito', e.tipo === 'descadastro' ? 'descadastro' : 'recebida') + '<br>' + esc(e.detalhe) + '</div>';
+          return '<div class="gr-item"><span class="gr-muted">' + esc(dt(e.registrado_em)) + '</span> ' + badge(e.tipo === 'descadastro' ? 'revogado' : 'aceito', e.tipo === 'descadastro' ? 'descadastro' : 'recebida') + '<br>' + esc(e.detalhe) + '</div>';
         }).join('') || '<div class="gr-empty">Nenhuma resposta registrada.</div>';
       }).catch(function () {});
     }
@@ -160,9 +167,9 @@
       if (m.erro_detalhe) { h += '<p class="gr-muted">Último erro: ' + esc(m.erro_codigo || '') + ' ' + esc(m.erro_detalhe) + '</p>'; }
       h += '<div class="gr-preview">' + esc(m.corpo) + '</div>';
       if (m.lembretes.length) {
-        h += '<ul class="gr-pkgs">' + m.lembretes.map(function (l) { return '<li><span>' + esc(l.snap_pacote) + '</span><span>' + esc(l.valor) + ' ' + badge(l.status, l.status) + ' <span class="gr-muted">' + esc(l.motivo_texto) + '</span></span></li>'; }).join('') + '</ul>';
+        h += '<ul class="gr-pkgs">' + m.lembretes.map(function (l) { return '<li><span>' + esc(l.snap_pacote) + '</span><span>' + esc(l.valor) + ' ' + badge(l.status, REM_LABELS[l.status] || l.status) + ' <span class="gr-muted">' + esc(l.motivo_texto) + '</span></span></li>'; }).join('') + '</ul>';
       }
-      h += '<ul class="gr-events">' + m.eventos.map(function (e) { return '<li><span class="gr-muted">' + esc(e.registrado_em) + (e.ocorrido_em ? ' (provedor: ' + esc(e.ocorrido_em) + ')' : '') + '</span><br>' + esc(e.detalhe) + '</li>'; }).join('') + '</ul>';
+      h += '<ul class="gr-events">' + m.eventos.map(function (e) { return '<li><span class="gr-muted">' + esc(dt(e.registrado_em)) + (e.ocorrido_em ? ' (provedor: ' + esc(dt(e.ocorrido_em)) + ')' : '') + '</span><br>' + esc(e.detalhe) + '</li>'; }).join('') + '</ul>';
       var acts = '';
       if (m.status === 'incerto') {
         acts += '<button class="gr-btn gr-btn-sm" data-resolve="confirmar_enviado">Confirmei no WhatsApp: foi enviada</button>' +
@@ -183,7 +190,7 @@
   function loadClients() {
     return api('clientes', { q: $('#gr-cli-q').value }).then(function (d) {
       $('#gr-cli').innerHTML = d.itens.map(function (c) {
-        var cs = c.consentimento === 'concedido' ? badge('concedido', 'autorizado em ' + (c.consentimento_em || '')) : badge(c.consentimento, c.consentimento === 'revogado' ? 'revogado' : 'sem autorização');
+        var cs = c.consentimento === 'concedido' ? badge('concedido', 'autorizado em ' + dt(c.consentimento_em)) : badge(c.consentimento, c.consentimento === 'revogado' ? 'revogado' : 'sem autorização');
         var warn = !c.telefone_valido ? ' ' + badge('falhou', 'telefone inválido') : (c.telefone_mudou ? ' ' + badge('incerto', 'telefone mudou — reautorizar') : '');
         var btns = c.consentimento === 'concedido'
           ? '<button class="gr-btn gr-btn-sec gr-btn-sm" data-consent="revogar" data-id="' + c.id + '">Revogar autorização</button>'
@@ -352,7 +359,7 @@
     if (t.dataset.clihist) {
       api('cliente_historico', { id: t.dataset.clihist }).then(function (d) {
         $('#gr-dialog-body').innerHTML = '<h2>Registro de autorização</h2><ul class="gr-events">' + (d.itens.map(function (i) {
-          return '<li><b>' + esc(i.acao) + '</b> · ' + esc(i.registrado_em) + '<br><span class="gr-muted">' + esc(i.origem || '') + ' ' + esc(i.observacao || '') + ' ' + esc(i.telefone || '') + '</span></li>';
+          return '<li><b>' + esc(i.acao) + '</b> · ' + esc(dt(i.registrado_em)) + '<br><span class="gr-muted">' + esc(i.origem || '') + ' ' + esc(i.observacao || '') + ' ' + esc(i.telefone || '') + '</span></li>';
         }).join('') || '<li>Sem registros.</li>') + '</ul>';
         $('#gr-dialog').showModal();
       });
@@ -394,7 +401,8 @@
   $('#gr-run').addEventListener('click', function () {
     var b = this; b.disabled = true;
     post('executar_agora', { ignorar_horario: $('#gr-run-ignore').checked }).then(function (r) {
-      $('#gr-run-out').textContent = 'Resultado: ' + JSON.stringify(r);
+      state.runMsg = !r.executado ? r.motivo
+        : 'Resultado: ' + (r.mensagens_criadas || 0) + ' mensagem(ns) criada(s), ' + (r.aceitas || 0) + ' aceita(s), ' + (r.falhas || 0) + ' falha(s), ' + (r.incertas || 0) + ' incerta(s)' + (r.motivo ? ' — ' + r.motivo : '') + (r.modo === 'simulacao' ? ' [SIMULAÇÃO]' : '');
       return loadDashboard();
     }).catch(function (e) { toast(e.message, true); }).then(function () { b.disabled = false; });
   });

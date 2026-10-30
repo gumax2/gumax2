@@ -99,3 +99,11 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 .gr-mt6 { margin-top: 6px; }
 .gr-mb14 { margin-bottom: 14px; }
 textarea.gr-ta-sm { min-height: 64px; }
+
+/* Abas cabem na largura do iPhone (4 colunas iguais) */
+@media (max-width: 520px) {
+  .gr-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; padding: 0 8px; }
+  .gr-tabs button { padding: 10px 2px; font-size: 13px; white-space: normal; line-height: 1.2; }
+}
+.gr-badges { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.gr-banner details summary { color: inherit; font-weight: 400; font-size: 13px; margin-top: 4px; }

@@ -25,6 +25,7 @@ final class Api
 
     public function handle(string $action, array $in): array
     {
+        self::checkShape($in);
         switch ($action) {
             case 'painel': return $this->dashboard();
             case 'historico': return $this->history($in);
@@ -37,6 +38,9 @@ final class Api
             case 'salvar_config': return $this->saveConfig($in);
             case 'consentimento': return $this->consent($in);
             case 'pausa_cliente':
+                if (!$this->app->panel()->client((int)($in['cliente_id'] ?? 0))) {
+                    throw new \InvalidArgumentException('Cliente não encontrado.');
+                }
                 $this->contacts->setPaused((int)($in['cliente_id'] ?? 0), !empty($in['pausado']), (string)($in['motivo'] ?? ''));
                 return ['ok' => true];
             case 'pausa_global':
@@ -61,6 +65,34 @@ final class Api
                 return $this->engine->run('painel', ['ignorar_horario' => !empty($in['ignorar_horario'])]);
         }
         throw new \InvalidArgumentException('Ação desconhecida.');
+    }
+
+    /**
+     * Rejeita entradas com formato inesperado (ex.: lista onde se espera texto), antes de qualquer conversão.
+     * Só 'textos', 'modelos', 'etapas' e 'numeros_teste' podem ter estrutura; as folhas são sempre escalares.
+     */
+    private static function checkShape(array $in): void
+    {
+        $nested = ['textos' => 2, 'modelos' => 2, 'etapas' => 2, 'numeros_teste' => 1];
+        $walk = static function ($v, int $depth) use (&$walk): bool {
+            if (!is_array($v)) {
+                return $v === null || is_scalar($v);
+            }
+            if ($depth === 0) {
+                return false;
+            }
+            foreach ($v as $x) {
+                if (!$walk($x, $depth - 1)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        foreach ($in as $k => $v) {
+            if (!$walk($v, $nested[$k] ?? 0)) {
+                throw new \InvalidArgumentException('Campo com formato inválido: ' . preg_replace('/[^a-z_]/', '', (string)$k));
+            }
+        }
     }
 
     private function dashboard(): array
@@ -131,8 +163,8 @@ final class Api
                     $eligible[] = $it;
                 }
             }
-            $previewItems = $eligible ?: $items;
-            $preview = $previewStage ? Templates::build($s, $previewStage['codigo'], $previewItems) : null;
+            // Sem nenhum pacote elegível (sem telefone, inativo, sem autorização…): mostra o motivo, não a prévia.
+            $preview = ($previewStage && $eligible) ? Templates::build($s, $previewStage['codigo'], $eligible) : null;
             $phone = Format::phone($first['telefone']);
             $entry = [
                 'cliente_id' => $first['cliente_id'],
@@ -326,7 +358,13 @@ final class Api
         $errors = Templates::validate($text, $group);
         $s = $this->app->settings();
         // Prévia com o texto em edição, sem salvar.
-        $items = Engine::sampleItems('5531999990000', $this->app->clock()->now(), $group);
+        $dias = 0;
+        foreach (Stages::all($s) as $st) {
+            if ($st['codigo'] === $stage) {
+                $dias = $st['dias'];
+            }
+        }
+        $items = Engine::sampleItems('5531999990000', $this->app->clock()->now(), $group, $dias);
         $overrides = $s->all();
         $overrides['textos'][$stage][$group ? 'grupo' : 'individual'] = $text;
         if (isset($in['instrucoes_pagamento'])) {

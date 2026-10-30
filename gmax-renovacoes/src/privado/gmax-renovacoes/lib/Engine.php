@@ -561,7 +561,13 @@ final class Engine
         if (!in_array($stage, Stages::CODES, true)) {
             throw new \InvalidArgumentException('Etapa inválida.');
         }
-        $items = self::sampleItems($phone, $this->app->clock()->now(), $group);
+        $dias = 0;
+        foreach (Stages::all($s) as $st) {
+            if ($st['codigo'] === $stage) {
+                $dias = $st['dias'];
+            }
+        }
+        $items = self::sampleItems($phone, $this->app->clock()->now(), $group, $dias);
         $built = Templates::build($s, $stage, $items);
         $tpl = $s->get('modelos')[$stage][$built['variante']] ?? null;
         $now = $this->now();
@@ -588,9 +594,11 @@ final class Engine
     }
 
     /** Pacotes fictícios para prévias e testes. */
-    public static function sampleItems(string $phone, \DateTimeImmutable $now, bool $group): array
+    public static function sampleItems(string $phone, \DateTimeImmutable $now, bool $group, int $stageDays = -3): array
     {
-        $base = ['cliente_id' => 0, 'cliente_nome' => 'Cliente Teste', 'telefone' => $phone, 'servico' => 'Lista', 'vencimento' => $now->modify('+3 days')->format('Y-m-d')];
+        // Vencimento coerente com a etapa: "antes" = hoje + N, "dia" = hoje, "depois" = hoje − N.
+        $due = $now->modify(($stageDays > 0 ? '-' : '+') . abs($stageDays) . ' days')->format('Y-m-d');
+        $base = ['cliente_id' => 0, 'cliente_nome' => 'Cliente Teste', 'telefone' => $phone, 'servico' => 'Lista', 'vencimento' => $due];
         $items = [$base + ['pacote_id' => 0, 'pacote_nome' => 'Pacote Família', 'pontos' => 4, 'ciclo' => 'Trimestral', 'valor_centavos' => 12000]];
         if ($group) {
             $items[] = $base + ['pacote_id' => 0, 'pacote_nome' => 'Pacote Quarto', 'pontos' => 1, 'ciclo' => 'Mensal', 'valor_centavos' => 3500];

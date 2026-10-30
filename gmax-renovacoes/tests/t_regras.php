@@ -787,3 +787,33 @@ test('instruções de pagamento e rodapé não aceitam links nem senhas', functi
     $r = $api->handle('salvar_config', ['instrucoes_pagamento' => 'Pix (chave e-mail): gumaxskins@gmail.com']);
     eq(true, $r['ok'], 'e-mail como chave aceito');
 });
+
+echo "Correções do teste independente\n";
+
+test('API rejeita formatos inválidos e cliente inexistente', function (T $t) {
+    $api = new \GmaxRenov\Api($t->app);
+    foreach ([['pausa_cliente', ['cliente_id' => 999999, 'pausado' => true]], ['pausa_cliente', []],
+              ['historico', ['status' => ['x']]], ['clientes', ['q' => ['a']]], ['enviar_teste', ['numero' => [1]]],
+              ['salvar_config', ['textos' => ['antes' => ['individual' => ['a']]]]]] as [$action, $in]) {
+        $failed = false;
+        try {
+            $api->handle($action, $in);
+        } catch (InvalidArgumentException $e) {
+            $failed = true;
+        }
+        check($failed, "$action recusado com entrada inválida");
+    }
+    eq(0, (int)$t->app->db()->value('SELECT COUNT(*) FROM gr_contatos'), 'nenhum contato criado');
+    eq(false, strpos($t->app->settings()->get('textos')['antes']['individual'], 'Array') === 0, 'texto não virou "Array"');
+});
+
+test('prévias usam a data coerente com cada etapa', function (T $t) {
+    $api = new \GmaxRenov\Api($t->app);
+    $tx = $t->app->settings()->get('textos');
+    $r = $api->handle('previa', ['etapa' => 'dia', 'variante' => 'individual', 'texto' => $tx['dia']['individual']]);
+    check(strpos($r['corpo'], 'vence hoje, 10/11/2026') !== false, 'no dia: hoje');
+    $r = $api->handle('previa', ['etapa' => 'depois', 'variante' => 'individual', 'texto' => $tx['depois']['individual']]);
+    check(strpos($r['corpo'], 'foi ontem, 09/11/2026') !== false, 'depois: ontem');
+    $r = $api->handle('previa', ['etapa' => 'antes', 'variante' => 'individual', 'texto' => $tx['antes']['individual']]);
+    check(strpos($r['corpo'], 'vence em 13/11/2026, daqui a 3 dias') !== false, 'antes: +3');
+});
