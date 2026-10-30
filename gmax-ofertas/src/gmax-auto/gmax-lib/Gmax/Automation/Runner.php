@@ -23,6 +23,9 @@ use Throwable;
 final class Runner
 {
     public const TIME_BUDGET = 45.0;
+    /** Orçamento total de uma chamada do Cron; uma tarefa só começa se sobrar pelo menos MIN_START. */
+    public const CALL_BUDGET = 150.0;
+    public const MIN_START = 30.0;
     public const STALE_MINUTES = 15;
 
     public static function lockFile(): string
@@ -47,17 +50,18 @@ final class Runner
             Queue::heartbeat($pdo, 'automacoes', 'ativo');
             self::closeStale($pdo);
             $out = [];
-            $deadline = microtime(true) + self::TIME_BUDGET;
+            $callEnd = microtime(true) + self::CALL_BUDGET;
             foreach (self::jobs($pdo) as $job) {
                 if (!(int)$job['enabled']) {
                     continue;
                 }
                 foreach (Schedule::dueSlots($pdo, $job) as $slot) {
-                    if (microtime(true) > $deadline) {
-                        $out[] = ['job' => $job['job'], 'slot' => $slot, 'resultado' => 'adiado_prazo'];
-                        break 2;
+                    if ($callEnd - microtime(true) < self::MIN_START) {
+                        // Sem registrar a execução: o próximo Cron pega este horário (dentro da janela de atraso).
+                        $out[] = ['job' => $job['job'], 'slot' => $slot, 'resultado' => 'adiado_proxima_chamada'];
+                        continue;
                     }
-                    $out[] = self::execute($pdo, $job, $slot, 'agendado', $actor, $deadline);
+                    $out[] = self::execute($pdo, $job, $slot, 'agendado', $actor, min($callEnd, microtime(true) + self::TIME_BUDGET));
                 }
             }
             return ['resultado' => 'ok', 'execucoes' => $out];

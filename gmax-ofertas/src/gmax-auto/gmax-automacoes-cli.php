@@ -11,9 +11,14 @@ declare(strict_types=1);
  *   pausar | retomar              Pausa geral das automações
  *   aprovacao-automatica --autorizar AUTORIZO_APROVACAO_AUTOMATICA | --desativar
  */
-if (PHP_SAPI !== 'cli') {
-    http_response_code(403);
-    exit('Apenas CLI');
+// Aceita o binário CGI usado por alguns Crons de cPanel, mas nunca uma requisição web.
+if (PHP_SAPI !== 'cli' && !(str_starts_with(PHP_SAPI, 'cgi') && empty($_SERVER['REQUEST_METHOD']))) {
+    if (!empty($_SERVER['REQUEST_METHOD'])) {
+        http_response_code(403);
+        exit('Apenas CLI');
+    }
+    fwrite(STDERR, 'ERRO: execute com o PHP de linha de comando (/usr/local/bin/php)' . PHP_EOL);
+    exit(1);
 }
 require __DIR__ . '/gmax-lib/bootstrap.php';
 

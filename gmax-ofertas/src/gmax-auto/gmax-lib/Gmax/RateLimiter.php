@@ -16,9 +16,14 @@ final class RateLimiter extends Http
     {
     }
 
+    public static function day(): string
+    {
+        return Time::now()->setTimezone(new \DateTimeZone(Config::TZ))->format('Y-m-d');
+    }
+
     private function acquire(): void
     {
-        $day = Time::now()->format('Y-m-d');
+        $day = self::day();
         $limit = Settings::int($this->pdo, 'api_limite_diario', 500);
         $row = Db::one($this->pdo, 'SELECT * FROM gmax3_api_usage WHERE connector=? AND day=?', [$this->connector, $day]);
         if ($row && (int)$row['requests'] >= $limit) {
@@ -38,7 +43,7 @@ final class RateLimiter extends Http
     private function record(?string $error): void
     {
         if ($error !== null) {
-            Db::run($this->pdo, 'UPDATE gmax3_api_usage SET failures=failures+1, last_error=? WHERE connector=? AND day=?', [mb_substr($error, 0, 200), $this->connector, Time::now()->format('Y-m-d')]);
+            Db::run($this->pdo, 'UPDATE gmax3_api_usage SET failures=failures+1, last_error=? WHERE connector=? AND day=?', [mb_substr($error, 0, 200), $this->connector, self::day()]);
         }
     }
 

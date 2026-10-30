@@ -81,6 +81,9 @@ final class FakeMarketConnector implements Gmax\Connectors\Discovery, Gmax\Conne
     {
         $this->fetches++;
         $r = $this->fetchMap[$row['external_id']] ?? ['ok' => false, 'error' => 'sem resposta', 'data' => []];
+        if ($r instanceof Closure) {
+            $r = $r($row);
+        }
         if ($r instanceof Throwable) {
             throw $r;
         }

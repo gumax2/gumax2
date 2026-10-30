@@ -71,7 +71,8 @@ final class MercadoLivre implements Connector, Discovery
         if (!is_array($j) || ($j['id'] ?? '') !== $m[1]) {
             return ['ok' => false, 'error' => 'Resposta inesperada da API', 'data' => []];
         }
-        $data = ['title' => (string)($j['title'] ?? '')];
+        // Esta fonte informa o preço original quando existe: ausência significa "sem desconto".
+        $data = ['title' => (string)($j['title'] ?? ''), 'reports_original' => true];
         if (isset($j['price']) && is_numeric($j['price']) && $j['price'] > 0) {
             $data['price_promo_cents'] = (int)round((float)$j['price'] * 100);
         }

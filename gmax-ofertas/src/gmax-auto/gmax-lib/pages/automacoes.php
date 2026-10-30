@@ -13,7 +13,7 @@ $kpi = Db::one($pdo, "SELECT COUNT(*) runs, COALESCE(SUM(found),0) found, COALES
 $alerts = Db::all($pdo, "SELECT a.*, c.title FROM gmax3_alerts a LEFT JOIN gmax3_catalog c ON c.id=a.catalog_id WHERE a.resolved_at IS NULL ORDER BY a.last_seen_at DESC LIMIT 60");
 $alertCount = (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_alerts WHERE resolved_at IS NULL');
 $runs = Db::all($pdo, 'SELECT r.*, j.name FROM gmax3_job_runs r LEFT JOIN gmax3_jobs j ON j.job=r.job ORDER BY r.id DESC LIMIT 30');
-$usage = Db::all($pdo, 'SELECT * FROM gmax3_api_usage WHERE day=?', [Time::now()->format('Y-m-d')]);
+$usage = Db::all($pdo, 'SELECT * FROM gmax3_api_usage WHERE day=?', [\Gmax\RateLimiter::day()]);
 $usageBy = array_column($usage, null, 'connector');
 $top = array_slice(array_values(array_filter(Ranking::list($pdo, [], 60), static fn($r) => in_array($r['item']['validation_status'], ['aprovado', 'aguardando_validacao'], true))), 0, 6);
 $todayQueue = Queue::countOnDay($pdo, Time::now()->setTimezone(new DateTimeZone('America/Sao_Paulo')));
@@ -33,6 +33,7 @@ $heart = Db::one($pdo, "SELECT * FROM gmax3_heartbeats WHERE name='automacoes'")
       <span class="pill pill-ok">Automações ativas</span>
       <?= View::actionButton('auto_pause', ['back' => 'automacoes'], 'Pausa geral das automações', 'btn btn-danger', 'Pausar todas as automações agendadas?') ?>
     <?php endif; ?>
+    <?php if (!$paused && (!$heart || \Gmax\Time::hoursSince($heart['last_at']) > 0.5)): ?><span class="pill pill-warn">O Cron do executor não chama há mais de 30 min</span><?php endif; ?>
     <span class="muted small">Cron: <?= $heart ? 'última chamada ' . View::e(Time::show($heart['last_at'])) . ' (' . View::e($heart['detail']) . ')' : 'ainda não configurado' ?></span>
   </div>
   <p class="muted small">As automações pesquisam, revisam e selecionam ofertas. <strong>Nenhuma delas envia mensagens</strong>: a publicação continua bloqueada pelas travas da fila (pausa de envios, autorização da automação comercial, arquivo de ativação e reconciliação). Aprovação automática: <strong><?= Settings::get($pdo, 'aprovacao_automatica', '0') === '1' ? 'AUTORIZADA (via linha de comando)' : 'desligada — aprovação manual' ?></strong>.</p>

@@ -124,7 +124,7 @@ final class Jobs
         $item['price_source'] = 'api_' . $item['marketplace'];
         $id = Db::immediate($pdo, static fn() => Catalog::insert($pdo, $item, 'rascunho', $actor));
         if (!empty($item['price_promo_cents'])) {
-            Catalog::markVerifiedByApi($pdo, $id, $item['marketplace'], $actor);
+            Catalog::markVerifiedByApi($pdo, $id, $item['marketplace'], $actor, (int)$item['price_promo_cents']);
         }
         if (empty($item['affiliate_url'])) {
             Alerts::raise($pdo, 'sem_link', 'Gere o link afiliado oficial para: ' . $item['title'], $id);
@@ -179,16 +179,26 @@ final class Jobs
     {
         $id = (int)$r['id'];
         $fields = array_intersect_key($d, array_flip(['price_promo_cents', 'price_original_cents', 'availability', 'variation_pending', 'variation_note', 'commission_rate']));
-        if (array_key_exists('price_promo_cents', $d) && !array_key_exists('price_original_cents', $d)) {
-            $fields['price_original_cents'] = null; // a fonte oficial não informou "De": não manter um "De" antigo
+        if (!empty($d['reports_original']) && array_key_exists('price_promo_cents', $d) && !array_key_exists('price_original_cents', $d)) {
+            // Fonte que informa "De" quando existe e não informou: não há desconto vigente.
+            $fields['price_original_cents'] = null;
         }
-        $res = Db::immediate($pdo, static fn() => Catalog::update($pdo, $r, $fields, 'api:' . $r['marketplace'], false));
+        $res = Db::immediate($pdo, static function () use ($pdo, $id, $fields) {
+            $fresh = Catalog::get($pdo, $id); // relido dentro da trava: edições concorrentes não são sobrescritas às cegas
+            return $fresh ? Catalog::update($pdo, $fresh, $fields, 'api:' . $fresh['marketplace'], false) : ['changed' => [], 'status' => ''];
+        });
         if (!empty($d['price_promo_cents'])) {
-            Catalog::markVerifiedByApi($pdo, $id, $r['marketplace'], $actor);
-            Alerts::clear($pdo, 'preco_nao_confirmado', $id);
+            if (Catalog::markVerifiedByApi($pdo, $id, $r['marketplace'], $actor, (int)$d['price_promo_cents'])) {
+                Alerts::clear($pdo, 'preco_nao_confirmado', $id);
+            } else {
+                Alerts::raise($pdo, 'preco_nao_confirmado', 'Preço alterado durante a revisão: confirme novamente', $id);
+            }
         }
         if (($d['availability'] ?? null) === 'indisponivel') {
             Alerts::raise($pdo, 'indisponivel', 'A API informa anúncio pausado/indisponível', $id);
+            if (Catalog::get($pdo, $id)['validation_status'] === 'aprovado') {
+                Catalog::setStatus($pdo, $id, 'aguardando_validacao', 'automacao');
+            }
             foreach (Db::all($pdo, "SELECT id FROM gmax3_pub_queue WHERE catalog_id=? AND state='agendado'", [$id]) as $q) {
                 Queue::cancel($pdo, (int)$q['id'], 'automacao');
             }

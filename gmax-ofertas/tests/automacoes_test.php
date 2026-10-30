@@ -170,15 +170,40 @@ test('Preço igual confirmado pela API: renova a confirmação e mantém aprova�
     ok(Time::hoursSince($p['price_verified_at']) < 1, 'confirmação renovada');
     ok((int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_price_history WHERE catalog_id=? AND verified=1 AND source='api_shopee'", [$id]) >= 2, 'histórico verificado');
 });
-test('Preço mudou: atualiza De/Por, retira aprovação; "De" não informado pela API não é mantido', function () use ($ready, $approvedShopee) {
+test('Preço mudou: atualiza Por e retira aprovação; "De" só é limpo por fonte que informa preço original', function () use ($ready, $approvedShopee) {
     $pdo = $ready();
     $id = $approvedShopee($pdo, '22812345602');
     Registry::override('shopee', new FakeMarketConnector('shopee', fetchMap: ['22812345602' => ['ok' => true, 'error' => null, 'data' => ['price_promo_cents' => 5990]]]));
     Runner::runManual($pdo, 'revisao_precos', 't');
     $p = Catalog::get($pdo, $id);
     eq(5990, (int)$p['price_promo_cents']);
-    eq(null, $p['price_original_cents'], 'sem "De" da fonte oficial');
+    eq(9990, (int)$p['price_original_cents'], 'Shopee não informa "De": o valor cadastrado é mantido');
     eq('aguardando_validacao', $p['validation_status']);
+    Registry::override('shopee', new FakeMarketConnector('shopee', fetchMap: ['22812345602' => ['ok' => true, 'error' => null, 'data' => ['price_promo_cents' => 5990, 'reports_original' => true]]]));
+    Runner::runManual($pdo, 'revisao_precos', 't');
+    eq(null, Catalog::get($pdo, $id)['price_original_cents'], 'fonte que informa "De" e não informou: sem desconto vigente');
+});
+test('Mesmo preço da API não retira aprovação de "De" cadastrado manualmente (revisão repetida)', function () use ($ready, $approvedShopee) {
+    $pdo = $ready();
+    $id = $approvedShopee($pdo, '22812345602');
+    Registry::override('shopee', new FakeMarketConnector('shopee', fetchMap: ['22812345602' => ['ok' => true, 'error' => null, 'data' => ['price_promo_cents' => 4990]]]));
+    Runner::runManual($pdo, 'revisao_precos', 't');
+    Runner::runManual($pdo, 'revisao_precos', 't');
+    eq('aprovado', Catalog::get($pdo, $id)['validation_status']);
+    eq(9990, (int)Catalog::get($pdo, $id)['price_original_cents']);
+});
+test('Edição concorrente durante a revisão não é carimbada como confirmada pela API', function () use ($ready, $approvedShopee) {
+    $pdo = $ready();
+    $id = $approvedShopee($pdo, '22812345602');
+    Db::run($pdo, "UPDATE gmax3_catalog SET price_verified_at='2026-01-01 00:00:00' WHERE id=?", [$id]);
+    Registry::override('shopee', new FakeMarketConnector('shopee', fetchMap: ['22812345602' => function () use ($pdo, $id) {
+        Db::run($pdo, 'UPDATE gmax3_catalog SET price_promo_cents=1234 WHERE id=?', [$id]); // admin edita no meio da revisão
+        return ['ok' => true, 'error' => null, 'data' => ['price_promo_cents' => 4990]];
+    }]));
+    Runner::runManual($pdo, 'revisao_precos', 't');
+    $p = Catalog::get($pdo, $id);
+    ok($p['price_verified_by'] !== 'api:shopee' || (int)$p['price_promo_cents'] === 4990, 'nunca confirma um preço que a API não devolveu');
+    ok(Time::hoursSince($p['price_verified_at']) === null || (int)$p['price_promo_cents'] === 4990, 'sem carimbo indevido');
 });
 test('API falhou: dados não mudam, alerta aberto e publicação bloqueada pelo preço vencido', function () use ($ready, $approvedShopee) {
     $pdo = $ready();
@@ -199,6 +224,7 @@ test('Anúncio pausado: indisponível, agendamento cancelado, alerta', function 
     Registry::override('shopee', new FakeMarketConnector('shopee', fetchMap: ['22812345602' => ['ok' => true, 'error' => null, 'data' => ['price_promo_cents' => 4990, 'price_original_cents' => 9990, 'availability' => 'indisponivel']]]));
     Runner::runManual($pdo, 'revisao_precos', 't');
     eq('indisponivel', Catalog::get($pdo, $id)['availability']);
+    eq('aguardando_validacao', Catalog::get($pdo, $id)['validation_status'], 'perde a aprovação');
     eq('cancelado', Db::value($pdo, 'SELECT state FROM gmax3_pub_queue WHERE catalog_id=?', [$id]));
     eq(1, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_alerts WHERE kind='indisponivel' AND catalog_id=?", [$id]));
 });
