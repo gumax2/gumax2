@@ -32,6 +32,8 @@ Nenhum arquivo do sistema antigo (`app.php`, `index.php`, `cron.php`, publicador
   - **Confere:** ok.
   - **Diverge** (outro anúncio ou link inexistente): **bloqueado**.
   - **Indeterminado** (sem resposta ou destino sem ID): fica marcado para você conferir.
+  - **Regra de gravação:** só entra sem pergunta o link com resultado **Confere**. Links não verificados ou indeterminados só são associados se você marcar **"Conferi manualmente que cada link sem verificação 'confere' leva ao produto da linha"**. Sem essa marcação, eles são ignorados e listados.
+  - **Concorrência:** aplicar, descartar, desfazer e verificar são protegidos contra clique duplo e contra duas abas abertas ao mesmo tempo.
 - **Registro:** data, usuário (`admin`), contagens e cada link alterado ficam na auditoria (Sistema → Auditoria) e no próprio lote.
 - **Desfazer:** restaura os links anteriores. Um produto editado depois do lote é preservado e aparece listado.
 
@@ -51,8 +53,10 @@ Nenhum arquivo do sistema antigo (`app.php`, `index.php`, `cron.php`, publicador
 2. Na prévia, confira os contadores e a coluna **Observações**:
    - o esperado são **18 links novos** e 0 erros;
    - qualquer linha em vermelho mostra o motivo e **não é aplicada**.
-3. (Recomendado) Clique em **Verificar destino dos links**. Linhas **Diverge** viram erro. Linhas **Indeterminado** podem ser conferidas abrindo o link.
-4. Clique em **Associar links**. A mensagem mostra quantos links foram associados e o nome do backup feito antes.
+3. Clique em **Verificar destino dos links** (leva alguns segundos por link). Linhas **Diverge** viram erro. Linhas **Indeterminado** você confere abrindo o link.
+   - Se todas derem **Confere**: clique em **Associar links**.
+   - Se alguma ficar indeterminada (por exemplo, a HostGator bloqueia saída de rede): abra esses links, confira o produto e marque a caixa de **conferência manual** antes de **Associar links**.
+4. Ao clicar em **Associar links**: A mensagem mostra quantos links foram associados e o nome do backup feito antes.
 5. **Validação:**
    - **Ofertas** → filtro Mercado Livre: os 18 produtos mostram o link "✓ oficial" e continuam como **Rascunho**;
    - **Links afiliados** → "Produtos sem link afiliado": restam **7** dos 25;

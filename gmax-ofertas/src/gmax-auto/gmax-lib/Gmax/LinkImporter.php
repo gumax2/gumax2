@@ -140,7 +140,12 @@ final class LinkImporter
         if ($key === null) {
             return ['rejeitado', null, $payload, $e, $w];
         }
-        $row = Db::one($pdo, "SELECT * FROM gmax3_catalog WHERE marketplace='mercadolivre' AND external_id IN (?, ?)", ['item:' . $key, 'catalogo:' . $key]);
+        $found = Db::all($pdo, "SELECT * FROM gmax3_catalog WHERE marketplace='mercadolivre' AND external_id IN (?, ?)", ['item:' . $key, 'catalogo:' . $key]);
+        if (count($found) > 1) {
+            $e[] = 'Mais de um produto cadastrado com o número ' . $key . ' (#' . implode(', #', array_column($found, 'id')) . '): associe manualmente';
+            return ['rejeitado', null, $payload, $e, $w];
+        }
+        $row = $found[0] ?? null;
         if (!$row) {
             $e[] = 'Anúncio ' . $key . ' não está cadastrado: nenhum produto é criado por esta importação';
             return ['rejeitado', null, $payload, $e, $w];
@@ -194,32 +199,46 @@ final class LinkImporter
         return round(count(array_intersect($x, $y)) / min(count($x), count($y)), 2);
     }
 
-    /** Consulta o destino de cada link da prévia (opcional; requer acesso de saída do servidor). */
+    /**
+     * Consulta o destino de cada link da prévia (opcional; requer acesso de saída do servidor).
+     * As consultas de rede acontecem ANTES de qualquer gravação; os resultados só são gravados
+     * se o lote ainda estiver em prévia.
+     */
     public static function verify(PDO $pdo, int $batchId, LinkVerifier $verifier, string $actor): array
     {
-        $batch = self::batch($pdo, $batchId);
-        if ($batch['status'] !== 'previa') {
+        if (self::batch($pdo, $batchId)['status'] !== 'previa') {
             throw new RuntimeException('Somente prévias podem ser verificadas');
         }
-        $res = [LinkVerifier::CONFERE => 0, LinkVerifier::DIVERGE => 0, LinkVerifier::INDETERMINADO => 0];
-        foreach (Db::all($pdo, "SELECT * FROM gmax3_import_items WHERE batch_id=? AND action IN ('novo_link','alteracao','sem_alteracao') ORDER BY line", [$batchId]) as $it) {
+        $items = Db::all($pdo, "SELECT i.*, c.external_id AS ext FROM gmax3_import_items i LEFT JOIN gmax3_catalog c ON c.id=i.catalog_id
+            WHERE i.batch_id=? AND i.action IN ('novo_link','alteracao','sem_alteracao') ORDER BY i.line", [$batchId]);
+        @set_time_limit(60 + 20 * count($items));
+        $checks = [];
+        foreach ($items as $it) {
             $payload = json_decode($it['payload_json'], true);
-            $ext = (string)Db::value($pdo, 'SELECT external_id FROM gmax3_catalog WHERE id=?', [$it['catalog_id']]);
-            $v = $verifier->check((string)$payload['url_afiliado'], $ext);
-            $v['verificado_em'] = Time::nowSql();
-            $payload['verificacao'] = $v;
-            $res[$v['resultado']]++;
-            $action = $it['action'];
-            $errors = json_decode((string)$it['errors_json'], true) ?: [];
-            if ($v['resultado'] === LinkVerifier::DIVERGE) {
-                $action = 'rejeitado';
-                $errors[] = 'Verificação do destino: ' . $v['detalhe'];
-            }
-            Db::run($pdo, 'UPDATE gmax3_import_items SET action=?, payload_json=?, errors_json=? WHERE id=?', [$action, self::json($payload), $errors ? self::json($errors) : null, $it['id']]);
+            $checks[$it['id']] = $verifier->check((string)$payload['url_afiliado'], (string)$it['ext']) + ['verificado_em' => Time::nowSql()];
         }
-        self::recount($pdo, $batchId);
-        Audit::log($pdo, $actor, 'links_lote_verificado', 'import_batch', $batchId, $res);
-        return $res;
+        return Db::immediate($pdo, static function (PDO $pdo) use ($batchId, $items, $checks, $actor) {
+            if (self::batch($pdo, $batchId)['status'] !== 'previa') {
+                throw new RuntimeException('O lote foi aplicado ou descartado durante a verificação; resultados não gravados');
+            }
+            $res = [LinkVerifier::CONFERE => 0, LinkVerifier::DIVERGE => 0, LinkVerifier::INDETERMINADO => 0];
+            foreach ($items as $it) {
+                $v = $checks[$it['id']];
+                $payload = json_decode($it['payload_json'], true);
+                $payload['verificacao'] = $v;
+                $res[$v['resultado']]++;
+                $action = $it['action'];
+                $errors = json_decode((string)$it['errors_json'], true) ?: [];
+                if ($v['resultado'] === LinkVerifier::DIVERGE) {
+                    $action = 'rejeitado';
+                    $errors[] = 'Verificação do destino: ' . $v['detalhe'];
+                }
+                Db::run($pdo, 'UPDATE gmax3_import_items SET action=?, payload_json=?, errors_json=? WHERE id=?', [$action, self::json($payload), $errors ? self::json($errors) : null, $it['id']]);
+            }
+            self::recount($pdo, $batchId);
+            Audit::log($pdo, $actor, 'links_lote_verificado', 'import_batch', $batchId, $res);
+            return $res;
+        });
     }
 
     /**
@@ -227,14 +246,19 @@ final class LinkImporter
      * Produtos continuam no mesmo estado (rascunho continua rascunho); um produto aprovado
      * que tiver o link trocado volta para "aguardando validação" (nunca aprovação automática).
      */
-    public static function apply(PDO $pdo, int $batchId, bool $replace, string $actor): array
+    public static function apply(PDO $pdo, int $batchId, bool $replace, string $actor, bool $acceptUnverified = false): array
     {
         $batch = self::batch($pdo, $batchId);
         if ($batch['status'] !== 'previa') {
             throw new RuntimeException('Este lote já foi ' . $batch['status']);
         }
         $backup = Backup::create($pdo, 'antes-links-lote-' . $batchId);
-        $result = Db::immediate($pdo, static function (PDO $pdo) use ($batchId, $replace, $actor) {
+        $result = Db::immediate($pdo, static function (PDO $pdo) use ($batchId, $replace, $actor, $acceptUnverified) {
+            // Rechecagem dentro da trava: outra aba pode ter aplicado ou descartado o lote.
+            $now = self::batch($pdo, $batchId);
+            if ($now['status'] !== 'previa') {
+                throw new RuntimeException('Este lote já foi ' . $now['status']);
+            }
             $done = ['aplicados' => 0, 'substituidos' => 0, 'ignorados' => []];
             foreach (Db::all($pdo, "SELECT * FROM gmax3_import_items WHERE batch_id=? AND action IN ('novo_link','alteracao') ORDER BY line", [$batchId]) as $it) {
                 $payload = json_decode($it['payload_json'], true);
@@ -243,6 +267,11 @@ final class LinkImporter
                 // Reconfere no momento da aplicação: o catálogo pode ter mudado desde a prévia.
                 if (!$row || $row['marketplace'] !== 'mercadolivre') {
                     $done['ignorados'][] = "Linha {$it['line']}: produto não encontrado";
+                    continue;
+                }
+                // O formato meli.la não prova o destino: sem verificação "confere", exige confirmação explícita.
+                if (($payload['verificacao']['resultado'] ?? null) !== LinkVerifier::CONFERE && !$acceptUnverified) {
+                    $done['ignorados'][] = "Linha {$it['line']}: destino do link não verificado (verifique ou confirme a conferência manual)";
                     continue;
                 }
                 if ($it['action'] === 'alteracao' && !$replace) {
@@ -270,7 +299,7 @@ final class LinkImporter
             Db::run($pdo, "UPDATE gmax3_import_batches SET status='aplicado', applied_at=?, note=? WHERE id=?", [
                 Time::nowSql(), $done['ignorados'] ? implode("\n", $done['ignorados']) : null, $batchId,
             ]);
-            Audit::log($pdo, $actor, 'links_lote_aplicado', 'import_batch', $batchId, $done);
+            Audit::log($pdo, $actor, 'links_lote_aplicado', 'import_batch', $batchId, $done + ['conferencia_manual_confirmada' => $acceptUnverified]);
             return $done;
         });
         return $result + ['backup' => basename($backup['file'])];
@@ -284,6 +313,9 @@ final class LinkImporter
             throw new RuntimeException('Somente lotes aplicados podem ser desfeitos');
         }
         return Db::immediate($pdo, static function (PDO $pdo) use ($batchId, $actor) {
+            if (self::batch($pdo, $batchId)['status'] !== 'aplicado') {
+                throw new RuntimeException('Este lote já foi desfeito');
+            }
             $res = ['restaurados' => 0, 'ignorados' => []];
             foreach (Db::all($pdo, 'SELECT * FROM gmax3_import_items WHERE batch_id=? AND after_hash IS NOT NULL ORDER BY line DESC', [$batchId]) as $it) {
                 $row = Catalog::get($pdo, (int)$it['catalog_id']);

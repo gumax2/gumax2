@@ -322,7 +322,7 @@ test('Importar links em lote: botão na aba, prévia, CSRF, aplicar e desfazer',
     $b = Db::one($pdo, 'SELECT * FROM gmax3_import_batches WHERE id=?', [$batch]);
     eq(17, (int)$b['inserted']);
     eq(1, (int)$b['updated']);
-    $r = follow(http('POST', 'painel.php', ['action' => 'link_batch_apply', 'batch' => $batch, 'csrf' => $t, 'back' => 'lote_links']));
+    $r = follow(http('POST', 'painel.php', ['action' => 'link_batch_apply', 'batch' => $batch, 'accept_unverified' => '1', 'csrf' => $t, 'back' => 'lote_links']));
     ok(str_contains($r['body'], 'Links associados: 17 novo(s), 0 substituído(s)'), substr(strip_tags($r['body']), 0, 300));
     eq('https://meli.la/Mouse01', Db::value($pdo, "SELECT affiliate_url FROM gmax3_catalog WHERE external_id='item:MLB4047815501'"), 'sem autorização não substitui');
     eq($before, hash('sha256', json_encode($pdo->query('SELECT id, price_original_cents, price_promo_cents, payment_condition, availability, validation_status FROM gmax3_catalog ORDER BY id')->fetchAll())), 'preço, condição, disponibilidade e estado intactos');

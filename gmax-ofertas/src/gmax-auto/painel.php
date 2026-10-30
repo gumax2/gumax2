@@ -142,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 View::flash($r['diverge'] ? 'aviso' : 'ok', "Verificação concluída: {$r['confere']} confere(m), {$r['diverge']} diverge(m) (bloqueados), {$r['indeterminado']} indeterminado(s).");
                 gmax_redirect('lote_links', ['id' => gmax_post_int('batch')]);
             case 'link_batch_apply':
-                $r = LinkImporter::apply($pdo, gmax_post_int('batch'), !empty($_POST['replace']), $actor);
+                $r = LinkImporter::apply($pdo, gmax_post_int('batch'), !empty($_POST['replace']), $actor, !empty($_POST['accept_unverified']));
                 View::flash($r['ignorados'] ? 'aviso' : 'ok', "Links associados: {$r['aplicados']} novo(s), {$r['substituidos']} substituído(s). Backup prévio: {$r['backup']}. Nenhum produto foi aprovado ou publicado."
                     . ($r['ignorados'] ? ' Não aplicados: ' . implode('; ', array_slice($r['ignorados'], 0, 10)) : ''));
                 gmax_redirect('lote_links', ['id' => gmax_post_int('batch')]);

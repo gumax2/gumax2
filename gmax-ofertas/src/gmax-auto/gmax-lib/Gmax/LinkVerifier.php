@@ -27,7 +27,11 @@ final class LinkVerifier
     public function check(string $url, string $expected): array
     {
         $current = $url;
+        $deadline = microtime(true) + 15; // orçamento total por link
         for ($hop = 0; $hop < 5; $hop++) {
+            if (microtime(true) > $deadline) {
+                return self::result(self::INDETERMINADO, 'Tempo esgotado ao seguir o link', $current);
+            }
             $host = strtolower((string)parse_url($current, PHP_URL_HOST));
             if (!preg_match(self::ALLOWED_HOSTS, $host) || strtolower((string)parse_url($current, PHP_URL_SCHEME)) !== 'https') {
                 return self::result(self::INDETERMINADO, 'Redirecionamento para domínio não esperado: ' . $host, $current);
@@ -37,7 +41,7 @@ final class LinkVerifier
                 return self::compare($found, $expected, $current);
             }
             try {
-                $r = $this->http->probe($current);
+                $r = $this->http->probe($current, 6);
             } catch (\Throwable $e) {
                 return self::result(self::INDETERMINADO, 'Consulta não realizada: ' . $e->getMessage(), null);
             }

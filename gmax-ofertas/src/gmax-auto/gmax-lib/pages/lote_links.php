@@ -31,12 +31,13 @@ $verifLabel = [LinkVerifier::CONFERE => ['ok', 'Destino confere'], LinkVerifier:
       <?= View::actionButton('link_batch_verify', ['batch' => $id, 'back' => 'lote_links'], 'Verificar destino dos links', 'btn') ?>
       <form method="post" action="painel.php" class="inline-form" data-loading data-confirm="Associar os links válidos desta prévia aos produtos? (um backup é feito antes)">
         <?= View::csrfField() ?><input type="hidden" name="action" value="link_batch_apply"><input type="hidden" name="batch" value="<?= (int)$id ?>"><input type="hidden" name="back" value="lote_links">
+        <label class="check"><input type="checkbox" name="accept_unverified" value="1"> Conferi manualmente que cada link sem verificação "confere" leva ao produto da linha</label>
         <?php if ((int)$b['updated'] > 0): ?><label class="check"><input type="checkbox" name="replace" value="1"> Substituir links existentes (<?= (int)$b['updated'] ?>)</label><?php endif; ?>
         <button type="submit" class="btn btn-primary"<?= (int)$b['inserted'] + (int)$b['updated'] === 0 ? ' disabled' : '' ?>>Associar links</button>
       </form>
       <?= View::actionButton('link_batch_discard', ['batch' => $id, 'back' => 'links'], 'Descartar prévia', 'btn btn-ghost') ?>
     </div>
-    <p class="muted small">Só o link afiliado é gravado. Preços, desconto, condição de pagamento e disponibilidade não mudam, e os produtos continuam no estado atual (rascunhos continuam rascunhos).</p>
+    <p class="muted small">Sem a verificação "Destino confere" ou a confirmação de conferência manual acima, o link <strong>não é associado</strong>. Só o link afiliado é gravado. Preços, desconto, condição de pagamento e disponibilidade não mudam, e os produtos continuam no estado atual (rascunhos continuam rascunhos).</p>
   <?php elseif ($b['status'] === 'aplicado'): ?>
     <?= View::actionButton('link_batch_revert', ['batch' => $id, 'back' => 'lote_links'], 'Desfazer: restaurar links anteriores', 'btn btn-danger', 'Restaurar os links que existiam antes deste lote?') ?>
   <?php endif; ?>

@@ -51,7 +51,7 @@ test('Aplicar: 18 links associados; preços, condição, disponibilidade e estad
     $shopee = hash('sha256', json_encode($pdo->query("SELECT * FROM gmax3_catalog WHERE marketplace='shopee' ORDER BY id")->fetchAll()));
     $legacy = t_legacy_snapshot_safe($pdo);
     $b = LinkImporter::preview($pdo, $CSV18, basename($CSV18), 'admin');
-    $r = LinkImporter::apply($pdo, $b, false, 'admin');
+    $r = LinkImporter::apply($pdo, $b, false, 'admin', true);
     eq(18, $r['aplicados']);
     ok(str_contains($r['backup'], 'antes-links-lote'), 'backup antes de aplicar');
     eq($before, $protected($pdo), 'somente o link mudou');
@@ -70,19 +70,19 @@ test('Associação independe da ordem das linhas (arquivo embaralhado dá o mesm
     $lines = array_slice(file($CSV18, FILE_IGNORE_NEW_LINES), 1);
     $lines = array_reverse($lines);
     $f = $csv($lines);
-    LinkImporter::apply($pdo, LinkImporter::preview($pdo, $f, 'x.csv', 't'), false, 't');
+    LinkImporter::apply($pdo, LinkImporter::preview($pdo, $f, 'x.csv', 't'), false, 't', true);
     eq('https://meli.la/Gx01Tst', Db::value($pdo, "SELECT affiliate_url FROM gmax3_catalog WHERE external_id='item:MLB4047815501'"));
     eq('https://meli.la/Gx07Tst', Db::value($pdo, "SELECT affiliate_url FROM gmax3_catalog WHERE external_id='item:MLB6632626272'"));
 });
 test('Reimportação do mesmo arquivo: 18 "já iguais", nenhuma alteração', function () use ($ready, $CSV18) {
     $pdo = $ready();
-    LinkImporter::apply($pdo, LinkImporter::preview($pdo, $CSV18, 'a.csv', 't'), false, 't');
+    LinkImporter::apply($pdo, LinkImporter::preview($pdo, $CSV18, 'a.csv', 't'), false, 't', true);
     $snap = hash('sha256', json_encode($pdo->query('SELECT * FROM gmax3_catalog ORDER BY id')->fetchAll()));
     $b = LinkImporter::preview($pdo, $CSV18, 'a.csv', 't');
     $batch = LinkImporter::batch($pdo, $b);
     eq(18, (int)$batch['unchanged']);
     eq(0, (int)$batch['inserted'] + (int)$batch['updated']);
-    LinkImporter::apply($pdo, $b, true, 't');
+    LinkImporter::apply($pdo, $b, true, 't', true);
     eq($snap, hash('sha256', json_encode($pdo->query('SELECT * FROM gmax3_catalog ORDER BY id')->fetchAll())), 'banco igual');
 });
 
@@ -100,7 +100,7 @@ test('Links inválidos são recusados (http, link comum, outro domínio, javascr
     foreach ($items($pdo, $b) as $line => $it) {
         eq('rejeitado', $it['action'], "linha $line");
     }
-    eq(0, LinkImporter::apply($pdo, $b, true, 't')['aplicados']);
+    eq(0, LinkImporter::apply($pdo, $b, true, 't', true)['aplicados']);
     eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE marketplace='mercadolivre' AND affiliate_url IS NOT NULL AND codigo IS NULL"));
 });
 test('ID inexistente não cria produto; ID inválido é recusado; Shopee nunca é alterada', function () use ($ready, $csv, $items) {
@@ -113,7 +113,7 @@ test('ID inexistente não cria produto; ID inválido é recusado; Shopee nunca �
     ok(str_contains((string)$it[2]['errors_json'], 'não está cadastrado'), 'inexistente');
     ok(str_contains((string)$it[3]['errors_json'], 'ID do anúncio inválido'), 'inválido');
     ok(str_contains((string)$it[4]['errors_json'], 'Shopee'), 'shopee recusada');
-    LinkImporter::apply($pdo, $b, true, 't');
+    LinkImporter::apply($pdo, $b, true, 't', true);
     eq($n, (int)$pdo->query('SELECT COUNT(*) FROM gmax3_catalog')->fetchColumn(), 'nenhum produto criado');
 });
 test('Duplicidades no arquivo: mesmo link em 2 anúncios e mesmo anúncio 2 vezes → todas as ocorrências bloqueadas', function () use ($ready, $csv, $items) {
@@ -154,16 +154,16 @@ test('Linha marcada como inválida na planilha não é aplicada', function () us
 });
 test('Substituir link existente exige autorização explícita; produto aprovado volta para validação', function () use ($ready, $csv, $items) {
     $pdo = $ready();
-    LinkImporter::apply($pdo, LinkImporter::preview($pdo, $csv(['1;MLB-4047815501;Mouse Bluetooth;https://meli.la/Old0001;OK']), 'a.csv', 't'), false, 't');
+    LinkImporter::apply($pdo, LinkImporter::preview($pdo, $csv(['1;MLB-4047815501;Mouse Bluetooth;https://meli.la/Old0001;OK']), 'a.csv', 't'), false, 't', true);
     $id = (int)Db::value($pdo, "SELECT id FROM gmax3_catalog WHERE external_id='item:MLB4047815501'");
     Db::run($pdo, "UPDATE gmax3_catalog SET validation_status='aprovado' WHERE id=?", [$id]);
     $b = LinkImporter::preview($pdo, $csv(['1;MLB-4047815501;Mouse Bluetooth;https://meli.la/New0001;OK']), 'b.csv', 't');
     eq('alteracao', $items($pdo, $b)[2]['action']);
-    $r = LinkImporter::apply($pdo, $b, false, 't');
+    $r = LinkImporter::apply($pdo, $b, false, 't', true);
     eq(0, $r['substituidos'], 'sem autorização não substitui');
     eq('https://meli.la/Old0001', Db::value($pdo, 'SELECT affiliate_url FROM gmax3_catalog WHERE id=?', [$id]));
     $b = LinkImporter::preview($pdo, $csv(['1;MLB-4047815501;Mouse Bluetooth;https://meli.la/New0001;OK']), 'c.csv', 't');
-    eq(1, LinkImporter::apply($pdo, $b, true, 't')['substituidos']);
+    eq(1, LinkImporter::apply($pdo, $b, true, 't', true)['substituidos']);
     eq('https://meli.la/New0001', Db::value($pdo, 'SELECT affiliate_url FROM gmax3_catalog WHERE id=?', [$id]));
     eq('aguardando_validacao', Db::value($pdo, 'SELECT validation_status FROM gmax3_catalog WHERE id=?', [$id]), 'aprovação retirada');
 });
@@ -189,7 +189,7 @@ test('Verificação: confere, diverge (bloqueia), 404 (bloqueia) e indeterminado
     eq('rejeitado', $it[3]['action'], 'outro anúncio bloqueado');
     eq('rejeitado', $it[4]['action'], '404 bloqueado');
     eq('novo_link', $it[5]['action'], 'indeterminado segue, marcado');
-    eq(2, LinkImporter::apply($pdo, $b, false, 't')['aplicados'], 'confere + indeterminado aplicados');
+    eq(2, LinkImporter::apply($pdo, $b, false, 't', true)['aplicados'], 'confere + indeterminado aplicados');
     ok(!in_array('https://evil', $http->calls, true), 'só domínios do Mercado Livre');
 });
 test('Verificador não segue redirecionamento para domínio estranho', function () {
@@ -197,11 +197,55 @@ test('Verificador não segue redirecionamento para domínio estranho', function 
     eq(LinkVerifier::INDETERMINADO, $v->check('https://meli.la/Abc1234', 'item:MLB4047815501')['resultado']);
 });
 
+test('Sem verificação "confere" e sem confirmação manual, nenhum link é associado', function () use ($ready, $CSV18, $csv, $items) {
+    $pdo = $ready();
+    $b = LinkImporter::preview($pdo, $CSV18, 'a.csv', 't');
+    $r = LinkImporter::apply($pdo, $b, false, 't');
+    eq(0, $r['aplicados']);
+    eq(18, count($r['ignorados']));
+    ok(str_contains($r['ignorados'][0], 'não verificado'), 'motivo');
+    $b = LinkImporter::preview($pdo, $csv(['1;MLB-4047815501;Mouse Bluetooth;https://meli.la/Ver0001;OK', '2;MLB-5381436588;Mouse Bluetooth preto;https://meli.la/Ver0002;OK']), 'v.csv', 't');
+    LinkImporter::verify($pdo, $b, new LinkVerifier(new FakeProbeHttp(['https://meli.la/Ver0001' => ['status' => 301, 'location' => 'https://produto.mercadolivre.com.br/MLB-4047815501-x-_JM', 'error' => null]])), 't');
+    eq(1, LinkImporter::apply($pdo, $b, false, 't')['aplicados'], 'só o verificado "confere" entra sem confirmação');
+});
+test('Concorrência: aplicar duas vezes, aplicar após descartar e verificar após aplicar são recusados', function () use ($ready, $CSV18) {
+    $pdo = $ready();
+    $b = LinkImporter::preview($pdo, $CSV18, 'a.csv', 't');
+    LinkImporter::apply($pdo, $b, false, 't', true);
+    throws(fn() => LinkImporter::apply($pdo, $b, false, 't', true), 'aplicado');
+    throws(fn() => LinkImporter::verify($pdo, $b, new LinkVerifier(new FakeProbeHttp([])), 't'), 'prévias');
+    $b2 = LinkImporter::preview($pdo, $CSV18, 'b.csv', 't');
+    LinkImporter::discard($pdo, $b2, 't');
+    throws(fn() => LinkImporter::apply($pdo, $b2, false, 't', true), 'descartado');
+    LinkImporter::revert($pdo, $b, 't');
+    throws(fn() => LinkImporter::revert($pdo, $b, 't'));
+});
+test('Verificação que termina depois de o lote ser aplicado não grava nada', function () use ($ready, $CSV18) {
+    $pdo = $ready();
+    $b = LinkImporter::preview($pdo, $CSV18, 'a.csv', 't');
+    $http = new class($pdo, $b) extends Gmax\Http {
+        private bool $done = false;
+        public function __construct(private PDO $pdo, private int $b) {}
+        public function probe(string $url, int $timeout = 8): array {
+            if (!$this->done) { $this->done = true; LinkImporter::apply($this->pdo, $this->b, false, 'outra-aba', true); }
+            return ['status' => 404, 'location' => null, 'error' => null];
+        }
+    };
+    throws(fn() => LinkImporter::verify($pdo, $b, new LinkVerifier($http), 't'), 'durante a verificação');
+    eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_import_items WHERE batch_id=? AND action='rejeitado'", [$b]), 'resultados não gravados');
+});
+test('Número de anúncio ambíguo (item e catálogo) é recusado', function () use ($ready, $csv, $items) {
+    $pdo = $ready();
+    $pdo->exec("INSERT INTO gmax3_catalog(marketplace,dedup_key,external_id,title,validation_status) VALUES('mercadolivre','catalogo:MLB4047815501','catalogo:MLB4047815501','Mouse catálogo','rascunho')");
+    $b = LinkImporter::preview($pdo, $csv(['1;MLB-4047815501;Mouse Bluetooth;https://meli.la/Amb0001;OK']), 'x.csv', 't');
+    ok(str_contains((string)$items($pdo, $b)[2]['errors_json'], 'Mais de um produto'), 'ambíguo');
+});
+
 echo "\n== Desfazer, auditoria e isolamento\n";
 test('Desfazer restaura os links anteriores (vazios) e preserva produto alterado depois', function () use ($ready, $CSV18) {
     $pdo = $ready();
     $b = LinkImporter::preview($pdo, $CSV18, 'a.csv', 't');
-    LinkImporter::apply($pdo, $b, false, 't');
+    LinkImporter::apply($pdo, $b, false, 't', true);
     $edited = (int)Db::value($pdo, "SELECT id FROM gmax3_catalog WHERE external_id='item:MLB4047815501'");
     Catalog::update($pdo, Catalog::get($pdo, $edited), ['affiliate_url' => 'https://meli.la/Manual1'], 't', false);
     $r = LinkImporter::revert($pdo, $b, 't');
@@ -214,7 +258,7 @@ test('Desfazer restaura os links anteriores (vazios) e preserva produto alterado
 test('Auditoria registra prévia, aplicação, cada link e o desfazer, com usuário e data', function () use ($ready, $CSV18) {
     $pdo = $ready();
     $b = LinkImporter::preview($pdo, $CSV18, 'a.csv', 'admin');
-    LinkImporter::apply($pdo, $b, false, 'admin');
+    LinkImporter::apply($pdo, $b, false, 'admin', true);
     LinkImporter::revert($pdo, $b, 'admin');
     $acts = $pdo->query("SELECT action, COUNT(*) FROM gmax3_audit WHERE actor='admin' GROUP BY action")->fetchAll(PDO::FETCH_KEY_PAIR);
     eq(1, (int)$acts['links_lote_previa']);
@@ -231,7 +275,7 @@ test('Importador de produtos não opera lotes de links (e vice-versa)', function
     throws(fn() => Importer::apply($pdo, $b, 't'), 'Links afiliados');
     throws(fn() => Importer::discard($pdo, $b, 't'));
     $p = Importer::preview($pdo, "$F/unificado.csv", 'u.csv', 't');
-    throws(fn() => LinkImporter::apply($pdo, $p, false, 't'), 'não encontrado');
+    throws(fn() => LinkImporter::apply($pdo, $p, false, 't', true), 'não encontrado');
 });
 test('Arquivo sem as colunas obrigatórias é recusado; XLSX com as mesmas colunas funciona', function () use ($ready) {
     $pdo = $ready();
