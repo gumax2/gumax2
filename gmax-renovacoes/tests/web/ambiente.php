@@ -1,16 +1,23 @@
 <?php
 /**
- * Ambiente de teste WEB (independente dos testes de regras):
- *  - monta um docroot temporário com painel/ = cópia de src/publico/painel + renovacoes-caminho.php;
- *  - copia a biblioteca privada para uma pasta temporária FORA do docroot e grava nela um config.php de teste;
- *  - adiciona login.php (só no docroot temporário) que simula o login do painel;
- *  - sobe `php -S 127.0.0.1:PORTA` em segundo plano e derruba tudo no final.
- * Requer tests/lib.php carregado antes (classe T). Nada aqui toca em src/.
+ * Ambiente de teste WEB sobre o PAINEL GMAX REAL (material de desenvolvimento, fora do repositório):
+ *  - docroot temporário com painel/ = cópia da base real (index.html, api.php, assets/...) — env GR_PAINEL_BASE;
+ *  - na CÓPIA, o $configPath fixo do api.php passa a apontar para um config.php temporário do painel
+ *    (dsn do banco grtest_* do teste, require_https=false, setup_secret aleatório);
+ *  - arquivos públicos do módulo + renovacoes-caminho.php; index.html recebe o PanelMenuPatch;
+ *  - a biblioteca privada é copiada para fora do docroot e o config.php do módulo usa db.config_painel
+ *    (mesmo config do painel: credenciais reaproveitadas, nada copiado);
+ *  - login pelo fluxo REAL: api.php action=status (CSRF) → setup (1ª vez) / login.
+ *  - sobe `php -S 127.0.0.1:PORTA` e derruba tudo no final. Nada aqui toca em src/ nem no repositório.
+ * Requer tests/lib.php carregado antes (classe T).
  */
 declare(strict_types=1);
 
 final class GrWeb
 {
+    public const ADMIN_USER = 'admin.teste';
+    public const ADMIN_PASS = 'senha-de-teste-forte-123';
+
     private static ?GrWeb $inst = null;
 
     public string $dir;
@@ -18,9 +25,23 @@ final class GrWeb
     public string $lib;
     public string $base;
     public string $errorLog;
+    public string $panelConfig;
+    public string $setupSecret;
+    public string $indexOriginal;
     public array $config = [];
+    public array $panelCfg = [];
     /** @var resource|null */
     private $proc = null;
+
+    public static function panelBase(): string
+    {
+        return getenv('GR_PAINEL_BASE') ?: '/tmp/claude-0/-home-user-gumax2/4551f546-0fe0-5e94-ba09-9252bba9ea1c/scratchpad/base/gmax-base-painel';
+    }
+
+    public static function available(): bool
+    {
+        return is_file(self::panelBase() . '/painel/api.php') && is_file(self::panelBase() . '/painel/index.html');
+    }
 
     public static function get(): self
     {
@@ -33,19 +54,46 @@ final class GrWeb
 
     private function __construct()
     {
+        if (!self::available()) {
+            throw new RuntimeException('Base do painel não encontrada em ' . self::panelBase() . ' (defina GR_PAINEL_BASE).');
+        }
         $src = dirname(__DIR__, 2) . '/src';
         $this->dir = sys_get_temp_dir() . '/gr-web-' . bin2hex(random_bytes(4));
         $this->docroot = $this->dir . '/public_html';
         $this->lib = $this->dir . '/privado/gmax-renovacoes';
+        $this->panelConfig = $this->dir . '/gmax-painel/private/config.php';
+        mkdir(dirname($this->panelConfig), 0700, true);
+        $this->setupSecret = bin2hex(random_bytes(20)); // 40 caracteres
+
+        // 1) Painel real (cópia).
+        self::copyDir(self::panelBase() . '/painel', $this->docroot . '/painel');
+        $api = file_get_contents($this->docroot . '/painel/api.php');
+        $n = 0;
+        $api = preg_replace('~\$configPath\s*=\s*\'[^\']*\';~', '$configPath = ' . var_export($this->panelConfig, true) . ';', $api, -1, $n);
+        if ($n !== 1) {
+            throw new RuntimeException('$configPath não encontrado exatamente uma vez no api.php da base.');
+        }
+        file_put_contents($this->docroot . '/painel/api.php', $api);
+
+        // 2) Módulo (público + privado).
         self::copyDir($src . '/publico/painel', $this->docroot . '/painel');
         self::copyDir($src . '/privado/gmax-renovacoes', $this->lib);
         @unlink($this->lib . '/config.php');
+        file_put_contents($this->docroot . '/painel/renovacoes-caminho.php', '<?php return ' . var_export($this->lib, true) . ";\n");
+
+        // 3) Link no menu com a ferramenta do próprio módulo.
+        $this->indexOriginal = file_get_contents($this->docroot . '/painel/index.html');
+        $plan = \GmaxRenov\PanelMenuPatch::plan($this->indexOriginal);
+        if (!$plan['ok']) {
+            throw new RuntimeException('PanelMenuPatch falhou: ' . $plan['motivo']);
+        }
+        file_put_contents($this->docroot . '/painel/index.html', $plan['novo']);
+
+        // 4) Helper SOMENTE de teste: envelhece $_SESSION['last'] da sessão real (mesmos parâmetros do api.php).
+        file_put_contents($this->docroot . '/expirar-sessao.php', "<?php\nini_set('session.use_strict_mode','1');\nsession_name('gmax_session');\nsession_set_cookie_params(['httponly'=>true,'secure'=>false,'samesite'=>'Strict','path'=>'/']);\nsession_start();\n\$_SESSION['last'] = time() - 3700;\nheader('Content-Type: text/plain');\necho 'expirada';\n");
+
         mkdir($this->dir . '/sessoes', 0700, true);
         mkdir($this->dir . '/logs', 0700, true);
-        file_put_contents($this->docroot . '/painel/renovacoes-caminho.php', '<?php return ' . var_export($this->lib, true) . ";\n");
-        // Helper SOMENTE de teste: simula o login do painel (mesma sessão PHP padrão).
-        file_put_contents($this->docroot . '/login.php', "<?php\nsession_start();\n\$_SESSION['gr_teste_logado'] = 1;\nheader('Content-Type: text/plain');\necho 'logado';\n");
-        file_put_contents($this->docroot . '/logout.php', "<?php\nsession_start();\n\$_SESSION = [];\nsession_destroy();\necho 'saiu';\n");
         $this->errorLog = $this->dir . '/php-erros.log';
         touch($this->errorLog);
 
@@ -56,7 +104,6 @@ final class GrWeb
             '-d', 'display_errors=0', '-d', 'log_errors=1', '-d', 'error_reporting=' . E_ALL,
             '-d', 'error_log=' . $this->errorLog,
             '-d', 'session.save_path=' . $this->dir . '/sessoes',
-            '-d', 'session.use_strict_mode=1',
             '-S', "127.0.0.1:$port", '-t', $this->docroot];
         $this->proc = proc_open($cmd, [0 => ['file', '/dev/null', 'r'], 1 => ['file', $this->dir . '/servidor.log', 'a'], 2 => ['file', $this->dir . '/servidor.log', 'a']], $pipes);
         if (!is_resource($this->proc)) {
@@ -74,22 +121,32 @@ final class GrWeb
         throw new RuntimeException('Servidor PHP embutido não respondeu.');
     }
 
-    /** Aponta o servidor para o banco do teste atual (config.php da cópia privada). */
+    /** Aponta painel e módulo para o banco do teste atual. O módulo lê as credenciais do config do painel. */
     public function useTest(T $t, array $extra = []): array
     {
-        $this->config = $t->config(['pasta_logs' => $this->dir . '/logs', 'permitir_relogio_teste' => false] + $extra);
-        file_put_contents($this->lib . '/config.php', '<?php return ' . var_export($this->config, true) . ";\n");
+        $this->panelCfg = [
+            'dsn' => 'mysql:host=' . T::env('GR_TEST_HOST', 'localhost') . ';dbname=' . $t->dbName . ';charset=utf8mb4',
+            'db_user' => T::env('GR_TEST_USER', 'grtest'),
+            'db_password' => T::env('GR_TEST_PASS', 'grtest'),
+            'require_https' => false,
+            'timezone' => 'America/Sao_Paulo',
+            'setup_secret' => $this->setupSecret,
+        ];
+        file_put_contents($this->panelConfig, '<?php return ' . var_export($this->panelCfg, true) . ";\n");
+        $cfg = $t->config(['pasta_logs' => $this->dir . '/logs', 'permitir_relogio_teste' => false] + $extra);
+        $cfg['db'] = ['config_painel' => $this->panelConfig]; // sem host/usuário/senha próprios
+        $this->config = $cfg;
+        file_put_contents($this->lib . '/config.php', '<?php return ' . var_export($cfg, true) . ";\n");
         clearstatcache();
-        return $this->config;
+        return $cfg;
     }
 
     public function stop(): void
     {
         if (is_resource($this->proc)) {
             $st = proc_get_status($this->proc);
-            // proc_open com array não usa shell: o pid é o do próprio php -S.
-            if (!empty($st['running'])) {
-                posix_kill_safe($st['pid']);
+            if (!empty($st['running']) && function_exists('posix_kill')) {
+                @posix_kill($st['pid'], 15);
             }
             proc_terminate($this->proc, 9);
             proc_close($this->proc);
@@ -197,13 +254,6 @@ final class GrWeb
     }
 }
 
-function posix_kill_safe(int $pid): void
-{
-    if (function_exists('posix_kill')) {
-        @posix_kill($pid, 15);
-    }
-}
-
 /** Cliente HTTP mínimo (curl) com "pote" de cookies próprio, como um navegador. */
 final class GrHttp
 {
@@ -285,18 +335,52 @@ final class GrHttp
         return $this->get('/painel/renovacoes-api.php?' . http_build_query(['acao' => $acao] + $q));
     }
 
-    /** Faz login pelo helper e lê o token CSRF da página (mesmo pote de cookies). */
-    public function login(): self
+    /** GET api.php?action=status: devolve o JSON e guarda o CSRF da sessão. */
+    public function panelStatus(): array
     {
-        $r = $this->get('/login.php');
-        if ($r['status'] !== 200 || empty($this->cookies)) {
-            throw new RuntimeException('Login de teste falhou.');
+        $r = $this->get('/painel/api.php?action=status');
+        if (!empty($r['json']['csrf'])) {
+            $this->csrf = $r['json']['csrf'];
         }
-        $p = $this->get('/painel/renovacoes.php');
-        if (!preg_match('/<meta name="csrf-token" content="([^"]+)"/', $p['body'], $m)) {
-            throw new RuntimeException('Token CSRF não encontrado na página (HTTP ' . $p['status'] . ').');
+        return $r;
+    }
+
+    /** POST para o api.php REAL do painel (JSON + X-CSRF-Token), como o app.js faz. */
+    public function panel(string $action, array $data = [], ?string $csrf = 'auto'): array
+    {
+        $h = ['Content-Type' => 'application/json', 'Accept' => 'application/json'];
+        $tok = $csrf === 'auto' ? $this->csrf : $csrf;
+        if ($tok !== null) {
+            $h['X-CSRF-Token'] = $tok;
         }
-        $this->csrf = html_entity_decode($m[1], ENT_QUOTES);
+        $r = $this->request('POST', '/painel/api.php?action=' . rawurlencode($action), json_encode($data), $h);
+        if (!empty($r['json']['csrf'])) {
+            $this->csrf = $r['json']['csrf'];
+        }
+        return $r;
+    }
+
+    /** Login pelo fluxo real do painel: status → setup (banco novo) ou login. */
+    public function login(?string $setupSecret = null): self
+    {
+        $st = $this->panelStatus();
+        if ($st['status'] !== 200 || empty($this->csrf)) {
+            throw new RuntimeException('api.php status falhou (HTTP ' . $st['status'] . '): ' . substr($st['body'], 0, 200));
+        }
+        $creds = ['username' => GrWeb::ADMIN_USER, 'password' => GrWeb::ADMIN_PASS];
+        $r = empty($st['json']['installed'])
+            ? $this->panel('setup', $creds + ['secret' => $setupSecret ?? GrWeb::get()->setupSecret])
+            : $this->panel('login', $creds);
+        if ($r['status'] !== 200 || empty($r['json']['ok'])) {
+            throw new RuntimeException('Login no painel falhou (HTTP ' . $r['status'] . '): ' . substr($r['body'], 0, 200));
+        }
         return $this;
+    }
+
+    /** Lê o token CSRF que renovacoes.php imprime na meta (deve ser o mesmo do painel). */
+    public function pageCsrf(): ?string
+    {
+        $p = $this->get('/painel/renovacoes.php');
+        return preg_match('/<meta name="csrf-token" content="([^"]+)"/', $p['body'], $m) ? html_entity_decode($m[1], ENT_QUOTES) : null;
     }
 }

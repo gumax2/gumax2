@@ -10,7 +10,7 @@ declare(strict_types=1);
 if (!defined('GR_ROOT')) {
     define('GR_ROOT', __DIR__);
 }
-define('GR_VERSION', '1.0.0');
+define('GR_VERSION', '1.1.0');
 
 if (PHP_SAPI !== 'cli') {
     // Nunca exibir avisos do PHP na web (revelariam caminhos privados); tudo vai para o log.

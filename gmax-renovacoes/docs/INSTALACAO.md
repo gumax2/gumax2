@@ -1,93 +1,97 @@
-# Instalação (HostGator / cPanel)
+# Instalação no painel GMAX (HostGator / cPanel)
 
-Requisitos: PHP **8.0 ou superior** com `pdo_mysql`, `curl`, `mbstring`; MySQL 5.7+ ou MariaDB 10.3+. O envio fica **desligado e em simulação** até você ativar.
+> **Não instale antes da revisão** do ZIP (Codex/você). Nesta etapa o envio real fica **desligado** e nenhuma ação com clientes reais está autorizada.
 
-> A instalação **só adiciona** arquivos e tabelas `gr_*`. Não substitui nenhum arquivo do painel, não altera o `.htaccess` e não toca nas tabelas de clientes, pacotes, recebimentos e custos.
+A instalação **só acrescenta**:
+- arquivos novos: a biblioteca privada e 3 páginas + assets em `/painel/`;
+- 8 tabelas `gr_*`;
+- 2 linhas no `index.html` (link do menu), aplicadas com conferência e cópia de segurança.
 
-## Passo 0 — Antes de tudo
+Ela **não** executa DROP, TRUNCATE, DELETE, ALTER ou seed em tabelas existentes. **Não** reimporta migrations antigas de pacotes. **Não** altera `api.php`, `app.js`, `config.php` do painel, `.htaccess` ou outros projetos.
 
-1. Confira se já não existem em `public_html/painel/` arquivos com estes nomes: `renovacoes.php`, `renovacoes-api.php`, `renovacoes-webhook.php`, `renovacoes-caminho.php`, pasta `renovacoes-assets/`. Se existir algum, **pare** e me avise.
-2. **Recomendado:** me envie os arquivos do painel (sem `config.php`, senhas, tokens ou banco de clientes) para eu conferir o mapeamento das tabelas e a chave de sessão do login (ver `PENDENCIAS.md`).
+Caminhos usados abaixo (confira no seu servidor):
+- conta: `/home1/gust1922`;
+- painel público: `/home1/gust1922/public_html/painel/`;
+- config privado do painel: `/home1/gust1922/gmax-painel/private/config.php` (lido pelo `api.php`).
 
-## Passo 1 — Backup
+Requisitos: PHP 8.0+ com `pdo_mysql`, `curl`, `mbstring`.
 
-Siga `BACKUP_E_RECUPERACAO.md`, parte A (banco completo + pasta `painel`). Não pule.
+## Passo 1 — Backup completo (obrigatório)
 
-## Passo 2 — Enviar os arquivos
+Siga `BACKUP_E_RECUPERACAO.md`, parte A: dump SQL **completo** do banco `gust1922_gmaxpainel` e ZIP da pasta `painel`. Guarde **fora** do servidor e **fora** do repositório/ZIP do módulo. Não continue sem esses dois arquivos.
 
-No **Gerenciador de Arquivos** do cPanel:
+## Passo 2 — Enviar os arquivos (não ativa nada)
 
-1. Envie o ZIP para `/home/USUARIO/` (a pasta **acima** de `public_html`) e extraia.
-2. Mova a pasta `privado/gmax-renovacoes` para `/home/USUARIO/gmax-renovacoes` (fora de `public_html`).
-3. Copie **o conteúdo** de `publico/painel/` para `/home/USUARIO/public_html/painel/` (só arquivos novos).
-4. Se a biblioteca **não** ficar em `/home/USUARIO/gmax-renovacoes`, crie `public_html/painel/renovacoes-caminho.php` com:
-   ```php
-   <?php return '/caminho/absoluto/para/gmax-renovacoes';
-   ```
+Gerenciador de Arquivos do cPanel:
+1. Envie o ZIP para `/home1/gust1922/` (acima de `public_html`) e extraia.
+2. Mova `privado/gmax-renovacoes` para `/home1/gust1922/gmax-renovacoes`.
+3. Confira que **não existem** em `public_html/painel/`: `renovacoes.php`, `renovacoes-api.php`, `renovacoes-webhook.php`, `renovacoes-caminho.php`, `renovacoes-assets/`. Se existir algum, pare.
+4. Copie o **conteúdo** de `publico/painel/` para `public_html/painel/` (somente arquivos novos).
 
-## Passo 3 — Configurar
+## Passo 3 — Configurar (sem segredos novos)
 
-1. Em `/home/USUARIO/gmax-renovacoes/`, copie `config.example.php` para `config.php`.
-2. Preencha `db` (os mesmos dados de banco do painel).
-3. Preencha `auth.chave_sessao`: é a chave que o login do painel grava em `$_SESSION` (procure por `$_SESSION['` no arquivo de login do painel). Se o painel usa `session_name(...)`, preencha `sessao_nome` também. **Vazio = ninguém entra na aba** (falha segura).
-4. Ajuste `esquema` aos nomes reais das tabelas/colunas (clientes e pacotes). `status_ativos` = valores de status que recebem lembrete (o resto — pausado, arquivado — fica de fora).
-5. Deixe `provedor.driver = 'simulado'` por enquanto.
-6. Permissão do arquivo: **600** (clique direito → Alterar permissões).
+1. Em `/home1/gust1922/gmax-renovacoes/`, copie `config.example.php` → `config.php`, permissão **600**.
+2. Confira `db.config_painel` = o mesmo caminho que aparece em `painel/api.php` (`$configPath`). O módulo lê `dsn`, `db_user` e `db_password` de lá — **não copie senha nenhuma**.
+3. Deixe `auth` com os padrões do painel e `provedor.driver = 'simulado'`.
 
-## Passo 4 — Diagnóstico e migração
+## Passo 4 — Diagnóstico e retrato ANTES (não altera nada)
 
-Pelo **Terminal** do cPanel (ou SSH):
+No **Terminal** do cPanel:
+```bash
+cd ~/gmax-renovacoes
+php bin/renovacoes-admin.php diagnostico                      # tabelas/colunas mapeadas, versão do PHP/MySQL
+php bin/renovacoes-admin.php integridade ~/integridade-antes.json   # contagens + hashes + totais, sem dados pessoais
+php bin/renovacoes-admin.php menu verificar ~/public_html/painel/index.html   # mostra a mudança do menu, não grava
+```
+O diagnóstico deve mostrar `clients`, `client_plans` e `client_exclusions` encontradas, com "mapeamento ok". Se aparecer FALHA, pare e me envie a saída. Ela lista só nomes de tabelas e colunas.
+
+## Passo 5 — Migração (só tabelas gr_*) e retrato DEPOIS
 
 ```bash
-php ~/gmax-renovacoes/bin/renovacoes-admin.php diagnostico   # só lê; mostra tabelas, colunas e falhas de mapeamento
-php ~/gmax-renovacoes/bin/renovacoes-admin.php migrar        # cria as tabelas gr_* (pode rodar de novo sem problema)
+php bin/renovacoes-admin.php migrar
+php bin/renovacoes-admin.php integridade ~/integridade-depois.json
+php bin/renovacoes-admin.php integridade-comparar ~/integridade-antes.json ~/integridade-depois.json
 ```
+O resultado deve ser **"dados do painel preservados"**, com todas as tabelas IGUAL e os totais financeiros IGUAIS. Se aparecer qualquer DIFERENTE, **pare** e siga `BACKUP_E_RECUPERACAO.md`. Rodar `migrar` de novo não muda nada (pode repetir o comparativo para confirmar).
 
-Sem Terminal: importe `sql/001_inicial.sql` no **phpMyAdmin** (aba Importar). É o mesmo conteúdo e também pode ser reimportado.
+Sem Terminal: importe `sql/001_inicial.sql` no phpMyAdmin. Ele contém só `CREATE TABLE IF NOT EXISTS gr_*` e `INSERT IGNORE INTO gr_*`. Nesse caso, compare **contagem de linhas** das tabelas do painel antes e depois na aba Estrutura do phpMyAdmin.
 
-Se o PHP da linha de comando for antigo, use o caminho do PHP 8 do cPanel, por exemplo `/opt/cpanel/ea-php82/root/usr/bin/php`.
+## Passo 6 — Link no menu
 
-## Passo 5 — Abrir a aba
-
-Entre no painel normalmente e abra `https://gmaxcanais.com.br/painel/renovacoes.php`. Deve aparecer a faixa amarela **MODO SIMULAÇÃO**.
-
-Link no menu do painel: acrescente no menu existente algo como
-```html
-<a href="renovacoes.php">Renovações</a>
+```bash
+php bin/renovacoes-admin.php menu aplicar ~/public_html/painel/index.html
 ```
-Isso exige editar um arquivo do painel. Faço essa alteração quando receber o arquivo do menu, para preservar o restante. No iPhone, a página abre dentro do atalho (PWA), porque fica na mesma pasta `/painel/`.
+O comando confere o arquivo atual, grava uma cópia `index.html.antes-renovacoes-AAAAMMDD-HHMMSS` e acrescenta o link. Para desfazer: `menu remover`. Detalhes e diff em `patch-painel/`.
 
-## Passo 6 — Agendamento (Cron)
+Abra o painel (no iPhone, pelo atalho). No menu aparece **Renovações**, e a página abre com a faixa amarela **MODO SIMULAÇÃO**. A sessão é a mesma do painel: sair do painel encerra o acesso à aba, e 1 hora sem uso também.
 
-cPanel → **Cron Jobs** → configuração comum "A cada 15 minutos" (`*/15 * * * *`), comando:
+## Passo 7 — Agendamento (Cron)
 
+cPanel → Cron Jobs → "A cada 15 minutos" (`*/15 * * * *`):
 ```
-/usr/local/bin/php /home/USUARIO/gmax-renovacoes/cron/renovacoes-cron.php >/dev/null 2>&1
+/usr/local/bin/php /home1/gust1922/gmax-renovacoes/cron/renovacoes-cron.php >/dev/null 2>&1
 ```
+- Use o PHP de **linha de comando** (`php`, não `php-cgi`). Se a versão for antiga, use o caminho do PHP 8 do cPanel (ex.: `/opt/cpanel/ea-php82/root/usr/bin/php`).
+- O horário dos avisos (09:00, America/Sao_Paulo) é configurado na aba. O fuso do servidor não importa.
+- Com o módulo **desativado** (padrão), o cron só registra a execução e não gera nada.
+- Na aba Vencimentos, "último cron" deve mudar a cada 15 minutos.
 
-- O horário dos lembretes (padrão **09:00**, fuso **America/Sao_Paulo**) é controlado na aba **Configurações**, então o fuso do servidor da HostGator não importa.
-- Rodar a cada 15 min permite as novas tentativas de falhas temporárias e o envio para quem foi autorizado depois das 09h.
-- Execuções repetidas ou simultâneas não duplicam mensagens.
-- Na aba **Vencimentos** aparece "último cron": confirme que muda a cada 15 min.
+## Passo 8 — Simulação (sem clientes reais)
 
-## Passo 7 — Período de simulação (recomendado: alguns dias)
+1. Configurações:
+   - confira os textos, o horário, a chave Pix e as instruções → **Salvar**;
+   - **não** confirme o Pix ainda, se quiser manter o bloqueio duplo.
+2. Os clientes existentes aparecem em **Autorizações** como **sem autorização**: importar não é consentir. Registre autorização somente de quem concordou de fato, com a origem.
+3. Para ver a simulação, marque **Módulo ativo** (o modo continua **Simulação**). Mensagens aparecem no Histórico com a etiqueta **SIMULAÇÃO**. Nada sai do servidor e isso **não** prova entrega real.
+4. Para desligar: desmarque Módulo ativo ou use Pausa global.
 
-1. Aba **Configurações**: confira textos, horário, chave Pix e instruções → **Salvar** → marque **Módulo ativo** (ainda em Simulação) → Salvar.
-2. Aba **Autorizações**: registre a autorização dos clientes que já concordaram.
-3. Acompanhe **Vencimentos** e **Histórico**: as mensagens aparecem com a etiqueta **SIMULAÇÃO**. Nada sai do servidor.
-4. Teste uma renovação: atualize o vencimento de um pacote no painel e veja o aviso pendente daquele pacote ser cancelado.
+## Passo 9 — Envio real (somente em etapa futura, após sua autorização)
 
-## Passo 8 — Envio real (depois da API e dos modelos aprovados — ver `WHATSAPP_API.md`)
-
-1. No `config.php`: `provedor.driver = 'meta_cloud'` e preencha `phone_number_id`, `waba_id`, `access_token`, `app_secret`, `verify_token`.
-2. No app da Meta, configure o webhook: `https://gmaxcanais.com.br/painel/renovacoes-webhook.php`, campo **messages**.
-3. Aba **Configurações**:
-   - preencha os **nomes dos 6 modelos aprovados**;
-   - **confirme a chave Pix e as instruções** (botão de confirmação);
-   - em **Teste com contato interno**, cadastre o seu número (ou de alguém da equipe que autorizou), mantenha marcado **"enviar SOMENTE para os números de teste"**;
-   - Modo = **Real** → Salvar. A faixa fica verde: **ENVIO REAL ATIVO**.
-4. **Primeiro teste real:** botão **Enviar mensagem de teste** (dados fictícios) para o número interno. Confira o recebimento e, no Histórico, a evolução *Aceito → Entregue → Lido*.
-5. Opcional: crie um cliente de teste com o seu número, um pacote vencendo em 3 dias e autorização registrada; espere o cron das 09h (ou "Executar agora").
-6. Liberar para clientes: desmarque **"enviar SOMENTE para os números de teste"** → Salvar.
-
-Para parar tudo a qualquer momento: **Pausa global** (Configurações). Erros de credencial (token expirado) ativam a pausa global automaticamente.
+Pré-requisitos e passos: `WHATSAPP_API.md`. Resumo:
+- credenciais no `config.php` do módulo, no servidor;
+- 6 modelos aprovados;
+- webhook configurado;
+- Pix confirmado;
+- Modo Real com "somente números de teste" marcado;
+- teste com contato interno;
+- só então desmarcar "somente números de teste".

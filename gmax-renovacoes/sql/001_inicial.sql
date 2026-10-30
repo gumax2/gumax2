@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS gr_configuracoes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS gr_contatos (
-    cliente_id BIGINT NOT NULL PRIMARY KEY,
+    cliente_id VARCHAR(64) NOT NULL PRIMARY KEY,
     consentimento VARCHAR(12) NOT NULL DEFAULT 'nenhum',
     telefone_consentido VARCHAR(20) NULL,
     consentimento_origem VARCHAR(120) NULL,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS gr_contatos (
 
 CREATE TABLE IF NOT EXISTS gr_consentimento_log (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    cliente_id BIGINT NOT NULL,
+    cliente_id VARCHAR(64) NOT NULL,
     acao VARCHAR(20) NOT NULL,
     telefone VARCHAR(20) NULL,
     origem VARCHAR(120) NULL,
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS gr_consentimento_log (
 CREATE TABLE IF NOT EXISTS gr_lembretes (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     modo VARCHAR(10) NOT NULL,
-    pacote_id BIGINT NOT NULL,
-    cliente_id BIGINT NOT NULL,
+    pacote_id VARCHAR(64) NOT NULL,
+    cliente_id VARCHAR(64) NOT NULL,
     vencimento DATE NOT NULL,
     etapa VARCHAR(10) NOT NULL,
     data_prevista DATE NOT NULL,
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS gr_mensagens (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     modo VARCHAR(10) NOT NULL,
     ref VARCHAR(40) NOT NULL,
-    cliente_id BIGINT NOT NULL,
+    cliente_id VARCHAR(64) NOT NULL,
     telefone VARCHAR(20) NOT NULL,
     etapa VARCHAR(10) NOT NULL,
     vencimento DATE NOT NULL,
@@ -139,4 +139,4 @@ INSERT IGNORE INTO gr_configuracoes (chave, valor, atualizado_em) VALUES ('texto
 INSERT IGNORE INTO gr_configuracoes (chave, valor, atualizado_em) VALUES ('modelos', '{"antes":{"individual":"","grupo":""},"dia":{"individual":"","grupo":""},"depois":{"individual":"","grupo":""}}', NOW());
 INSERT IGNORE INTO gr_configuracoes (chave, valor, atualizado_em) VALUES ('modelo_idioma', '"pt_BR"', NOW());
 
-INSERT IGNORE INTO gr_migracoes (versao, nome, checksum, aplicado_em) VALUES ('001', 'inicial', '523ab6583d14fc97ea02e3a0b525cfa412988d46de7b167bad7ed9b627c723a9', NOW());
+INSERT IGNORE INTO gr_migracoes (versao, nome, checksum, aplicado_em) VALUES ('001', 'inicial', '9a1aaf147184bd58b8eda3fb388ddefc7cdcdfc8737c1535c70a5ec0a6dc830d', NOW());

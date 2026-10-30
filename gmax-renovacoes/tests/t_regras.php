@@ -975,3 +975,18 @@ test('controle negativo: a verificação de integridade detecta 1 centavo, 1 exc
     eq(false, $r['iguais'], 'mudança de estrutura detectada');
     check(strpos(implode(' ', $r['linhas']), 'estrutura mudou') !== false, 'motivo informado');
 });
+
+test('migrações e SQL de instalação: só CREATE TABLE IF NOT EXISTS gr_* e INSERT IGNORE em gr_*', function (T $t) {
+    foreach (glob(GR_TEST_SRC . '/migrations/*.php') as $f) {
+        $m = require $f;
+        foreach ($m['sql'] as $sql) {
+            check((bool)preg_match('/^\s*CREATE TABLE IF NOT EXISTS gr_[a-z_]+\s*\(/', $sql), basename($f) . ': comando não permitido: ' . substr(trim($sql), 0, 60));
+        }
+    }
+    $sql = file_get_contents(dirname(__DIR__) . '/sql/001_inicial.sql');
+    $stmts = array_filter(array_map('trim', explode(";\n", preg_replace('/^--.*$/m', '', $sql))));
+    foreach ($stmts as $st) {
+        check((bool)preg_match('/^(SET NAMES utf8mb4|CREATE TABLE IF NOT EXISTS gr_[a-z_]+|INSERT IGNORE INTO gr_[a-z_]+)\b/', $st), 'sql/001_inicial.sql: ' . substr($st, 0, 60));
+    }
+    check(!preg_match('/\b(DROP|TRUNCATE|DELETE|ALTER|UPDATE|REPLACE)\b/i', $sql), 'sem comandos destrutivos');
+});

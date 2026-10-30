@@ -17,6 +17,7 @@ mkdir -p "$OUT/docs"
 cp docs/*.md "$OUT/docs/"
 [ -d docs/capturas ] && cp -r docs/capturas "$OUT/docs/capturas"
 cp LEIA_PRIMEIRO.md "$OUT/"
+cp -r patch-painel "$OUT/patch-painel"
 
 # Nunca empacotar segredos nem logs.
 rm -f "$OUT/privado/gmax-renovacoes/config.php"
