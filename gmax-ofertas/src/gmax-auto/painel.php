@@ -27,7 +27,7 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'automacoes', 'integracoes', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'automacoes', 'execucoes', 'integracoes', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
@@ -200,6 +200,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $p = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre')))->probePermissions();
                 $_SESSION['gmax3_ml_probe'] = $p + ['em' => Time::nowSql()];
                 Audit::log($pdo, $actor, 'ml_oauth_testado', 'integracao', 'mercadolivre', ['conta' => $p['conta']['detalhe'], 'busca' => $p['busca']['detalhe']]);
+                gmax_redirect('integracoes');
+            case 'ml_item_test':
+                $conn = new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'));
+                $p = $conn->probeItem(gmax_post_str('mlb', 30));
+                $_SESSION['gmax3_ml_item_probe'] = $p + ['em' => Time::nowSql()];
+                Audit::log($pdo, $actor, 'ml_item_testado', 'integracao', 'mercadolivre', ['endpoint' => $p['endpoint'], 'http' => $p['http'], 'ok' => $p['ok']]);
                 gmax_redirect('integracoes');
             case 'auto_pause':
                 Settings::set($pdo, 'automacoes_pausadas', '1', $actor);
@@ -528,7 +534,7 @@ if ($page === 'exportar') {
 $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
-$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'integracoes' => 'Integrações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
+$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'execucoes' => 'Detalhes das execuções', 'integracoes' => 'Integrações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
     'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';

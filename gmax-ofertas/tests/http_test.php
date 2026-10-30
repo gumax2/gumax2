@@ -364,6 +364,30 @@ test('Central: execução manual, agendamento validado, pausa/retomada, modelo e
     eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('reservado','confirmado','incerto')"), 'nada enviado');
 });
 
+echo "\n== Detalhes das execuções pelo navegador\n";
+test('Histórico: "Ver detalhes" abre produtos, motivos e filtros; nada é enviado', function () {
+    $pdo = Db::get();
+    $r = http('GET', 'painel.php?p=automacoes');
+    $t = csrf($r['body']);
+    follow(http('POST', 'painel.php', ['action' => 'auto_run', 'job' => 'revisao_precos', 'csrf' => $t, 'back' => 'automacoes']));
+    $run = (int)Db::value($pdo, "SELECT MAX(id) FROM gmax3_job_runs WHERE job='revisao_precos'");
+    $r = http('GET', 'painel.php?p=automacoes');
+    ok(str_contains($r['body'], 'p=execucoes&amp;run=' . $run) && str_contains($r['body'], 'Ver detalhes'), 'botão Ver detalhes');
+    $r = http('GET', 'painel.php?p=execucoes&run=' . $run);
+    no_php_errors($r, 'execucoes');
+    ok(str_contains($r['body'], 'Execução #' . $run) && str_contains($r['body'], 'Bloqueado (não foi possível consultar)'), 'resumo e resultados');
+    ok(str_contains($r['body'], 'shopee-api.php ausente'), 'motivo individual do bloqueio');
+    ok(str_contains($r['body'], 'Prévia da próxima revisão'), 'prévia de elegibilidade');
+    $r = http('GET', 'painel.php?p=execucoes&run=' . $run . '&mp=mercadolivre&res=fora_da_revisao');
+    ok(str_contains($r['body'], 'meli.la') && !str_contains($r['body'], 'shopee-api.php ausente</td>'), 'filtro por marketplace e resultado');
+    $r = http('GET', 'painel.php?p=execucoes&q=Parafusadeira');
+    ok(str_contains($r['body'], 'Parafusadeira') && !str_contains($r['body'], 'shopee-api.php ausente'), 'filtro por produto');
+    $r = http('GET', 'painel.php?p=execucoes&run=abc&res=%3Cscript%3E&q=%25%27%22%3Cb%3E');
+    no_php_errors($r, 'filtros inválidos');
+    ok(!str_contains($r['body'], '<b>') && !str_contains($r['body'], '<script>'), 'entrada escapada');
+    eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('reservado','confirmado','incerto')"), 'nada enviado');
+});
+
 echo "\n== OAuth Mercado Livre pelo navegador\n";
 test('Integrações: conectar gera redirecionamento S256 com state; callback exige login e state válido', function () {
     $secrets = t_sandbox() . '/gmax-secrets';

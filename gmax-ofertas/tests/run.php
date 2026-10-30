@@ -89,7 +89,7 @@ echo "\n== Migração, preservação e rollback\n";
 test('Migração preserva tabelas antigas e copia 5 Shopee + 1 Mercado Livre', function () {
     $pdo = t_seed();
     $before = t_legacy_snapshot($pdo);
-    eq(['001', '002'], Migrator::pending($pdo));
+    eq(['001', '002', '003'], Migrator::pending($pdo));
     $done = Migrator::up($pdo, 'teste');
     eq(['shopee' => 5, 'mercadolivre' => 1], $done[0]['result']);
     ok(is_file($done[0]['backup']), 'backup prévio criado');
@@ -129,7 +129,8 @@ test('Reverter migração remove apenas tabelas gmax3_ e mantém dados antigos',
     $pdo = t_seed();
     $before = t_legacy_snapshot($pdo);
     Migrator::up($pdo, 'teste');
-    eq('002', Migrator::down($pdo, 'teste')['version'], 'reverte a mais recente primeiro');
+    eq('003', Migrator::down($pdo, 'teste')['version'], 'reverte a mais recente primeiro');
+    eq('002', Migrator::down($pdo, 'teste')['version']);
     $r = Migrator::down($pdo, 'teste');
     eq('001', $r['version']);
     eq(0, (int)$pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'gmax3%'")->fetchColumn());

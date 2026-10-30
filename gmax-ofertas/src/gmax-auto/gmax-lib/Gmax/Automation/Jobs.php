@@ -35,9 +35,9 @@ final class Jobs
     {
         return match ($job) {
             'descoberta' => self::discovery($pdo, $params, $deadline, $runId, $actor),
-            'revisao_precos' => self::review($pdo, (int)($params['limite'] ?? 60), $deadline, $actor, false),
+            'revisao_precos' => self::review($pdo, (int)($params['limite'] ?? 60), $deadline, $actor, false, $runId),
             'selecao' => self::selection($pdo, $params, $actor),
-            'analise_semanal' => self::weekly($pdo, $params, $deadline, $actor),
+            'analise_semanal' => self::weekly($pdo, $params, $deadline, $actor, $runId),
             'revisao_vencidas' => self::expired($pdo, $params, $actor),
             'saude_catalogo' => self::health($pdo, $actor),
             default => throw new \RuntimeException("Tarefa desconhecida: $job"),
@@ -134,48 +134,123 @@ final class Jobs
     }
 
     // ------------------------------------------------------------------ 2. revisão de preços
-    private static function review(PDO $pdo, int $limit, float $deadline, string $actor, bool $includeDrafts): array
+    public const REVIEW_STATES = ['aprovado', 'aguardando_validacao'];
+    private const FIELD_LABELS = ['price_promo_cents' => 'preço Por', 'price_original_cents' => 'preço De', 'availability' => 'disponibilidade',
+        'variation_pending' => 'variação', 'variation_note' => 'nota de variação', 'commission_rate' => 'comissão', 'validation_status' => 'estado'];
+    /** Máximo de linhas "fora da revisão" gravadas por execução (o total sempre vai no resumo). */
+    private const MAX_EXCLUDED_LOG = 300;
+
+    /** Produtos candidatos, na ordem de prioridade da revisão (arquivados e rejeitados ficam de fora). */
+    public static function reviewCandidates(PDO $pdo): array
+    {
+        return Db::all($pdo, "SELECT c.* FROM gmax3_catalog c WHERE c.validation_status NOT IN ('arquivado','rejeitado')
+            ORDER BY EXISTS(SELECT 1 FROM gmax3_pub_queue q WHERE q.catalog_id=c.id AND q.state='agendado') DESC,
+                     (c.validation_status='aprovado') DESC, COALESCE(c.price_verified_at,'0000') ASC, c.id ASC");
+    }
+
+    /** Motivo pelo qual o produto não entra na revisão; null = elegível. */
+    public static function reviewExclusion(array $r, bool $includeDrafts): ?string
+    {
+        $states = $includeDrafts ? [...self::REVIEW_STATES, 'rascunho'] : self::REVIEW_STATES;
+        if (!in_array($r['validation_status'], $states, true)) {
+            return 'Estado "' . $r['validation_status'] . '": a revisão só consulta produtos ' . ($includeDrafts ? 'aprovados, aguardando validação ou rascunhos' : 'aprovados ou aguardando validação');
+        }
+        if (trim((string)($r['external_id'] ?? '')) === '') {
+            if ($r['marketplace'] === 'mercadolivre') {
+                $short = parse_url((string)($r['affiliate_url'] ?? ''), PHP_URL_HOST) === 'meli.la';
+                return empty($r['original_url']) && $short
+                    ? 'Sem ID do anúncio (MLB): só há o link curto meli.la, que não é consultável em /items/{id}. Cadastre a URL original do anúncio (produto.mercadolivre.com.br/MLB-…) na oferta'
+                    : 'Sem ID do anúncio (MLB): a URL original não contém o código MLB do anúncio';
+            }
+            return 'Sem identificador do produto no marketplace (Item Id): não há o que consultar na API';
+        }
+        return null;
+    }
+
+    private static function review(PDO $pdo, int $limit, float $deadline, string $actor, bool $includeDrafts, int $runId = 0): array
     {
         $c = self::counters();
-        $states = $includeDrafts ? "'aprovado','aguardando_validacao','rascunho'" : "'aprovado','aguardando_validacao'";
-        $rows = Db::all($pdo, "SELECT c.* FROM gmax3_catalog c
-            WHERE c.validation_status IN ($states) AND c.external_id IS NOT NULL
-            ORDER BY EXISTS(SELECT 1 FROM gmax3_pub_queue q WHERE q.catalog_id=c.id AND q.state='agendado') DESC,
-                     (c.validation_status='aprovado') DESC, COALESCE(c.price_verified_at,'0000') ASC
-            LIMIT " . max(1, min(200, $limit)));
+        $limit = max(1, min(200, $limit));
         $connectors = [];
-        foreach ($rows as $r) {
-            if (microtime(true) > $deadline) {
-                $c['detail'][] = 'Prazo da execução atingido; o restante fica para a próxima';
-                break;
+        $eligible = $excluded = $validated = $notProcessed = 0;
+        $timeUp = false;
+        foreach (self::reviewCandidates($pdo) as $r) {
+            if (($why = self::reviewExclusion($r, $includeDrafts)) !== null) {
+                if (++$excluded <= self::MAX_EXCLUDED_LOG) {
+                    RunLog::add($pdo, $runId, $r, 'fora_da_revisao', $why);
+                }
+                continue;
+            }
+            $eligible++;
+            if ($eligible > $limit || microtime(true) > $deadline) {
+                $timeUp = $timeUp || $eligible <= $limit;
+                $notProcessed++;
+                RunLog::add($pdo, $runId, $r, 'nao_processado', $eligible > $limit
+                    ? "Limite de $limit produtos por execução atingido: fica para a próxima revisão"
+                    : 'Prazo da execução atingido: fica para a próxima revisão');
+                continue;
             }
             $conn = $connectors[$r['marketplace']] ??= Registry::get($r['marketplace'], $pdo);
             $c['found']++;
             if (!$conn->configured()) {
                 $c['blocked']++;
+                RunLog::add($pdo, $runId, $r, 'bloqueado', 'Integração ' . (Registry::MARKETPLACES[$r['marketplace']] ?? $r['marketplace']) . ' indisponível: '
+                    . $conn->status() . '. Nenhuma consulta feita; preço não validado');
                 if ($r['validation_status'] === 'aprovado') {
                     Alerts::raise($pdo, 'preco_nao_confirmado', 'Sem integração oficial para confirmar o preço: confira manualmente antes de publicar', (int)$r['id']);
                 }
                 continue;
             }
+            $checkedAt = Time::nowSql();
             try {
                 $res = $conn->fetch($r);
             } catch (Throwable $e) {
                 $res = ['ok' => false, 'error' => $e->getMessage(), 'data' => []];
             }
+            $api = ['endpoint' => $res['endpoint'] ?? null, 'http' => $res['http'] ?? null, 'checked_at' => $checkedAt];
             if (!$res['ok']) {
                 $c['errors']++;
                 $c['blocked']++;
-                Alerts::raise($pdo, 'preco_nao_confirmado', 'Preço não confirmado pela API: ' . $res['error'], (int)$r['id']);
+                Alerts::raise($pdo, 'preco_nao_confirmado', 'Preço não confirmado pela API: ' . RunLog::sanitize((string)$res['error']), (int)$r['id']);
+                RunLog::add($pdo, $runId, $r, 'bloqueado', 'Consulta à API falhou' . ($api['http'] ? ' (HTTP ' . $api['http'] . ')' : '') . ': preço não validado e dados do produto mantidos. Detalhe na coluna da consulta', $api + ['error' => $res['error']]);
                 continue;
             }
-            $c['updated'] += self::applyFetched($pdo, $r, $res['data'], $actor) ? 1 : 0;
+            $d = $res['data'];
+            $out = self::applyFetched($pdo, $r, $d, $actor);
+            $c['updated'] += $out['changed'] ? 1 : 0;
+            $validated += $out['verified'] ? 1 : 0;
+            $notes = [];
+            if ($out['changed']) {
+                $notes[] = 'Alterado: ' . implode(', ', array_map(static fn($f) => self::FIELD_LABELS[$f] ?? $f, $out['changed']));
+            }
+            $notes[] = $out['verified'] ? 'preço confirmado pela API' : 'preço NÃO validado: ' . $out['why'];
+            if (($d['availability'] ?? null) === 'indisponivel') {
+                $notes[] = 'API informa anúncio indisponível: aprovação retirada e agendamentos cancelados';
+            }
+            if (!empty($d['variation_pending'])) {
+                $notes[] = (string)($d['variation_note'] ?? 'variação pendente');
+            }
+            $outcome = $out['changed'] ? 'atualizado' : ($out['verified'] ? 'validado' : 'sem_alteracao');
+            RunLog::add($pdo, $runId, $r, $outcome, implode('; ', $notes), $api + [
+                'price_api' => $d['price_promo_cents'] ?? null, 'original_api' => $d['price_original_cents'] ?? null, 'availability' => $d['availability'] ?? null,
+            ]);
+        }
+        if ($timeUp) {
+            $c['detail'][] = 'Prazo da execução atingido; o restante fica para a próxima';
+        }
+        $c['detail'][] = sprintf('Elegíveis: %d · fora da revisão: %d · não processados: %d · consultados: %d · preços confirmados pela API: %d',
+            $eligible, $excluded, $notProcessed, $c['found'], $validated);
+        if ($c['found'] > 0 && $validated === 0) {
+            $c['detail'][] = 'Nenhum preço foi confirmado pela API nesta execução';
         }
         return $c;
     }
 
-    /** Aplica dados oficiais. Preço confirmado => verificado agora; mudança de preço retira aprovação. */
-    private static function applyFetched(PDO $pdo, array $r, array $d, string $actor): bool
+    /**
+     * Aplica dados oficiais. Preço confirmado => verificado agora; mudança de preço retira aprovação.
+     * @return array{changed:list<string>,verified:bool,why:string}
+     */
+    private static function applyFetched(PDO $pdo, array $r, array $d, string $actor): array
     {
         $id = (int)$r['id'];
         $fields = array_intersect_key($d, array_flip(['price_promo_cents', 'price_original_cents', 'availability', 'variation_pending', 'variation_note', 'commission_rate']));
@@ -187,11 +262,15 @@ final class Jobs
             $fresh = Catalog::get($pdo, $id); // relido dentro da trava: edições concorrentes não são sobrescritas às cegas
             return $fresh ? Catalog::update($pdo, $fresh, $fields, 'api:' . $fresh['marketplace'], false) : ['changed' => [], 'status' => ''];
         });
+        $verified = false;
+        $why = empty($d['variation_pending']) ? 'a API não devolveu preço' : 'a API devolveu uma faixa de preços entre variações';
         if (!empty($d['price_promo_cents'])) {
             if (Catalog::markVerifiedByApi($pdo, $id, $r['marketplace'], $actor, (int)$d['price_promo_cents'])) {
                 Alerts::clear($pdo, 'preco_nao_confirmado', $id);
+                $verified = true;
             } else {
                 Alerts::raise($pdo, 'preco_nao_confirmado', 'Preço alterado durante a revisão: confirme novamente', $id);
+                $why = 'o preço do produto foi alterado durante a revisão (edição concorrente)';
             }
         }
         if (($d['availability'] ?? null) === 'indisponivel') {
@@ -208,7 +287,8 @@ final class Jobs
         if (!empty($d['variation_pending'])) {
             Alerts::raise($pdo, 'variacao', (string)($d['variation_note'] ?? 'Variação pendente'), $id);
         }
-        return $res['changed'] !== [];
+        $changed = array_values(array_diff($res['changed'], ['price_verified_at', 'price_verified_by', 'price_seen_at', 'price_source']));
+        return ['changed' => $changed, 'verified' => $verified, 'why' => $why];
     }
 
     // ------------------------------------------------------------------ 3. seleção
@@ -257,9 +337,9 @@ final class Jobs
     }
 
     // ------------------------------------------------------------------ 4. análise semanal
-    private static function weekly(PDO $pdo, array $p, float $deadline, string $actor): array
+    private static function weekly(PDO $pdo, array $p, float $deadline, string $actor, int $runId = 0): array
     {
-        $c = self::review($pdo, (int)($p['limite'] ?? 100), $deadline, $actor, true);
+        $c = self::review($pdo, (int)($p['limite'] ?? 100), $deadline, $actor, true, $runId);
         $h = self::health($pdo, $actor);
         $c['blocked'] += $h['blocked'];
         $c['detail'] = array_merge($c['detail'], $h['detail']);

@@ -120,3 +120,4 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0}
 .weekdays label.check{font-size:12px;gap:4px}
 .toplist{margin:0;padding-left:20px}.toplist li{padding:6px 0;border-bottom:1px solid #22384f}
 .run-concluido{background:#145a46;color:#c7f6e6}.run-parcial{background:#6a4a10;color:#ffe9bd}.run-falhou{background:#5a1f2b;color:#ffd2d2}.run-executando{background:#20425f;color:#cfe8ff}.run-ignorado{background:#2b3645;color:#c9d4e2}
+.out-atualizado{background:#145a46;color:#c7f6e6}.out-validado{background:#1d4f2e;color:#d4f7dc}.out-sem_alteracao{background:#2b3645;color:#c9d4e2}.out-bloqueado{background:#5a1f2b;color:#ffd2d2}.out-nao_processado{background:#6a4a10;color:#ffe9bd}.out-fora_da_revisao{background:#223b52;color:#cfe8ff}

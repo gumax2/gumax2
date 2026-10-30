@@ -155,15 +155,17 @@ $heart = Db::one($pdo, "SELECT * FROM gmax3_heartbeats WHERE name='automacoes'")
 </div>
 </section>
 
-<section class="card">
+<section class="card" id="historico">
   <h2>Histórico de tarefas</h2>
-  <div class="table-wrap"><table class="table compact"><thead><tr><th>#</th><th>Tarefa</th><th>Gatilho</th><th>Início</th><th>Estado</th><th>Enc.</th><th>Novos</th><th>Atual.</th><th>Aprov.</th><th>Bloq.</th><th>Erros</th><th>Detalhe</th></tr></thead><tbody>
+  <p class="small"><a href="<?= View::e(View::url('execucoes')) ?>">Ver todos os produtos analisados, com filtros por execução, produto, marketplace e resultado →</a></p>
+  <div class="table-wrap"><table class="table compact"><thead><tr><th>#</th><th>Tarefa</th><th>Gatilho</th><th>Início</th><th>Estado</th><th>Enc.</th><th>Novos</th><th>Atual.</th><th>Aprov.</th><th>Bloq.</th><th>Erros</th><th>Detalhe</th><th></th></tr></thead><tbody>
   <?php foreach ($runs as $r): ?>
     <tr><td><?= (int)$r['id'] ?></td><td><?= View::e($r['name'] ?? $r['job']) ?></td><td><?= View::e($r['trigger']) ?></td><td><?= View::e(Time::show($r['started_at'])) ?></td>
       <td><span class="badge run-<?= View::e($r['status']) ?>"><?= View::e($r['status']) ?></span></td>
       <td><?= (int)$r['found'] ?></td><td><?= (int)$r['created'] ?></td><td><?= (int)$r['updated'] ?></td><td><?= (int)$r['approved'] ?></td><td><?= (int)$r['blocked'] ?></td><td><?= (int)$r['errors'] ?></td>
-      <td class="small"><?= nl2br(View::e(mb_substr((string)$r['detail'], 0, 400))) ?></td></tr>
+      <td class="small"><?= nl2br(View::e(mb_substr((string)$r['detail'], 0, 400))) ?></td>
+      <td><a class="btn btn-ghost btn-sm" href="<?= View::e(View::url('execucoes', ['run' => $r['id']])) ?>">Ver detalhes</a></td></tr>
   <?php endforeach; ?>
-  <?php if (!$runs): ?><tr><td colspan="12" class="muted">Nenhuma execução ainda.</td></tr><?php endif; ?>
+  <?php if (!$runs): ?><tr><td colspan="13" class="muted">Nenhuma execução ainda.</td></tr><?php endif; ?>
   </tbody></table></div>
 </section>

@@ -45,6 +45,8 @@ test('Migração 002: tarefas criadas inativas, automações pausadas, aprovaç�
     eq('0', Settings::get($pdo, 'aprovacao_automatica'));
     eq('1', Settings::get($pdo, 'publicacao_pausada'), 'envios continuam pausados');
     $catalog = $pdo->query('SELECT COUNT(*) FROM gmax3_catalog')->fetchColumn();
+    eq('003', Migrator::down($pdo, 'teste')['version']);
+    ok(!Db::tableExists($pdo, 'gmax3_job_run_items') && Db::tableExists($pdo, 'gmax3_job_runs'), 'a 003 remove só o detalhamento');
     eq('002', Migrator::down($pdo, 'teste')['version']);
     ok(!Db::tableExists($pdo, 'gmax3_jobs') && Db::tableExists($pdo, 'gmax3_catalog'), 'remove só as tabelas da 002');
     eq($catalog, $pdo->query('SELECT COUNT(*) FROM gmax3_catalog')->fetchColumn(), 'catálogo intacto');

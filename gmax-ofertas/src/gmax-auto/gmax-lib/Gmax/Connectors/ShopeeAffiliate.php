@@ -71,14 +71,15 @@ final class ShopeeAffiliate implements Connector, Discovery
         $payload = json_encode(['query' => $query, 'variables' => $variables], JSON_UNESCAPED_SLASHES);
         $auth = self::authorization((string)$this->creds['app_id'], (string)$this->creds['secret'], $timestamp ?? time(), $payload);
         $res = $this->http->request('POST', self::ENDPOINT, ['Content-Type: application/json', 'Authorization: ' . $auth], $payload);
+        $meta = ['endpoint' => 'POST /graphql', 'http' => $res['status'] ?: null];
         if ($res['error'] !== null || $res['status'] !== 200) {
-            return ['ok' => false, 'error' => $res['error'] ?? 'HTTP ' . $res['status'], 'data' => []];
+            return ['ok' => false, 'error' => $res['error'] ?? 'HTTP ' . $res['status'], 'data' => []] + $meta;
         }
         $json = json_decode((string)$res['body'], true);
         if (!is_array($json) || !empty($json['errors'])) {
-            return ['ok' => false, 'error' => 'Resposta da API com erro: ' . mb_substr(json_encode($json['errors'] ?? 'JSON inválido', JSON_UNESCAPED_UNICODE), 0, 200), 'data' => []];
+            return ['ok' => false, 'error' => 'Resposta da API com erro: ' . mb_substr(json_encode($json['errors'] ?? 'JSON inválido', JSON_UNESCAPED_UNICODE), 0, 200), 'data' => []] + $meta;
         }
-        return ['ok' => true, 'error' => null, 'data' => $json['data'] ?? []];
+        return ['ok' => true, 'error' => null, 'data' => $json['data'] ?? []] + $meta;
     }
 
     public function fetch(array $row): array
@@ -94,7 +95,7 @@ final class ShopeeAffiliate implements Connector, Discovery
         }
         $node = $res['data']['productOfferV2']['nodes'][0] ?? null;
         if (!is_array($node) || (string)($node['itemId'] ?? '') !== $itemId) {
-            return ['ok' => false, 'error' => 'Item não retornado pela API', 'data' => []];
+            return ['ok' => false, 'error' => 'Item não retornado pela API (HTTP 200 sem o produto)', 'data' => [], 'endpoint' => $res['endpoint'], 'http' => $res['http']];
         }
         $data = ['title' => (string)($node['productName'] ?? '')];
         // Faixa de preço (variações): só usa quando mínimo = máximo, senão exige conferir variação.
@@ -109,7 +110,7 @@ final class ShopeeAffiliate implements Connector, Discovery
         if (isset($node['commissionRate'])) {
             $data['commission_rate'] = (string)$node['commissionRate'];
         }
-        return ['ok' => true, 'error' => null, 'data' => $data];
+        return ['ok' => true, 'error' => null, 'data' => $data, 'endpoint' => $res['endpoint'], 'http' => $res['http']];
     }
 
     /**

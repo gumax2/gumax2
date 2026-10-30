@@ -11,6 +11,7 @@ declare(strict_types=1);
  *   pausar | retomar              Pausa geral das automações
  *   aprovacao-automatica --autorizar AUTORIZO_APROVACAO_AUTOMATICA | --desativar
  *   ml-oauth status | renovar | testar   Situação/renovação do token OAuth do Mercado Livre (sem exibir tokens)
+ *   ml-oauth item MLB123456789          Testa só a consulta /items/{id} (somente leitura; mostra HTTP, preço e situação)
  */
 // Aceita o binário CGI usado por alguns Crons de cPanel, mas nunca uma requisição web.
 if (PHP_SAPI !== 'cli' && !(str_starts_with(PHP_SAPI, 'cgi') && empty($_SERVER['REQUEST_METHOD']))) {
@@ -63,6 +64,9 @@ try {
             $sub = $args[1] ?? 'status';
             if ($sub === 'renovar') {
                 $print($o->accessToken(true) !== null ? 'Token renovado.' : 'Não foi possível renovar: reconecte em Integrações.');
+            } elseif ($sub === 'item') {
+                // Teste isolado de /items/{id}: somente leitura, nada é gravado no catálogo.
+                $print((new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o))->probeItem((string)($args[2] ?? '')));
             } elseif ($sub === 'testar') {
                 $print((new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o))->probePermissions());
             } else {

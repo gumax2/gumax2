@@ -100,22 +100,39 @@ final class MercadoLivre implements Connector, Discovery
         return $this->configured() ? 'Token fixo (legado, sem renovação)' : 'Não conectado: configure o aplicativo e conecte em Integrações';
     }
 
+    /** Motivo legível de uma resposta de erro da API (nunca inclui o token). */
+    public static function httpReason(array $res, string $what): string
+    {
+        if ($res['error'] !== null) {
+            return $res['error'];
+        }
+        return match ($res['status']) {
+            401 => "Não autenticado (HTTP 401) em $what: token inválido ou expirado mesmo após a renovação automática; reconecte em Integrações",
+            403 => "Acesso negado (HTTP 403) em $what: o aplicativo ou a conta não tem permissão para este recurso",
+            404 => "Não encontrado (HTTP 404) em $what: anúncio inexistente ou removido",
+            429 => "Limite de requisições do Mercado Livre (HTTP 429) em $what",
+            default => "HTTP {$res['status']} em $what",
+        };
+    }
+
     public function fetch(array $row): array
     {
         if (!$this->configured() || $this->token() === null) {
-            return ['ok' => false, 'error' => 'Conector Mercado Livre não conectado (OAuth)', 'data' => []];
+            return ['ok' => false, 'error' => 'Conector Mercado Livre não conectado (OAuth) ou token não renovável', 'data' => []];
         }
         $ext = (string)($row['external_id'] ?? '');
         if (!preg_match('/^item:(MLB\d{5,15})$/D', $ext, $m)) {
             return ['ok' => false, 'error' => 'Consulta disponível apenas para anúncios individuais (MLB-…); produtos de catálogo exigem escolher o anúncio', 'data' => []];
         }
-        $res = $this->get('/items/' . $m[1]);
+        $endpoint = '/items/' . $m[1];
+        $res = $this->get($endpoint);
+        $meta = ['endpoint' => 'GET ' . $endpoint, 'http' => $res['status'] ?: null];
         if ($res['error'] !== null || $res['status'] !== 200) {
-            return ['ok' => false, 'error' => $res['error'] ?? 'HTTP ' . $res['status'], 'data' => []];
+            return ['ok' => false, 'error' => self::httpReason($res, $endpoint), 'data' => []] + $meta;
         }
         $j = json_decode((string)$res['body'], true);
         if (!is_array($j) || ($j['id'] ?? '') !== $m[1]) {
-            return ['ok' => false, 'error' => 'Resposta inesperada da API', 'data' => []];
+            return ['ok' => false, 'error' => 'Resposta inesperada da API', 'data' => []] + $meta;
         }
         // Esta fonte informa o preço original quando existe: ausência significa "sem desconto".
         $data = ['title' => (string)($j['title'] ?? ''), 'reports_original' => true];
@@ -134,7 +151,25 @@ final class MercadoLivre implements Connector, Discovery
             $data['variation_pending'] = 1;
             $data['variation_note'] = 'Anúncio com ' . count($j['variations']) . ' variação(ões): confirme a correta';
         }
-        return ['ok' => true, 'error' => null, 'data' => $data];
+        return ['ok' => true, 'error' => null, 'data' => $data] + $meta;
+    }
+
+    /**
+     * Teste isolado de /items/{id} (somente leitura; nada é gravado no catálogo).
+     * @return array{endpoint:string,http:?int,ok:bool,detalhe:string,preco:?int,preco_original:?int,situacao:?string}
+     */
+    public function probeItem(string $mlb): array
+    {
+        $mlb = strtoupper(str_replace('-', '', trim($mlb)));
+        if (!preg_match('/^MLB\d{5,15}$/D', $mlb)) {
+            return ['endpoint' => 'GET /items/{id}', 'http' => null, 'ok' => false, 'detalhe' => 'Informe um código de anúncio no formato MLB123456789', 'preco' => null, 'preco_original' => null, 'situacao' => null];
+        }
+        $r = $this->fetch(['external_id' => 'item:' . $mlb]);
+        return [
+            'endpoint' => $r['endpoint'] ?? 'GET /items/' . $mlb, 'http' => $r['http'] ?? null, 'ok' => $r['ok'],
+            'detalhe' => $r['ok'] ? 'Disponível: a revisão de preços consegue consultar este anúncio' : (string)$r['error'],
+            'preco' => $r['data']['price_promo_cents'] ?? null, 'preco_original' => $r['data']['price_original_cents'] ?? null, 'situacao' => $r['data']['availability'] ?? null,
+        ];
     }
 
     /**

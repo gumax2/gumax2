@@ -8,6 +8,9 @@ $o = new MercadoLivreOAuth();
 $s = $o->status();
 $probe = $_SESSION['gmax3_ml_probe'] ?? null;
 unset($_SESSION['gmax3_ml_probe']);
+$itemProbe = $_SESSION['gmax3_ml_item_probe'] ?? null;
+unset($_SESSION['gmax3_ml_item_probe']);
+$mlbIds = $pdo->query("SELECT DISTINCT substr(external_id, 6) FROM gmax3_catalog WHERE external_id LIKE 'item:MLB%' ORDER BY id DESC LIMIT 30")->fetchAll(PDO::FETCH_COLUMN);
 $host = $_SERVER['HTTP_HOST'] ?? 'gmaxcanais.com.br';
 $path = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/gmax-auto/painel.php'), '/');
 $suggested = 'https://' . preg_replace('/[^a-z0-9.\-]/i', '', $host) . $path . '/ml-oauth-callback.php';
@@ -39,6 +42,23 @@ $suggested = 'https://' . preg_replace('/[^a-z0-9.\-]/i', '', $host) . $path . '
     </div>
   <?php endif; ?>
   <?php if ($s['connected']): ?>
+  <h3>Consulta individual de anúncio (/items/{id})</h3>
+  <p class="muted small">Testa, separadamente da pesquisa, se o aplicativo consegue ler um anúncio. Somente leitura: nada é gravado no catálogo.</p>
+  <form method="post" action="painel.php" class="inline-form" data-loading>
+    <?= View::csrfField() ?><input type="hidden" name="action" value="ml_item_test"><input type="hidden" name="back" value="integracoes">
+    <input name="mlb" maxlength="30" placeholder="MLB1234567890" required list="gmax-mlb-ids" aria-label="Código do anúncio">
+    <datalist id="gmax-mlb-ids"><?php foreach ($mlbIds as $m): ?><option value="<?= View::e($m) ?>"><?php endforeach; ?></datalist>
+    <button class="btn" type="submit">Testar /items</button>
+  </form>
+  <?php if (!$mlbIds): ?><p class="small warn">Nenhum produto do catálogo tem código MLB de anúncio: a revisão de preços não tem o que consultar no Mercado Livre.</p><?php endif; ?>
+  <?php if ($itemProbe): ?>
+    <div class="alert <?= $itemProbe['ok'] ? 'alert-ok' : 'alert-aviso' ?>">
+      <strong>Teste de <?= View::e(Time::show($itemProbe['em'])) ?>:</strong> <code><?= View::e($itemProbe['endpoint']) ?></code>
+      · <?= $itemProbe['http'] !== null ? 'HTTP ' . (int)$itemProbe['http'] : 'sem resposta HTTP' ?> · <?= View::e($itemProbe['detalhe']) ?>
+      <?php if ($itemProbe['ok']): ?><br>Preço: <?= $itemProbe['preco'] !== null ? View::e(\Gmax\Money::format((int)$itemProbe['preco'])) : 'não informado' ?>
+        · De: <?= $itemProbe['preco_original'] !== null ? View::e(\Gmax\Money::format((int)$itemProbe['preco_original'])) : 'não informado' ?> · Situação: <?= View::e($itemProbe['situacao'] ?? '—') ?><?php endif; ?>
+    </div>
+  <?php endif; ?>
   <details><summary>Desconectar</summary>
     <form method="post" action="painel.php" class="inline-form" data-loading>
       <?= View::csrfField() ?><input type="hidden" name="action" value="ml_oauth_disconnect"><input type="hidden" name="back" value="integracoes">
