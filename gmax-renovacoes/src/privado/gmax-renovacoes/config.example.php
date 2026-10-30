@@ -1,7 +1,7 @@
 <?php
 /**
  * GMAX Renovações — configuração de exemplo para o painel GMAX — Central de Gestão. SEM SEGREDOS.
- * Copie para config.php NESTA MESMA PASTA (fora de public_html) e confira os caminhos. chmod 600 config.php
+ * Copie para config.php NESTA MESMA PASTA (fora da pasta pública do site, /home1/gust1922/gmaxcanais.com.br) e confira os caminhos. chmod 600 config.php
  *
  * Banco: o módulo LÊ o config.php privado do painel (dsn/db_user/db_password). Nenhuma senha é copiada para cá.
  * Login: reaproveita a sessão do painel (gmax_session, $_SESSION['admin'], $_SESSION['csrf'], 3600 s).

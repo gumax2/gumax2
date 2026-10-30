@@ -1077,3 +1077,64 @@ test('CLI: integridade antes/depois + migrar + comparar, e menu recusa modo inv�
     array_map('unlink', glob("$dir/*"));
     rmdir($dir);
 });
+
+echo "Ajustes da revisão do Codex (caminho da hospedagem e .htaccess)\n";
+
+test('documentação e exemplos usam o caminho real do painel (gmaxcanais.com.br/painel), nunca public_html', function (T $t) {
+    $root = dirname(__DIR__);
+    $files = array_merge([$root . '/LEIA_PRIMEIRO.md'], glob($root . '/docs/*.md'), glob($root . '/patch-painel/*'),
+        iterator_to_array(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/src', FilesystemIterator::SKIP_DOTS))));
+    foreach ($files as $f) {
+        $f = (string)$f;
+        if (basename($f) === 'REVISAO_SEGURANCA.md' || basename($f) === 'TESTES_RESULTADO.md') {
+            continue; // registros históricos
+        }
+        $s = file_get_contents($f);
+        check(stripos($s, 'public_html') === false, 'public_html em ' . basename($f));
+        check(strpos($s, '/home/USUARIO') === false, '/home/USUARIO em ' . basename($f));
+    }
+    foreach (['docs/INSTALACAO.md', 'docs/HTACCESS.md', 'patch-painel/LEIA.md', 'docs/BACKUP_E_RECUPERACAO.md'] as $d) {
+        check(strpos(file_get_contents("$root/$d"), '/home1/gust1922/gmaxcanais.com.br/painel') !== false, "caminho do painel em $d");
+    }
+    check(strpos(file_get_contents("$root/docs/INSTALACAO.md"), '/home1/gust1922/gmax-painel/private/config.php') !== false, 'config privado do painel');
+    // As páginas públicas localizam a biblioteca em dirname(painel, 2)/gmax-renovacoes.
+    eq('/home1/gust1922/gmax-renovacoes', dirname('/home1/gust1922/gmaxcanais.com.br/painel', 2) . '/gmax-renovacoes', 'localização padrão da biblioteca');
+    foreach (['renovacoes.php', 'renovacoes-api.php', 'renovacoes-webhook.php'] as $p) {
+        check(strpos(file_get_contents("$root/src/publico/painel/$p"), "dirname(__DIR__, 2) . '/gmax-renovacoes'") !== false, "$p usa a localização padrão");
+    }
+});
+
+test('.htaccess: 4 formatos liberam só os 3 arquivos, reversão exata; sem bloqueio não muda; desconhecido recusa', function (T $t) {
+    $H = \GmaxRenov\HtaccessPatch::class;
+    $cases = [
+        'files24' => ["Options -Indexes\n<FilesMatch \"\\.php$\">\n  Require all denied\n</FilesMatch>\n<Files \"api.php\">\n  Require all granted\n</Files>\n", '', 'Files'],
+        'files22' => ["<FilesMatch \"\\.(php|phtml)$\">\nOrder allow,deny\nDeny from all\n</FilesMatch>\n<FilesMatch \"^api\\.php$\">\nOrder allow,deny\nAllow from all\n</FilesMatch>", '', 'Files'], // sem quebra final
+        'rewrite' => ["RewriteEngine On\nRewriteCond %{REQUEST_URI} !/api\\.php$\nRewriteRule \\.php$ - [F,L]\n", '', 'Rewrite'],
+        'raiz' => ["RewriteEngine On\nRewriteRule ^painel/(?!api\\.php$).*\\.php$ - [F]\n", 'painel', 'Rewrite'],
+    ];
+    foreach ($cases as $k => [$h, $rel, $fmt]) {
+        $r = $H::analyze($h, $rel);
+        eq($fmt, $r['formato'], "$k: formato");
+        eq(\GmaxRenov\HtaccessPatch::FILES, $r['bloqueia'], "$k: detecta os 3 bloqueados");
+        check($r['plano'] !== null && strpos($r['plano'], $h === '' ? '' : trim(explode("\n", $h)[1])) !== false, "$k: regras originais mantidas");
+        check(strpos($r['plano'], 'Require all granted' . "\n</FilesMatch>\n<FilesMatch") === false, "$k: nada além do bloco marcado");
+        $after = $H::analyze($r['plano'], $rel);
+        eq([], $after['bloqueia'], "$k: depois do patch nada bloqueado");
+        check($after['aplicado'] && $after['plano'] === null, "$k: não aplica duas vezes");
+        eq($h, $H::revert($r['plano']), "$k: reversão byte a byte");
+        check(!preg_match('~granted|Allow from all|\[L\]~', str_replace(explode("\n", $h), '', preg_replace('~# BEGIN GMAX.*?# END GMAX Renovacoes~s', '', $r['plano']))), "$k: nenhuma liberação fora do bloco");
+        preg_match('~# BEGIN GMAX.*?# END GMAX Renovacoes~s', $r['plano'], $blk);
+        foreach (['renovacoes.php', 'renovacoes-api.php', 'renovacoes-webhook.php'] as $ok) {
+            check((bool)preg_match('~renovacoes\(-api\|-webhook\)\?\\\\\.php\$~', $blk[0]), "$k: regex exata dos 3 nomes");
+        }
+    }
+    foreach (['renovacoes.php', 'renovacoes-api.php', 'renovacoes-webhook.php'] as $n) {
+        check(preg_match('~' . \GmaxRenov\HtaccessPatch::FILES_REGEX . '~', $n) === 1, "$n liberado");
+    }
+    foreach (['api2.php', 'renovacoes-caminho.php', 'xrenovacoes.php', 'renovacoes.php.bak', 'renovacoes-teste.php', 'suspeito.php', 'renovacoes.phtml'] as $n) {
+        check(preg_match('~' . \GmaxRenov\HtaccessPatch::FILES_REGEX . '~', $n) === 0, "$n NÃO liberado");
+    }
+    eq('nenhum', $H::analyze("Options -Indexes\n")['formato'], 'sem bloqueio: nada a fazer');
+    $u = $H::analyze("<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n");
+    check($u['plano'] === null && $u['formato'] === 'desconhecido', 'bloqueio sem exceção do api.php: recusa');
+});

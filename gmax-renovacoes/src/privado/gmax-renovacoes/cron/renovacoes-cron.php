@@ -1,6 +1,6 @@
 <?php
 // Agendador dos lembretes. Rodar pelo Cron do cPanel a cada 15 minutos:
-//   */15 * * * * /usr/local/bin/php /home/USUARIO/gmax-renovacoes/cron/renovacoes-cron.php >/dev/null 2>&1
+//   */15 * * * * /usr/local/bin/php /home1/gust1922/gmax-renovacoes/cron/renovacoes-cron.php >/dev/null 2>&1
 /*
  * O horário de geração/envio (padrão 09:00, fuso America/Sao_Paulo) é controlado pela aba Renovações,
  * então o fuso do servidor não importa. Execuções repetidas ou simultâneas são seguras.

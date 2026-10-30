@@ -12,10 +12,11 @@
      mysqldump --single-transaction --routines --default-character-set=utf8mb4 -u USUARIO_DO_BANCO -p gust1922_gmaxpainel > ~/backup-gmaxpainel-$(date +%Y%m%d-%H%M).sql
      chmod 600 ~/backup-gmaxpainel-*.sql
      ```
-2. **Arquivos do painel:** Gerenciador de Arquivos → `public_html/painel` → Compactar → baixar o ZIP.
-3. **Conferir o backup:** o arquivo `.sql` não pode estar vazio e deve conter `CREATE TABLE` de `clients`, `client_plans`, `client_exclusions`, `entries`, `entry_plans`, `settings` e `admins`.
-4. **Retrato de integridade** (`integridade-antes.json`, passo 4 da instalação). Ele **não** substitui o backup. Serve para comparar depois.
-5. Baixe tudo para fora do servidor e apague as cópias de `~/` depois da instalação validada.
+2. **`.htaccess` do painel e da raiz do site** (`gmaxcanais.com.br/.htaccess`, se existir): baixe uma cópia de cada (Gerenciador de Arquivos → "Mostrar arquivos ocultos").
+3. **Arquivos do painel:** Gerenciador de Arquivos → `/home1/gust1922/gmaxcanais.com.br/painel` → Compactar → baixar o ZIP.
+4. **Conferir o backup:** o arquivo `.sql` não pode estar vazio e deve conter `CREATE TABLE` de `clients`, `client_plans`, `client_exclusions`, `entries`, `entry_plans`, `settings` e `admins`.
+5. **Retrato de integridade** (`integridade-antes.json`, passo 4 da instalação). Ele **não** substitui o backup. Serve para comparar depois.
+6. Baixe tudo para fora do servidor e apague as cópias de `~/` depois da instalação validada.
 
 ## B. Prova de preservação
 
@@ -32,8 +33,9 @@ Não grava nomes, telefones nem códigos. `integridade-comparar antes.json depoi
 |---|---|---|---|
 | 1 — Pausar | algo estranho | Aba Configurações → **Pausa global** (ou desmarcar Módulo ativo) | nenhum |
 | 2 — Parar o agendador | interromper tudo | Cron Jobs → excluir a linha do `renovacoes-cron.php` | nenhum |
-| 3 — Tirar do menu | link ou aba com problema | `php bin/renovacoes-admin.php menu remover ~/public_html/painel/index.html` (ou restaurar a cópia `index.html.antes-renovacoes-*`) | nenhum |
-| 4 — Remover o módulo | desistir | níveis 2 e 3 + apagar `public_html/painel/renovacoes*` e `renovacoes-assets/` + apagar `~/gmax-renovacoes/` + (opcional) `sql/rollback_remover_modulo.sql` no phpMyAdmin (apaga **só** `gr_*`) | nenhum |
+| 3 — Tirar do menu | link ou aba com problema | `php bin/renovacoes-admin.php menu remover /home1/gust1922/gmaxcanais.com.br/painel/index.html` (ou restaurar a cópia `index.html.antes-renovacoes-*`) | nenhum |
+| 3b — Desfazer o `.htaccess` | se a liberação foi aplicada | `php bin/renovacoes-admin.php htaccess remover <caminho/.htaccess>` (ou restaurar `.htaccess.antes-renovacoes-*`) | nenhum |
+| 4 — Remover o módulo | desistir | níveis 2, 3 e 3b + apagar `/home1/gust1922/gmaxcanais.com.br/painel/renovacoes*` e `renovacoes-assets/` + apagar `~/gmax-renovacoes/` + (opcional) `sql/rollback_remover_modulo.sql` no phpMyAdmin (apaga **só** `gr_*`) | nenhum |
 | 5 — Restaurar backup | **somente** se o comparativo mostrar diferença nas tabelas do painel | restaurar o dump do passo A (phpMyAdmin → Importar) e o ZIP da pasta `painel` | volta ao ponto do backup; perde alterações feitas depois dele |
 
 O módulo não grava nas tabelas do painel. Isso é verificado por teste automático e, na instalação, pelo comparativo de integridade. Por isso os níveis 1 a 4 não afetam clientes, pacotes, vencimentos, recebimentos, custos, despesas, relatórios, exportações ou a lixeira.

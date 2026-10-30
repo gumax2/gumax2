@@ -2,7 +2,7 @@
 /**
  * GMAX Renovações — ponto de entrada da biblioteca privada.
  *
- * Esta pasta deve ficar FORA de public_html (ex.: /home/USUARIO/gmax-renovacoes).
+ * Esta pasta deve ficar FORA da pasta pública do site (ex.: /home1/gust1922/gmax-renovacoes; o painel fica em /home1/gust1922/gmaxcanais.com.br/painel).
  * Os arquivos públicos em /painel/ apenas incluem este bootstrap.
  */
 declare(strict_types=1);
@@ -10,7 +10,7 @@ declare(strict_types=1);
 if (!defined('GR_ROOT')) {
     define('GR_ROOT', __DIR__);
 }
-define('GR_VERSION', '1.1.0');
+define('GR_VERSION', '1.2.0');
 
 if (PHP_SAPI !== 'cli') {
     // Nunca exibir avisos do PHP na web (revelariam caminhos privados); tudo vai para o log.

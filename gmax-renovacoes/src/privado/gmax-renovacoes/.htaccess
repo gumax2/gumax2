@@ -1,4 +1,4 @@
-# Proteção extra caso esta pasta seja enviada por engano para dentro de public_html.
+# Proteção extra caso esta pasta seja enviada por engano para dentro da pasta pública do site (gmaxcanais.com.br).
 <IfModule mod_authz_core.c>
   Require all denied
 </IfModule>

@@ -5,13 +5,14 @@
 A instalação **só acrescenta**:
 - arquivos novos: a biblioteca privada e 3 páginas + assets em `/painel/`;
 - 8 tabelas `gr_*`;
-- 2 linhas no `index.html` (link do menu), aplicadas com conferência e cópia de segurança.
+- 2 linhas no `index.html` (link do menu), aplicadas com conferência e cópia de segurança;
+- **somente se o diagnóstico indicar**, um bloco marcado no `.htaccess` liberando **apenas** `renovacoes.php`, `renovacoes-api.php` e `renovacoes-webhook.php` (com cópia e reversão; ver `HTACCESS.md`).
 
-Ela **não** executa DROP, TRUNCATE, DELETE, ALTER ou seed em tabelas existentes. **Não** reimporta migrations antigas de pacotes. **Não** altera `api.php`, `app.js`, `config.php` do painel, `.htaccess` ou outros projetos.
+Ela **não** executa DROP, TRUNCATE, DELETE, ALTER ou seed em tabelas existentes. **Não** reimporta migrations antigas de pacotes. **Não** altera `api.php`, `app.js`, `config.php` do painel nem outros projetos. **Não** libera PHP em geral.
 
 Caminhos usados abaixo (confira no seu servidor):
 - conta: `/home1/gust1922`;
-- painel público: `/home1/gust1922/public_html/painel/`;
+- painel público: `/home1/gust1922/gmaxcanais.com.br/painel/`;
 - config privado do painel: `/home1/gust1922/gmax-painel/private/config.php` (lido pelo `api.php`).
 
 Requisitos: PHP 8.0+ com `pdo_mysql`, `curl`, `mbstring`.
@@ -23,10 +24,10 @@ Siga `BACKUP_E_RECUPERACAO.md`, parte A: dump SQL **completo** do banco `gust192
 ## Passo 2 — Enviar os arquivos (não ativa nada)
 
 Gerenciador de Arquivos do cPanel:
-1. Envie o ZIP para `/home1/gust1922/` (acima de `public_html`) e extraia.
+1. Envie o ZIP para `/home1/gust1922/` (fora da pasta do site `gmaxcanais.com.br`) e extraia.
 2. Mova `privado/gmax-renovacoes` para `/home1/gust1922/gmax-renovacoes`.
-3. Confira que **não existem** em `public_html/painel/`: `renovacoes.php`, `renovacoes-api.php`, `renovacoes-webhook.php`, `renovacoes-caminho.php`, `renovacoes-assets/`. Se existir algum, pare.
-4. Copie o **conteúdo** de `publico/painel/` para `public_html/painel/` (somente arquivos novos).
+3. Confira que **não existem** em `/home1/gust1922/gmaxcanais.com.br/painel/`: `renovacoes.php`, `renovacoes-api.php`, `renovacoes-webhook.php`, `renovacoes-caminho.php`, `renovacoes-assets/`. Se existir algum, pare.
+4. Copie o **conteúdo** de `publico/painel/` para `/home1/gust1922/gmaxcanais.com.br/painel/` (somente arquivos novos).
 
 ## Passo 3 — Configurar (sem segredos novos)
 
@@ -41,7 +42,7 @@ No **Terminal** do cPanel:
 cd ~/gmax-renovacoes
 php bin/renovacoes-admin.php diagnostico                      # tabelas/colunas mapeadas, versão do PHP/MySQL
 php bin/renovacoes-admin.php integridade ~/integridade-antes.json   # contagens + hashes + totais, sem dados pessoais
-php bin/renovacoes-admin.php menu verificar ~/public_html/painel/index.html   # mostra a mudança do menu, não grava
+php bin/renovacoes-admin.php menu verificar /home1/gust1922/gmaxcanais.com.br/painel/index.html   # mostra a mudança do menu, não grava
 ```
 O diagnóstico deve mostrar `clients`, `client_plans` e `client_exclusions` encontradas, com "mapeamento ok". Se aparecer FALHA, pare e me envie a saída. Ela lista só nomes de tabelas e colunas.
 
@@ -56,16 +57,26 @@ O resultado deve ser **"dados do painel preservados"**, com todas as tabelas IGU
 
 Sem Terminal: importe `sql/001_inicial.sql` no phpMyAdmin. Ele contém só `CREATE TABLE IF NOT EXISTS gr_*` e `INSERT IGNORE INTO gr_*`. Nesse caso, compare **contagem de linhas** das tabelas do painel antes e depois na aba Estrutura do phpMyAdmin.
 
-## Passo 6 — Link no menu
+## Passo 6 — `.htaccess` (evitar o 403)
 
 ```bash
-php bin/renovacoes-admin.php menu aplicar ~/public_html/painel/index.html
+php bin/renovacoes-admin.php htaccess verificar /home1/gust1922/gmaxcanais.com.br/painel
+php bin/renovacoes-admin.php verificar-http https://gmaxcanais.com.br/painel/
+```
+- Se `verificar-http` der **"Tudo conforme"**, pule para o passo 7.
+- Se apontar **"bloqueado pelo servidor"**, aplique a liberação mínima com o comando que o `htaccess verificar` mostrar. Depois rode `verificar-http` de novo. Detalhes, exemplos e como desfazer estão em **`HTACCESS.md`**.
+- Formato desconhecido: não altere à mão às pressas. Me envie o `.htaccess` (sem senhas).
+
+## Passo 7 — Link no menu
+
+```bash
+php bin/renovacoes-admin.php menu aplicar /home1/gust1922/gmaxcanais.com.br/painel/index.html
 ```
 O comando confere o arquivo atual, grava uma cópia `index.html.antes-renovacoes-AAAAMMDD-HHMMSS` e acrescenta o link. Para desfazer: `menu remover`. Detalhes e diff em `patch-painel/`.
 
 Abra o painel (no iPhone, pelo atalho). No menu aparece **Renovações**, e a página abre com a faixa amarela **MODO SIMULAÇÃO**. A sessão é a mesma do painel: sair do painel encerra o acesso à aba, e 1 hora sem uso também.
 
-## Passo 7 — Agendamento (Cron)
+## Passo 8 — Agendamento (Cron)
 
 cPanel → Cron Jobs → "A cada 15 minutos" (`*/15 * * * *`):
 ```
@@ -76,7 +87,7 @@ cPanel → Cron Jobs → "A cada 15 minutos" (`*/15 * * * *`):
 - Com o módulo **desativado** (padrão), o cron só registra a execução e não gera nada.
 - Na aba Vencimentos, "último cron" deve mudar a cada 15 minutos.
 
-## Passo 8 — Simulação (sem clientes reais)
+## Passo 9 — Simulação (sem clientes reais)
 
 1. Configurações:
    - confira os textos, o horário, a chave Pix e as instruções → **Salvar**;
@@ -85,7 +96,7 @@ cPanel → Cron Jobs → "A cada 15 minutos" (`*/15 * * * *`):
 3. Para ver a simulação, marque **Módulo ativo** (o modo continua **Simulação**). Mensagens aparecem no Histórico com a etiqueta **SIMULAÇÃO**. Nada sai do servidor e isso **não** prova entrega real.
 4. Para desligar: desmarque Módulo ativo ou use Pausa global.
 
-## Passo 9 — Envio real (somente em etapa futura, após sua autorização)
+## Passo 10 — Envio real (somente em etapa futura, após sua autorização)
 
 Pré-requisitos e passos: `WHATSAPP_API.md`. Resumo:
 - credenciais no `config.php` do módulo, no servidor;

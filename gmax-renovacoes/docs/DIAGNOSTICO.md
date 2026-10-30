@@ -28,21 +28,25 @@ Valores de exemplo do `app.js` (`seed()`, modo `?demo=1`) são fictícios e não
 ## 2. Arquitetura
 
 ```
-/home/USUARIO/
-├── gmax-renovacoes/            ← PRIVADO (fora de public_html)
-│   ├── config.php              ← credenciais e mapeamento (chmod 600) — você cria a partir do exemplo
+/home1/gust1922/
+├── gmax-painel/private/config.php   ← config privado do PAINEL (já existe; o módulo só lê dsn/usuário/senha)
+├── gmax-renovacoes/                 ← PRIVADO, novo (fora da pasta do site)
+│   ├── config.php                   ← mapeamento e opções, sem senhas (chmod 600) — criado a partir do exemplo
 │   ├── bootstrap.php
-│   ├── lib/                    ← regras, fila, provedores, webhook
-│   ├── migrations/             ← migrações versionadas
-│   ├── cron/renovacoes-cron.php← agendador (Cron do cPanel a cada 15 min)
-│   ├── bin/renovacoes-admin.php← diagnóstico, migração, backup
-│   └── logs/                   ← log sem segredos
-└── public_html/painel/         ← PÚBLICO (só 3 arquivos novos + assets)
-    ├── renovacoes.php          ← a aba "Renovações"
-    ├── renovacoes-api.php      ← JSON (login + CSRF)
-    ├── renovacoes-webhook.php  ← callbacks da Meta (assinatura HMAC)
-    └── renovacoes-assets/      ← CSS e JS puros
+│   ├── lib/                         ← regras, fila, provedores, webhook
+│   ├── migrations/                  ← migrações versionadas (só gr_*)
+│   ├── cron/renovacoes-cron.php     ← agendador (Cron do cPanel a cada 15 min)
+│   ├── bin/renovacoes-admin.php     ← diagnóstico, integridade, migração, menu, .htaccess, verificação HTTP, backup
+│   └── logs/                        ← log sem segredos
+└── gmaxcanais.com.br/               ← pasta pública do site
+    └── painel/                      ← painel existente (index.html, api.php, assets/…)
+        ├── renovacoes.php           ← novo: a aba "Renovações"
+        ├── renovacoes-api.php       ← novo: JSON (login + CSRF)
+        ├── renovacoes-webhook.php   ← novo: callbacks da Meta (assinatura HMAC)
+        └── renovacoes-assets/       ← novo: CSS e JS puros
 ```
+
+As páginas públicas localizam a biblioteca em `dirname(painel, 2)/gmax-renovacoes` = `/home1/gust1922/gmax-renovacoes`, sem arquivo extra. Se a biblioteca ficar em outro lugar, crie `painel/renovacoes-caminho.php` retornando o caminho.
 
 ### Tabelas novas (prefixo `gr_`, nenhuma tabela existente é alterada)
 

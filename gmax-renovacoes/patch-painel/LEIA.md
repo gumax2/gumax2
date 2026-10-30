@@ -15,9 +15,9 @@ Não são alterados: `api.php`, `assets/app.js` (continua `?v=vencimentos-3`), `
 
 **Como aplicar (recomendado):** o comando confere o arquivo REAL do servidor, mostra a diferença, faz cópia de segurança e só então grava:
 ```bash
-php ~/gmax-renovacoes/bin/renovacoes-admin.php menu verificar ~/public_html/painel/index.html   # só mostra
-php ~/gmax-renovacoes/bin/renovacoes-admin.php menu aplicar   ~/public_html/painel/index.html   # grava + backup
-php ~/gmax-renovacoes/bin/renovacoes-admin.php menu remover   ~/public_html/painel/index.html   # desfaz
+php ~/gmax-renovacoes/bin/renovacoes-admin.php menu verificar /home1/gust1922/gmaxcanais.com.br/painel/index.html   # só mostra
+php ~/gmax-renovacoes/bin/renovacoes-admin.php menu aplicar   /home1/gust1922/gmaxcanais.com.br/painel/index.html   # grava + backup
+php ~/gmax-renovacoes/bin/renovacoes-admin.php menu remover   /home1/gust1922/gmaxcanais.com.br/painel/index.html   # desfaz
 ```
 Se o `index.html` de produção for diferente do esperado (o ponto de inserção não aparecer exatamente uma vez), o comando **não altera nada** e avisa.
 

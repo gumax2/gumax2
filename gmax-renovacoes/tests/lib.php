@@ -192,3 +192,10 @@ function test(string $name, callable $fn, string $now = '2026-11-10 09:30:00'): 
         }
     }
 }
+
+/** Registra um teste que NÃO pôde ser executado (não conta como aprovado). */
+function skipTest(string $name, string $reason): void
+{
+    T::$results[] = [$name, null, $reason, 0.0];
+    echo "  ⏭ $name — PULADO: $reason\n";
+}

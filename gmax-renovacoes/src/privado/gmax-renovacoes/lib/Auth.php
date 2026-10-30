@@ -117,6 +117,7 @@ final class Auth
 
     public static function securityHeaders(): void
     {
+        header('X-GMAX-Renovacoes: 1'); // permite distinguir "respondido pelo módulo" de "bloqueado pelo servidor"
         header('X-Frame-Options: DENY');
         header('X-Content-Type-Options: nosniff');
         header('Referrer-Policy: same-origin');

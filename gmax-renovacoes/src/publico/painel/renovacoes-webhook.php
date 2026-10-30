@@ -12,6 +12,7 @@ $grDir = is_file(__DIR__ . '/renovacoes-caminho.php') ? (require __DIR__ . '/ren
 require $grDir . '/bootstrap.php';
 
 header('Content-Type: text/plain; charset=utf-8');
+header('X-GMAX-Renovacoes: 1');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 
