@@ -1,0 +1,1327 @@
+# GMAX Renovações — diff da versão 1.1.0 (commit 7e873b6) para 1.2.0
+# Exclui binários (ZIP, PNG) e o relatório de testes gerado.
+
+ gmax-renovacoes/LEIA_PRIMEIRO.md                   |  12 +-
+ gmax-renovacoes/docs/BACKUP_E_RECUPERACAO.md       |  14 +-
+ gmax-renovacoes/docs/DIAGNOSTICO.md                |  30 +--
+ gmax-renovacoes/docs/HTACCESS.md                   | 102 ++++++++
+ gmax-renovacoes/docs/INSTALACAO.md                 |  35 ++-
+ gmax-renovacoes/docs/PENDENCIAS.md                 |  41 ++--
+ gmax-renovacoes/docs/REVISAO_SEGURANCA.md          |  20 ++
+ gmax-renovacoes/patch-painel/LEIA.md               |   6 +-
+ .../src/privado/gmax-renovacoes/.htaccess          |   2 +-
+ .../gmax-renovacoes/bin/renovacoes-admin.php       | 133 ++++++++++-
+ .../src/privado/gmax-renovacoes/bootstrap.php      |   4 +-
+ .../src/privado/gmax-renovacoes/config.example.php |   2 +-
+ .../gmax-renovacoes/cron/renovacoes-cron.php       |   2 +-
+ .../src/privado/gmax-renovacoes/lib/Auth.php       |   1 +
+ .../privado/gmax-renovacoes/lib/HtaccessPatch.php  | 216 +++++++++++++++++
+ .../src/privado/gmax-renovacoes/logs/.htaccess     |   2 +-
+ .../src/publico/painel/renovacoes-webhook.php      |   1 +
+ gmax-renovacoes/tests/lib.php                      |   7 +
+ gmax-renovacoes/tests/run.php                      |  11 +-
+ gmax-renovacoes/tests/t_apache.php                 | 256 +++++++++++++++++++++
+ gmax-renovacoes/tests/t_regras.php                 |  83 +++++++
+ 21 files changed, 912 insertions(+), 68 deletions(-)
+
+diff --git a/gmax-renovacoes/LEIA_PRIMEIRO.md b/gmax-renovacoes/LEIA_PRIMEIRO.md
+index 8da57f9..d02c6db 100644
+--- a/gmax-renovacoes/LEIA_PRIMEIRO.md
++++ b/gmax-renovacoes/LEIA_PRIMEIRO.md
+@@ -1,4 +1,4 @@
+-# GMAX Renovações 1.1.0 — lembretes de renovação por WhatsApp
++# GMAX Renovações 1.2.0 — lembretes de renovação por WhatsApp
+ 
+ Módulo adicional para o painel **GMAX — Central de Gestão** (`/painel/`), integrado à base de 15/10/2026 (`GMAX_Base_Painel_Para_Claude.zip`). Ele identifica cada **ponto/pacote** (`client_plans`) perto do vencimento, pelo vencimento próprio de cada um. O envio dos lembretes pelo WhatsApp parte do servidor.
+ 
+@@ -9,7 +9,7 @@ Módulo adicional para o painel **GMAX — Central de Gestão** (`/painel/`), in
+ | Item | Estado |
+ |---|---|
+ | Leitura de clientes e pacotes reais (`clients`, `client_plans.due_date`, `client_exclusions`, `price_cents`) | **pronto**, testado em banco descartável com a estrutura real |
+-| Sessão do painel (`gmax_session`, `admin`, `csrf`, expiração 3600 s, HTTPS) | **pronto**, testado com o `api.php` real em servidor local (89/89 em 30/10/2026, duas execuções completas) |
++| Sessão do painel (`gmax_session`, `admin`, `csrf`, expiração 3600 s, HTTPS) | **pronto**, testado com o `api.php` real em servidor local (98/98 em 30/10/2026, nenhum teste pulado: inclui Apache 2.4.58 real e Chromium) |
+ | Preservação dos dados (clientes, pacotes, vencimentos, preços, custos, financeiro, exclusões) | **verificada em banco descartável** com dados fictícios. **Na produção, só depois do comparativo de integridade** do passo 5 da instalação |
+ | Regras, fila, agendador, revalidação, webhook, aba Renovações | **pronto e testado** |
+ | Envio pelo WhatsApp | **simulado**. O simulado **não prova entrega real** |
+@@ -18,9 +18,10 @@ Módulo adicional para o painel **GMAX — Central de Gestão** (`/painel/`), in
+ 
+ ## O que muda no servidor
+ 
+-- **Novo:** `/home1/gust1922/gmax-renovacoes/` (privado), 3 páginas e assets em `public_html/painel/`, 8 tabelas `gr_*`.
++- **Novo:** `/home1/gust1922/gmax-renovacoes/` (privado), 3 páginas e assets em `/home1/gust1922/gmaxcanais.com.br/painel/`, 8 tabelas `gr_*`.
+ - **Alterado:** só o `painel/index.html`, onde entram 2 linhas: o link do menu e uma folha de estilo. O comando que aplica confere o arquivo atual, faz cópia e pode desfazer (`patch-painel/`).
+-- **Não alterado:** `api.php`, `app.js`, CSS do painel, config do painel, `.htaccess`, tabelas existentes, outros projetos.
++- **`.htaccess`:** só se o diagnóstico indicar. Recebe um bloco marcado que libera **apenas** os 3 arquivos do módulo, com cópia de segurança e reversão (`docs/HTACCESS.md`). Testado no Apache 2.4.58.
++- **Não alterado:** `api.php`, `app.js`, CSS do painel, config do painel, tabelas existentes, outros projetos.
+ 
+ ## Conteúdo
+ 
+@@ -32,11 +33,12 @@ Módulo adicional para o painel **GMAX — Central de Gestão** (`/painel/`), in
+ | `sql/001_inicial.sql` | migração só com `CREATE TABLE IF NOT EXISTS gr_*` e `INSERT IGNORE INTO gr_*` |
+ | `sql/rollback_remover_modulo.sql` | remove só `gr_*` |
+ | `docs/INSTALACAO.md` | backup → retrato antes → migração → retrato depois → comparativo → menu → Cron |
++| `docs/HTACCESS.md` | diagnóstico do 403 e liberação mínima dos 3 arquivos (aplicar, conferir, desfazer) |
+ | `docs/BACKUP_E_RECUPERACAO.md` | backup SQL completo (fora do Git/ZIP) e reversão em níveis |
+ | `docs/DIAGNOSTICO.md` | base, mapeamento e arquitetura |
+ | `docs/WHATSAPP_API.md` | provedor, custos, coexistência, modelos, consentimento |
+ | `docs/TESTES_RESULTADO.md` | testes executados (gerado automaticamente) |
+-| `docs/REVISAO_SEGURANCA.md` | revisões de segurança (2 rodadas) |
++| `docs/REVISAO_SEGURANCA.md` | revisões de segurança (3 rodadas; a 3ª feita pelo coordenador, ver o arquivo) |
+ | `docs/PENDENCIAS.md` | o que realmente falta para ativar |
+ | `docs/capturas/` | telas com dados fictícios |
+ | `MANIFESTO.txt` | arquivos e hashes |
+diff --git a/gmax-renovacoes/docs/BACKUP_E_RECUPERACAO.md b/gmax-renovacoes/docs/BACKUP_E_RECUPERACAO.md
+index faff86b..6f99c9a 100644
+--- a/gmax-renovacoes/docs/BACKUP_E_RECUPERACAO.md
++++ b/gmax-renovacoes/docs/BACKUP_E_RECUPERACAO.md
+@@ -12,10 +12,11 @@
+      mysqldump --single-transaction --routines --default-character-set=utf8mb4 -u USUARIO_DO_BANCO -p gust1922_gmaxpainel > ~/backup-gmaxpainel-$(date +%Y%m%d-%H%M).sql
+      chmod 600 ~/backup-gmaxpainel-*.sql
+      ```
+-2. **Arquivos do painel:** Gerenciador de Arquivos → `public_html/painel` → Compactar → baixar o ZIP.
+-3. **Conferir o backup:** o arquivo `.sql` não pode estar vazio e deve conter `CREATE TABLE` de `clients`, `client_plans`, `client_exclusions`, `entries`, `entry_plans`, `settings` e `admins`.
+-4. **Retrato de integridade** (`integridade-antes.json`, passo 4 da instalação). Ele **não** substitui o backup. Serve para comparar depois.
+-5. Baixe tudo para fora do servidor e apague as cópias de `~/` depois da instalação validada.
++2. **`.htaccess` do painel e da raiz do site** (`gmaxcanais.com.br/.htaccess`, se existir): baixe uma cópia de cada (Gerenciador de Arquivos → "Mostrar arquivos ocultos").
++3. **Arquivos do painel:** Gerenciador de Arquivos → `/home1/gust1922/gmaxcanais.com.br/painel` → Compactar → baixar o ZIP.
++4. **Conferir o backup:** o arquivo `.sql` não pode estar vazio e deve conter `CREATE TABLE` de `clients`, `client_plans`, `client_exclusions`, `entries`, `entry_plans`, `settings` e `admins`.
++5. **Retrato de integridade** (`integridade-antes.json`, passo 4 da instalação). Ele **não** substitui o backup. Serve para comparar depois.
++6. Baixe tudo para fora do servidor e apague as cópias de `~/` depois da instalação validada.
+ 
+ ## B. Prova de preservação
+ 
+@@ -32,8 +33,9 @@ Não grava nomes, telefones nem códigos. `integridade-comparar antes.json depoi
+ |---|---|---|---|
+ | 1 — Pausar | algo estranho | Aba Configurações → **Pausa global** (ou desmarcar Módulo ativo) | nenhum |
+ | 2 — Parar o agendador | interromper tudo | Cron Jobs → excluir a linha do `renovacoes-cron.php` | nenhum |
+-| 3 — Tirar do menu | link ou aba com problema | `php bin/renovacoes-admin.php menu remover ~/public_html/painel/index.html` (ou restaurar a cópia `index.html.antes-renovacoes-*`) | nenhum |
+-| 4 — Remover o módulo | desistir | níveis 2 e 3 + apagar `public_html/painel/renovacoes*` e `renovacoes-assets/` + apagar `~/gmax-renovacoes/` + (opcional) `sql/rollback_remover_modulo.sql` no phpMyAdmin (apaga **só** `gr_*`) | nenhum |
++| 3 — Tirar do menu | link ou aba com problema | `php bin/renovacoes-admin.php menu remover /home1/gust1922/gmaxcanais.com.br/painel/index.html` (ou restaurar a cópia `index.html.antes-renovacoes-*`) | nenhum |
++| 3b — Desfazer o `.htaccess` | se a liberação foi aplicada | `php bin/renovacoes-admin.php htaccess remover <caminho/.htaccess>` (ou restaurar `.htaccess.antes-renovacoes-*`) | nenhum |
++| 4 — Remover o módulo | desistir | níveis 2, 3 e 3b + apagar `/home1/gust1922/gmaxcanais.com.br/painel/renovacoes*` e `renovacoes-assets/` + apagar `~/gmax-renovacoes/` + (opcional) `sql/rollback_remover_modulo.sql` no phpMyAdmin (apaga **só** `gr_*`) | nenhum |
+ | 5 — Restaurar backup | **somente** se o comparativo mostrar diferença nas tabelas do painel | restaurar o dump do passo A (phpMyAdmin → Importar) e o ZIP da pasta `painel` | volta ao ponto do backup; perde alterações feitas depois dele |
+ 
+ O módulo não grava nas tabelas do painel. Isso é verificado por teste automático e, na instalação, pelo comparativo de integridade. Por isso os níveis 1 a 4 não afetam clientes, pacotes, vencimentos, recebimentos, custos, despesas, relatórios, exportações ou a lixeira.
+diff --git a/gmax-renovacoes/docs/DIAGNOSTICO.md b/gmax-renovacoes/docs/DIAGNOSTICO.md
+index 280614d..f366928 100644
+--- a/gmax-renovacoes/docs/DIAGNOSTICO.md
++++ b/gmax-renovacoes/docs/DIAGNOSTICO.md
+@@ -28,22 +28,26 @@ Valores de exemplo do `app.js` (`seed()`, modo `?demo=1`) são fictícios e não
+ ## 2. Arquitetura
+ 
+ ```
+-/home/USUARIO/
+-├── gmax-renovacoes/            ← PRIVADO (fora de public_html)
+-│   ├── config.php              ← credenciais e mapeamento (chmod 600) — você cria a partir do exemplo
++/home1/gust1922/
++├── gmax-painel/private/config.php   ← config privado do PAINEL (já existe; o módulo só lê dsn/usuário/senha)
++├── gmax-renovacoes/                 ← PRIVADO, novo (fora da pasta do site)
++│   ├── config.php                   ← mapeamento e opções, sem senhas (chmod 600) — criado a partir do exemplo
+ │   ├── bootstrap.php
+-│   ├── lib/                    ← regras, fila, provedores, webhook
+-│   ├── migrations/             ← migrações versionadas
+-│   ├── cron/renovacoes-cron.php← agendador (Cron do cPanel a cada 15 min)
+-│   ├── bin/renovacoes-admin.php← diagnóstico, migração, backup
+-│   └── logs/                   ← log sem segredos
+-└── public_html/painel/         ← PÚBLICO (só 3 arquivos novos + assets)
+-    ├── renovacoes.php          ← a aba "Renovações"
+-    ├── renovacoes-api.php      ← JSON (login + CSRF)
+-    ├── renovacoes-webhook.php  ← callbacks da Meta (assinatura HMAC)
+-    └── renovacoes-assets/      ← CSS e JS puros
++│   ├── lib/                         ← regras, fila, provedores, webhook
++│   ├── migrations/                  ← migrações versionadas (só gr_*)
++│   ├── cron/renovacoes-cron.php     ← agendador (Cron do cPanel a cada 15 min)
++│   ├── bin/renovacoes-admin.php     ← diagnóstico, integridade, migração, menu, .htaccess, verificação HTTP, backup
++│   └── logs/                        ← log sem segredos
++└── gmaxcanais.com.br/               ← pasta pública do site
++    └── painel/                      ← painel existente (index.html, api.php, assets/…)
++        ├── renovacoes.php           ← novo: a aba "Renovações"
++        ├── renovacoes-api.php       ← novo: JSON (login + CSRF)
++        ├── renovacoes-webhook.php   ← novo: callbacks da Meta (assinatura HMAC)
++        └── renovacoes-assets/       ← novo: CSS e JS puros
+ ```
+ 
++As páginas públicas localizam a biblioteca em `dirname(painel, 2)/gmax-renovacoes` = `/home1/gust1922/gmax-renovacoes`, sem arquivo extra. Se a biblioteca ficar em outro lugar, crie `painel/renovacoes-caminho.php` retornando o caminho.
++
+ ### Tabelas novas (prefixo `gr_`, nenhuma tabela existente é alterada)
+ 
+ | Tabela | Função |
+diff --git a/gmax-renovacoes/docs/HTACCESS.md b/gmax-renovacoes/docs/HTACCESS.md
+new file mode 100644
+index 0000000..79820e3
+--- /dev/null
++++ b/gmax-renovacoes/docs/HTACCESS.md
+@@ -0,0 +1,102 @@
++# `.htaccess`: diagnóstico e liberação mínima (evitar o erro 403)
++
++## O problema
++
++Anteriormente, uma regra no `.htaccess` bloqueava todos os arquivos PHP e, depois da correção, passou a liberar só o `api.php`. Se essa regra continuar ativa, o Apache responderá **403** para os três arquivos novos:
++
++- `renovacoes.php` (a aba);
++- `renovacoes-api.php` (dados da aba);
++- `renovacoes-webhook.php` (callbacks da Meta).
++
++O 403 vem do servidor, antes de o módulo rodar. Por isso o módulo envia o cabeçalho `X-GMAX-Renovacoes: 1` em todas as respostas: **com** o cabeçalho, quem respondeu foi o módulo; **sem** ele, foi o servidor.
++
++## O que a liberação faz e o que NÃO faz
++
++- **Faz:** acrescenta um bloco marcado que libera **somente** os três nomes exatos (`^renovacoes(-api|-webhook)?\.php$`), na mesma forma da exceção que já existe para o `api.php`.
++- **Não faz:**
++  - não libera PHP em geral;
++  - não remove nem altera as regras existentes;
++  - não reativa outros arquivos. Nos testes, `suspeito.php`, `xrenovacoes.php`, `renovacoes-teste.php` e `renovacoes-caminho.php` continuaram bloqueados.
++- **Segurança preservada:** as páginas continuam exigindo a sessão do painel (sem login: página → redireciona; API → 401). O webhook continua exigindo a assinatura `X-Hub-Signature-256` (sem assinatura ou com assinatura falsa → 401).
++
++## Passo a passo (Terminal do cPanel)
++
++Faça antes o backup da instalação (`BACKUP_E_RECUPERACAO.md`). O comando também guarda uma cópia do `.htaccess`.
++
++### 1. Diagnóstico (só lê)
++```bash
++cd /home1/gust1922/gmax-renovacoes
++php bin/renovacoes-admin.php htaccess verificar /home1/gust1922/gmaxcanais.com.br/painel
++```
++O comando procura `.htaccess` na pasta do painel e em até 3 pastas acima: `gmaxcanais.com.br/`, `/home1/gust1922/` etc. Para cada arquivo encontrado, informa:
++
++- **"Nenhuma regra deste arquivo bloqueia os arquivos do módulo"**: nada a fazer.
++- **"formato: Files"** ou **"formato: Rewrite"**: mostra o patch proposto e o comando para aplicar.
++- **"formato: desconhecido"**: **não altera nada**. Envie o `.htaccess` (sem senhas) para análise.
++
++Também é possível ver o arquivo com o Gerenciador de Arquivos do cPanel ("Mostrar arquivos ocultos").
++
++### 2. Aplicar (somente se o passo 1 indicar)
++```bash
++php bin/renovacoes-admin.php htaccess aplicar /home1/gust1922/gmaxcanais.com.br/painel/.htaccess /home1/gust1922/gmaxcanais.com.br/painel
++```
++Use o caminho do `.htaccess` que o diagnóstico apontou, seja o da pasta do painel ou o da raiz `gmaxcanais.com.br/.htaccess`. O comando faz o seguinte:
++
++1. grava a cópia `.htaccess.antes-renovacoes-AAAAMMDD-HHMMSS`, conferida por hash;
++2. grava o novo arquivo de forma atômica, mantendo as permissões;
++3. mostra exatamente as linhas acrescentadas.
++
++### 3. Conferir pela web
++```bash
++php bin/renovacoes-admin.php verificar-http https://gmaxcanais.com.br/painel/
++```
++Todos os itens devem dar **OK**:
++- página sem sessão redireciona;
++- API sem sessão → 401;
++- webhook sem token → 403 do módulo;
++- webhook sem assinatura ou com assinatura falsa → 401;
++- `api.php` continua respondendo;
++- um PHP qualquer continua bloqueado.
++
++Se algum item disser "bloqueado pelo servidor", a regra ainda está ativa. Nesse caso, desfaça (passo 4) e me envie a saída.
++
++### 4. Desfazer
++```bash
++php bin/renovacoes-admin.php htaccess remover /home1/gust1922/gmaxcanais.com.br/painel/.htaccess
++```
++Remove só o bloco marcado e devolve o arquivo **byte a byte** ao original. Isso foi testado nos 4 formatos. Também guarda uma cópia antes de remover. Alternativa manual: restaurar a cópia `.htaccess.antes-renovacoes-*` pelo Gerenciador de Arquivos.
++
++## Como fica o bloco (exemplos testados no Apache 2.4.58)
++
++**Formato Files (Apache 2.4).** Copia a exceção do `api.php`, só trocando o nome:
++```apache
++<FilesMatch "\.php$">
++  Require all denied
++</FilesMatch>
++<Files "api.php">
++  Require all granted
++</Files>
++# BEGIN GMAX Renovacoes (liberar somente os 3 arquivos do modulo)
++<FilesMatch "^renovacoes(-api|-webhook)?\.php$">
++  Require all granted
++</FilesMatch>
++# END GMAX Renovacoes
++```
++**Formato Files antigo (`Order/Deny/Allow`):** igual, com `Order allow,deny` / `Allow from all`, copiados da exceção existente.
++
++**Formato Rewrite.** Regra de passagem inserida **antes** da regra de bloqueio, ancorada na pasta do painel:
++```apache
++RewriteEngine On
++# BEGIN GMAX Renovacoes (liberar somente os 3 arquivos do modulo)
++RewriteRule ^renovacoes(-api|-webhook)?\.php$ - [L]
++# END GMAX Renovacoes
++RewriteCond %{REQUEST_URI} !/api\.php$
++RewriteRule \.php$ - [F,L]
++```
++Quando o `.htaccess` está na raiz do domínio, a âncora vira `^painel/renovacoes(-api|-webhook)?\.php$`.
++
++Observação sobre o formato Files: `<FilesMatch>` compara só o **nome** do arquivo, como já acontece com a exceção do `api.php`. Um arquivo com um desses três nomes exatos em uma subpasta também seria liberado; nenhum existe. O formato Rewrite fica ancorado na pasta `painel/`.
++
++## Webhook e proteção por senha
++
++Se a pasta `/painel/` usar senha HTTP (`AuthType Basic`), a Meta não alcançará o webhook. O diagnóstico não altera esse tipo de proteção. Nesse caso, me avise antes de configurar o webhook.
+diff --git a/gmax-renovacoes/docs/INSTALACAO.md b/gmax-renovacoes/docs/INSTALACAO.md
+index 7b223af..a8cbef4 100644
+--- a/gmax-renovacoes/docs/INSTALACAO.md
++++ b/gmax-renovacoes/docs/INSTALACAO.md
+@@ -5,13 +5,14 @@
+ A instalação **só acrescenta**:
+ - arquivos novos: a biblioteca privada e 3 páginas + assets em `/painel/`;
+ - 8 tabelas `gr_*`;
+-- 2 linhas no `index.html` (link do menu), aplicadas com conferência e cópia de segurança.
++- 2 linhas no `index.html` (link do menu), aplicadas com conferência e cópia de segurança;
++- **somente se o diagnóstico indicar**, um bloco marcado no `.htaccess` liberando **apenas** `renovacoes.php`, `renovacoes-api.php` e `renovacoes-webhook.php` (com cópia e reversão; ver `HTACCESS.md`).
+ 
+-Ela **não** executa DROP, TRUNCATE, DELETE, ALTER ou seed em tabelas existentes. **Não** reimporta migrations antigas de pacotes. **Não** altera `api.php`, `app.js`, `config.php` do painel, `.htaccess` ou outros projetos.
++Ela **não** executa DROP, TRUNCATE, DELETE, ALTER ou seed em tabelas existentes. **Não** reimporta migrations antigas de pacotes. **Não** altera `api.php`, `app.js`, `config.php` do painel nem outros projetos. **Não** libera PHP em geral.
+ 
+ Caminhos usados abaixo (confira no seu servidor):
+ - conta: `/home1/gust1922`;
+-- painel público: `/home1/gust1922/public_html/painel/`;
++- painel público: `/home1/gust1922/gmaxcanais.com.br/painel/`;
+ - config privado do painel: `/home1/gust1922/gmax-painel/private/config.php` (lido pelo `api.php`).
+ 
+ Requisitos: PHP 8.0+ com `pdo_mysql`, `curl`, `mbstring`.
+@@ -23,10 +24,10 @@ Siga `BACKUP_E_RECUPERACAO.md`, parte A: dump SQL **completo** do banco `gust192
+ ## Passo 2 — Enviar os arquivos (não ativa nada)
+ 
+ Gerenciador de Arquivos do cPanel:
+-1. Envie o ZIP para `/home1/gust1922/` (acima de `public_html`) e extraia.
++1. Envie o ZIP para `/home1/gust1922/` (fora da pasta do site `gmaxcanais.com.br`) e extraia.
+ 2. Mova `privado/gmax-renovacoes` para `/home1/gust1922/gmax-renovacoes`.
+-3. Confira que **não existem** em `public_html/painel/`: `renovacoes.php`, `renovacoes-api.php`, `renovacoes-webhook.php`, `renovacoes-caminho.php`, `renovacoes-assets/`. Se existir algum, pare.
+-4. Copie o **conteúdo** de `publico/painel/` para `public_html/painel/` (somente arquivos novos).
++3. Confira que **não existem** em `/home1/gust1922/gmaxcanais.com.br/painel/`: `renovacoes.php`, `renovacoes-api.php`, `renovacoes-webhook.php`, `renovacoes-caminho.php`, `renovacoes-assets/`. Se existir algum, pare.
++4. Copie o **conteúdo** de `publico/painel/` para `/home1/gust1922/gmaxcanais.com.br/painel/` (somente arquivos novos).
+ 
+ ## Passo 3 — Configurar (sem segredos novos)
+ 
+@@ -41,7 +42,7 @@ No **Terminal** do cPanel:
+ cd ~/gmax-renovacoes
+ php bin/renovacoes-admin.php diagnostico                      # tabelas/colunas mapeadas, versão do PHP/MySQL
+ php bin/renovacoes-admin.php integridade ~/integridade-antes.json   # contagens + hashes + totais, sem dados pessoais
+-php bin/renovacoes-admin.php menu verificar ~/public_html/painel/index.html   # mostra a mudança do menu, não grava
++php bin/renovacoes-admin.php menu verificar /home1/gust1922/gmaxcanais.com.br/painel/index.html   # mostra a mudança do menu, não grava
+ ```
+ O diagnóstico deve mostrar `clients`, `client_plans` e `client_exclusions` encontradas, com "mapeamento ok". Se aparecer FALHA, pare e me envie a saída. Ela lista só nomes de tabelas e colunas.
+ 
+@@ -56,16 +57,26 @@ O resultado deve ser **"dados do painel preservados"**, com todas as tabelas IGU
+ 
+ Sem Terminal: importe `sql/001_inicial.sql` no phpMyAdmin. Ele contém só `CREATE TABLE IF NOT EXISTS gr_*` e `INSERT IGNORE INTO gr_*`. Nesse caso, compare **contagem de linhas** das tabelas do painel antes e depois na aba Estrutura do phpMyAdmin.
+ 
+-## Passo 6 — Link no menu
++## Passo 6 — `.htaccess` (evitar o 403)
+ 
+ ```bash
+-php bin/renovacoes-admin.php menu aplicar ~/public_html/painel/index.html
++php bin/renovacoes-admin.php htaccess verificar /home1/gust1922/gmaxcanais.com.br/painel
++php bin/renovacoes-admin.php verificar-http https://gmaxcanais.com.br/painel/
++```
++- Se `verificar-http` der **"Tudo conforme"**, pule para o passo 7.
++- Se apontar **"bloqueado pelo servidor"**, aplique a liberação mínima com o comando que o `htaccess verificar` mostrar. Depois rode `verificar-http` de novo. Detalhes, exemplos e como desfazer estão em **`HTACCESS.md`**.
++- Formato desconhecido: não altere à mão às pressas. Me envie o `.htaccess` (sem senhas).
++
++## Passo 7 — Link no menu
++
++```bash
++php bin/renovacoes-admin.php menu aplicar /home1/gust1922/gmaxcanais.com.br/painel/index.html
+ ```
+ O comando confere o arquivo atual, grava uma cópia `index.html.antes-renovacoes-AAAAMMDD-HHMMSS` e acrescenta o link. Para desfazer: `menu remover`. Detalhes e diff em `patch-painel/`.
+ 
+ Abra o painel (no iPhone, pelo atalho). No menu aparece **Renovações**, e a página abre com a faixa amarela **MODO SIMULAÇÃO**. A sessão é a mesma do painel: sair do painel encerra o acesso à aba, e 1 hora sem uso também.
+ 
+-## Passo 7 — Agendamento (Cron)
++## Passo 8 — Agendamento (Cron)
+ 
+ cPanel → Cron Jobs → "A cada 15 minutos" (`*/15 * * * *`):
+ ```
+@@ -76,7 +87,7 @@ cPanel → Cron Jobs → "A cada 15 minutos" (`*/15 * * * *`):
+ - Com o módulo **desativado** (padrão), o cron só registra a execução e não gera nada.
+ - Na aba Vencimentos, "último cron" deve mudar a cada 15 minutos.
+ 
+-## Passo 8 — Simulação (sem clientes reais)
++## Passo 9 — Simulação (sem clientes reais)
+ 
+ 1. Configurações:
+    - confira os textos, o horário, a chave Pix e as instruções → **Salvar**;
+@@ -85,7 +96,7 @@ cPanel → Cron Jobs → "A cada 15 minutos" (`*/15 * * * *`):
+ 3. Para ver a simulação, marque **Módulo ativo** (o modo continua **Simulação**). Mensagens aparecem no Histórico com a etiqueta **SIMULAÇÃO**. Nada sai do servidor e isso **não** prova entrega real.
+ 4. Para desligar: desmarque Módulo ativo ou use Pausa global.
+ 
+-## Passo 9 — Envio real (somente em etapa futura, após sua autorização)
++## Passo 10 — Envio real (somente em etapa futura, após sua autorização)
+ 
+ Pré-requisitos e passos: `WHATSAPP_API.md`. Resumo:
+ - credenciais no `config.php` do módulo, no servidor;
+diff --git a/gmax-renovacoes/docs/PENDENCIAS.md b/gmax-renovacoes/docs/PENDENCIAS.md
+index 9c5d425..d344489 100644
+--- a/gmax-renovacoes/docs/PENDENCIAS.md
++++ b/gmax-renovacoes/docs/PENDENCIAS.md
+@@ -1,4 +1,4 @@
+-# O que realmente resta (situação em 30/10/2026)
++# O que realmente resta (versão 1.2.0, 30/10/2026)
+ 
+ ## Já resolvido nesta etapa
+ - Base do painel recebida e integrada. A tabela abaixo mostra o que a base trouxe e como o módulo usa cada item.
+@@ -12,38 +12,47 @@
+ | IDs | texto |
+ | Login | sessão do painel reaproveitada; módulo **sem credencial própria**, lê o config privado do painel |
+ | Menu | link inserido com conferência, cópia e reversão |
++| Caminho | painel em `/home1/gust1922/gmaxcanais.com.br/painel/`; biblioteca em `/home1/gust1922/gmax-renovacoes` |
++| `.htaccess` | diagnóstico + liberação mínima só dos 3 arquivos, com cópia e reversão |
+ 
+-- 89 testes executados em bancos **descartáveis**, incluindo o `api.php` real: login, CSRF, logout, expiração, renovação por `entry`, `delete_client` e regressão do `action=data`. Resultado em `TESTES_RESULTADO.md`.
+-- Duas rodadas de revisão de segurança, sem achado de gravidade alta. Correções aplicadas e cobertas por testes (`REVISAO_SEGURANCA.md`).
++- 98 testes executados em bancos **descartáveis**, sem nenhum pulado. Incluem:
++  - o `api.php` real: login, CSRF, logout, expiração, renovação por `entry`, `delete_client` e regressão do `action=data`;
++  - **Apache 2.4.58 real** com 4 formatos de `.htaccess`;
++  - o teste visual no **Chromium**.
++  Resultado em `TESTES_RESULTADO.md`.
++- Três rodadas de revisão de segurança, sem achado de gravidade alta. A 3ª, sobre o `.htaccess`, foi feita pelo coordenador porque o agente parou por limite de uso. Correções aplicadas e cobertas por testes (`REVISAO_SEGURANCA.md`).
+ 
+ ## Para INSTALAR (depende de você)
+-1. **Revisão do pacote** (Codex/você): ZIP `dist/GMAX_Renovacoes_1.1.0_incremental.zip` e a branch `claude/gmax-whatsapp-renewal-reminders-poplk0`.
+-2. **Backup SQL completo** do banco `gust1922_gmaxpainel` + ZIP da pasta `painel`, guardados fora do servidor e fora do Git (`BACKUP_E_RECUPERACAO.md`, parte A).
++1. **Revisão do pacote** (Codex/você): ZIP `dist/GMAX_Renovacoes_1.2.0_incremental.zip` e a branch `claude/gmax-whatsapp-renewal-reminders-poplk0`.
++2. **Backup SQL completo** do banco `gust1922_gmaxpainel` + cópia dos `.htaccess` + ZIP da pasta `/home1/gust1922/gmaxcanais.com.br/painel`, guardados fora do servidor e fora do Git (`BACKUP_E_RECUPERACAO.md`, parte A).
+ 3. **Conferir no servidor** que o caminho do config privado do painel é o mesmo do `api.php` (`/home1/gust1922/gmax-painel/private/config.php`) e que o PHP da linha de comando é 8.0+.
+ 4. Seguir `INSTALACAO.md`. O passo 5 (comparativo de integridade antes/depois) é a **prova na produção**. Até lá, a preservação só foi demonstrada em banco descartável, com a estrutura da base de 15/10, que pode diferir da produção.
+-5. Aplicar o link do menu com `menu verificar` e depois `menu aplicar`. Se o `index.html` de produção estiver diferente da base, o comando não altera nada; nesse caso me envie o arquivo.
++5. **`.htaccess`:** rodar `htaccess verificar` e `verificar-http` (`HTACCESS.md`).
++   - Se a regra antiga bloquear os 3 arquivos, aplicar a liberação mínima.
++   - Formato desconhecido: me enviar o `.htaccess` (sem senhas). O conteúdo real ainda não foi visto; só os 4 formatos comuns foram testados no Apache.
++6. Aplicar o link do menu com `menu verificar` e depois `menu aplicar`. Se o `index.html` de produção estiver diferente da base, o comando não altera nada; nesse caso me envie o arquivo.
+ 
+ ## Para ATIVAR a simulação
+-6. Revisar os textos na aba Configurações e marcar **Módulo ativo** (Modo continua **Simulação**). O simulado não envia nada e **não prova entrega**.
+-7. Registrar autorizações **reais** na aba Autorizações. Importar a carteira não autorizou ninguém.
++7. Revisar os textos na aba Configurações e marcar **Módulo ativo** (Modo continua **Simulação**). O simulado não envia nada e **não prova entrega**.
++8. Registrar autorizações **reais** na aba Autorizações. Importar a carteira não autorizou ninguém.
+ 
+ ## Para o ENVIO REAL (etapa futura, só com sua autorização expressa)
+-8. Escolher o caminho do número (`WHATSAPP_API.md` §2):
++9. Escolher o caminho do número (`WHATSAPP_API.md` §2):
+    - coexistência via parceiro (mantém o número e o app);
+    - ou número novo direto na Cloud API.
+    Se for um parceiro com endpoint próprio, é preciso escrever o conector dele.
+-9. Conta Meta Business + WABA + forma de pagamento. Conferir a **tabela oficial de preços** (BRL).
+-10. Credenciais no `config.php` do módulo, **somente no servidor**:
++10. Conta Meta Business + WABA + forma de pagamento. Conferir a **tabela oficial de preços** (BRL).
++11. Credenciais no `config.php` do módulo, **somente no servidor**:
+     - `phone_number_id`
+     - `waba_id`
+     - token de Usuário do Sistema
+     - App Secret
+     - verify token
+-11. Cadastrar e aprovar os **6 modelos** (com a linha de descadastro no texto aprovado). Depois, preencher os nomes na aba.
+-12. Configurar o webhook `/painel/renovacoes-webhook.php`, campo `messages`. Se a pasta `/painel/` tiver senha HTTP no `.htaccess`, avise: não altero o `.htaccess`.
+-13. Confirmar a chave Pix `gumaxskins@gmail.com` e as instruções na aba.
+-14. Modo Real com **"somente números de teste"** marcado → mensagem de teste para um contato **interno** → conferir *Aceito → Entregue → Lido* no Histórico.
+-15. Só então desmarcar "somente números de teste".
++12. Cadastrar e aprovar os **6 modelos** (com a linha de descadastro no texto aprovado). Depois, preencher os nomes na aba.
++13. Configurar o webhook `/painel/renovacoes-webhook.php`, campo `messages`. Se a pasta `/painel/` tiver senha HTTP (`AuthType Basic`), avise: a liberação automática do `.htaccess` não mexe nesse tipo de proteção.
++14. Confirmar a chave Pix `gumaxskins@gmail.com` e as instruções na aba.
++15. Modo Real com **"somente números de teste"** marcado → mensagem de teste para um contato **interno** → conferir *Aceito → Entregue → Lido* no Histórico.
++16. Só então desmarcar "somente números de teste".
+ 
+ ## Limitações conhecidas (não bloqueiam)
+ - A base é a entrega de 15/10, não um download da produção. Diferenças na produção aparecem no `diagnostico`, no `menu verificar` e no comparativo de integridade. Em nenhum caso o módulo grava por cima.
+diff --git a/gmax-renovacoes/docs/REVISAO_SEGURANCA.md b/gmax-renovacoes/docs/REVISAO_SEGURANCA.md
+index 5ca3f5b..82f8ac3 100644
+--- a/gmax-renovacoes/docs/REVISAO_SEGURANCA.md
++++ b/gmax-renovacoes/docs/REVISAO_SEGURANCA.md
+@@ -147,3 +147,23 @@ Testes: `php -l` passou em todos os PHP. `php tests/run.php` deu 73/77; as 4 fal
+ | R2-11 textos | **Corrigido** em DIAGNOSTICO; LEIA_PRIMEIRO só diz "testado" com o resultado da execução completa |
+ 
+ Testes de regressão: `tests/t_regras.php`, seção "rodada 2".
++
++---
++
++## Rodada 3 (.htaccess e caminho da hospedagem) — versão 1.2.0
++
++**Quem revisou:** o agente de segurança foi acionado, mas **parou por limite de uso da API antes de concluir** e não registrou achados. Esta rodada foi feita pelo coordenador, com verificação por testes no Apache real. Recomenda-se que a revisão do Codex inclua `lib/HtaccessPatch.php`.
++
++| # | Ponto verificado | Resultado |
++|---|---|---|
++| R3-1 | Liberar mais que os 3 arquivos | Regex `^renovacoes(-api|-webhook)?\.php$` com âncoras. Testado no Apache 2.4.58: `suspeito.php`, `xrenovacoes.php`, `renovacoes-teste.php` e `renovacoes-caminho.php` continuam 403. Controle negativo: patch propositalmente amplo (`\.php$`) **é detectado** pelos testes. Maiúsculas não são liberadas |
++| R3-2 | `<FilesMatch>` vale para o nome em qualquer subpasta | **Aceito/documentado**: mesmo comportamento da exceção existente do `api.php`; nenhum arquivo com esses nomes em subpastas. O formato Rewrite é ancorado na pasta `painel/` |
++| R3-3 | `[L]` no formato Rewrite pula regras **posteriores** à de bloqueio (ex.: redirecionamento HTTPS colocado depois) | **Aceito/documentado**: a regra é inserida imediatamente antes da regra de bloqueio, então as regras anteriores continuam valendo. As 3 páginas exigem HTTPS por conta própria (403 em HTTP) |
++| R3-4 | Detecção errada (blocos em comentário, `<Files ~>`, IfModule, `[OR]`, raiz do domínio) | Exceção comentada **não** conta como exceção (recusa). `<Files ~>` reconhecido. Bloco inserido dentro do mesmo `<IfModule>`. Cadeia com `[OR]` tratada de forma conservadora. Formato desconhecido ou bloqueio sem exceção do `api.php` → **não altera nada** |
++| R3-5 | `remover` apagar conteúdo do usuário | Remove apenas o trecho entre os marcadores `# BEGIN/END GMAX Renovacoes`. Reversão byte a byte testada nos 4 formatos, com e sem quebra de linha final. Também grava cópia antes |
++| R3-6 | Gravação insegura | Cópia conferida por hash antes de gravar, escrita atômica preservando permissões, só aceita arquivo chamado `.htaccess`, pasta do painel precisa estar dentro da pasta do `.htaccess`. **Corrigido nesta rodada:** `.htaccess` que é link simbólico é recusado (antes, a gravação atômica trocaria o link por um arquivo) |
++| R3-7 | Cabeçalho `X-GMAX-Renovacoes: 1` | Revela apenas que o módulo existe (o nome dos arquivos já revela). Serve para distinguir "respondido pelo módulo" de "bloqueado pelo servidor" no diagnóstico |
++| R3-8 | Sessão e assinatura depois da liberação | Testado no Apache: sem login, a página redireciona e a API dá 401. Webhook sem assinatura ou com assinatura falsa → 401; com assinatura válida → 200. Login real pelo `api.php` sob Apache dá acesso à aba |
++| R3-9 | Caminho da hospedagem | `dirname(painel, 2)/gmax-renovacoes` = `/home1/gust1922/gmax-renovacoes`; testado no Apache com a árvore `home1/gust1922/gmaxcanais.com.br/painel/` **sem** `renovacoes-caminho.php` |
++
++Limitação: o `.htaccess` real da produção não foi visto. Só os 4 formatos comuns foram testados. Qualquer outro formato é recusado pelo comando e precisa de análise manual.
+diff --git a/gmax-renovacoes/patch-painel/LEIA.md b/gmax-renovacoes/patch-painel/LEIA.md
+index 43759d3..f755e99 100644
+--- a/gmax-renovacoes/patch-painel/LEIA.md
++++ b/gmax-renovacoes/patch-painel/LEIA.md
+@@ -15,9 +15,9 @@ Não são alterados: `api.php`, `assets/app.js` (continua `?v=vencimentos-3`), `
+ 
+ **Como aplicar (recomendado):** o comando confere o arquivo REAL do servidor, mostra a diferença, faz cópia de segurança e só então grava:
+ ```bash
+-php ~/gmax-renovacoes/bin/renovacoes-admin.php menu verificar ~/public_html/painel/index.html   # só mostra
+-php ~/gmax-renovacoes/bin/renovacoes-admin.php menu aplicar   ~/public_html/painel/index.html   # grava + backup
+-php ~/gmax-renovacoes/bin/renovacoes-admin.php menu remover   ~/public_html/painel/index.html   # desfaz
++php ~/gmax-renovacoes/bin/renovacoes-admin.php menu verificar /home1/gust1922/gmaxcanais.com.br/painel/index.html   # só mostra
++php ~/gmax-renovacoes/bin/renovacoes-admin.php menu aplicar   /home1/gust1922/gmaxcanais.com.br/painel/index.html   # grava + backup
++php ~/gmax-renovacoes/bin/renovacoes-admin.php menu remover   /home1/gust1922/gmaxcanais.com.br/painel/index.html   # desfaz
+ ```
+ Se o `index.html` de produção for diferente do esperado (o ponto de inserção não aparecer exatamente uma vez), o comando **não altera nada** e avisa.
+ 
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/.htaccess b/gmax-renovacoes/src/privado/gmax-renovacoes/.htaccess
+index 5b18fef..d00c96d 100644
+--- a/gmax-renovacoes/src/privado/gmax-renovacoes/.htaccess
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/.htaccess
+@@ -1,4 +1,4 @@
+-# Proteção extra caso esta pasta seja enviada por engano para dentro de public_html.
++# Proteção extra caso esta pasta seja enviada por engano para dentro da pasta pública do site (gmaxcanais.com.br).
+ <IfModule mod_authz_core.c>
+   Require all denied
+ </IfModule>
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/bin/renovacoes-admin.php b/gmax-renovacoes/src/privado/gmax-renovacoes/bin/renovacoes-admin.php
+index 797b3fa..f33b935 100644
+--- a/gmax-renovacoes/src/privado/gmax-renovacoes/bin/renovacoes-admin.php
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/bin/renovacoes-admin.php
+@@ -120,7 +120,7 @@ switch ($cmd) {
+         exit($r['iguais'] ? 0 : 3);
+ 
+     case 'menu':
+-        // php renovacoes-admin.php menu verificar|aplicar|remover /caminho/public_html/painel/index.html
++        // php renovacoes-admin.php menu verificar|aplicar|remover /home1/gust1922/gmaxcanais.com.br/painel/index.html
+         $mode = $argv[2] ?? '';
+         $file = $argv[3] ?? '';
+         if (!in_array($mode, ['verificar', 'aplicar', 'remover'], true)) {
+@@ -166,7 +166,136 @@ switch ($cmd) {
+         echo "Gravado. Cópia de segurança: $bak\n";
+         break;
+ 
++    case 'htaccess':
++        // htaccess verificar <pasta-do-painel> | aplicar <arquivo .htaccess> <pasta-do-painel> | remover <arquivo .htaccess>
++        $mode = $argv[2] ?? '';
++        if ($mode === 'verificar') {
++            $painel = rtrim((string)realpath($argv[3] ?? ''), '/');
++            if ($painel === '' || !is_dir($painel)) {
++                echo "Uso: htaccess verificar /home1/gust1922/gmaxcanais.com.br/painel\n";
++                exit(1);
++            }
++            $dir = $painel;
++            $found = 0;
++            $problem = false;
++            for ($i = 0; $i < 4 && $dir !== '/' && $dir !== ''; $i++, $dir = dirname($dir)) {
++                $f = $dir . '/.htaccess';
++                if (!is_file($f)) {
++                    continue;
++                }
++                $found++;
++                $rel = ltrim(substr($painel, strlen($dir)), '/');
++                $r = \GmaxRenov\HtaccessPatch::analyze((string)file_get_contents($f), $rel);
++                echo "== $f\n   formato: {$r['formato']}\n   bloqueia: " . ($r['bloqueia'] ? implode(', ', $r['bloqueia']) : 'nenhum arquivo do módulo') . "\n";
++                if ($r['motivo'] !== '') {
++                    echo "   {$r['motivo']}\n";
++                }
++                if ($r['plano'] !== null) {
++                    $problem = true;
++                    echo "   Patch proposto (só acrescenta):\n" . \GmaxRenov\PanelMenuPatch::diff((string)file_get_contents($f), $r['plano']) . "\n";
++                    echo "   Para aplicar: php " . $argv[0] . " htaccess aplicar $f $painel\n";
++                }
++                if ($r['formato'] === 'desconhecido') {
++                    $problem = true;
++                }
++            }
++            echo $found ? '' : "Nenhum .htaccess encontrado do painel até 3 pastas acima.\n";
++            echo "Lembrete: confirme também pela web com: php " . $argv[0] . " verificar-http https://gmaxcanais.com.br/painel/\n";
++            exit($problem ? 2 : 0);
++        }
++        if (!in_array($mode, ['aplicar', 'remover'], true) || !is_file($argv[3] ?? '') || basename($argv[3]) !== '.htaccess') {
++            echo "Uso: htaccess verificar <pasta-do-painel> | aplicar <caminho/.htaccess> <pasta-do-painel> | remover <caminho/.htaccess>\n";
++            exit(1);
++        }
++        $file = $argv[3];
++        if (is_link($file)) {
++            echo "O .htaccess é um link simbólico; nada foi alterado. Edite o arquivo de destino manualmente (docs/HTACCESS.md).\n";
++            exit(2);
++        }
++        $orig = (string)file_get_contents($file);
++        if ($mode === 'aplicar') {
++            $painel = rtrim((string)realpath($argv[4] ?? ''), '/');
++            $base = rtrim((string)realpath(dirname($file)), '/');
++            if ($painel === '' || strpos($painel . '/', $base . '/') !== 0) {
++                echo "A pasta do painel precisa estar dentro da pasta deste .htaccess.\n";
++                exit(1);
++            }
++            $r = \GmaxRenov\HtaccessPatch::analyze($orig, ltrim(substr($painel, strlen($base)), '/'));
++            if ($r['plano'] === null) {
++                echo ($r['motivo'] ?: 'Nada a aplicar.') . "\n";
++                exit($r['formato'] === 'desconhecido' ? 2 : 0);
++            }
++            $new = $r['plano'];
++        } else {
++            $new = \GmaxRenov\HtaccessPatch::revert($orig);
++            if ($new === $orig) {
++                echo "Nada a remover.\n";
++                break;
++            }
++        }
++        echo \GmaxRenov\PanelMenuPatch::diff($orig, $new), "\n";
++        $bak = $file . '.antes-renovacoes-' . date('Ymd-His');
++        if (!copy($file, $bak) || hash_file('sha256', $bak) !== hash('sha256', $orig)) {
++            fwrite(STDERR, "Cópia de segurança falhou; nada foi alterado.\n");
++            exit(1);
++        }
++        @chmod($bak, 0644);
++        $tmp = $file . '.renovacoes-tmp';
++        if (file_put_contents($tmp, $new) === false || !@chmod($tmp, fileperms($file) & 0777) || !rename($tmp, $file)) {
++            @unlink($tmp);
++            fwrite(STDERR, "Falha ao gravar; o .htaccess original foi mantido.\n");
++            exit(1);
++        }
++        echo "Gravado. Cópia de segurança: $bak\nTeste agora: php " . $argv[0] . " verificar-http https://gmaxcanais.com.br/painel/\n";
++        break;
++
++    case 'verificar-http':
++        // Confere pela web: módulo responde (cabeçalho X-GMAX-Renovacoes), exige sessão, webhook exige assinatura,
++        // api.php continua funcionando e um PHP qualquer continua bloqueado.
++        $base = rtrim($argv[2] ?? '', '/') . '/';
++        if (!preg_match('~^https?://~', $base)) {
++            echo "Uso: verificar-http https://gmaxcanais.com.br/painel/\n";
++            exit(1);
++        }
++        $req = static function (string $method, string $url, ?string $body = null, array $headers = []): array {
++            $ch = curl_init($url);
++            $hdr = [];
++            curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false,
++                CURLOPT_TIMEOUT => 20, CURLOPT_HTTPHEADER => $headers, CURLOPT_POSTFIELDS => $body,
++                CURLOPT_HEADERFUNCTION => static function ($c, $l) use (&$hdr) { $hdr[] = $l; return strlen($l); }]);
++            $b = (string)curl_exec($ch);
++            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
++            curl_close($ch);
++            $mod = (bool)preg_grep('~^X-GMAX-Renovacoes:\s*1~i', $hdr);
++            $loc = '';
++            foreach ($hdr as $l) {
++                if (stripos($l, 'Location:') === 0) {
++                    $loc = trim(substr($l, 9));
++                }
++            }
++            return ['code' => $code, 'mod' => $mod, 'body' => $b, 'loc' => $loc];
++        };
++        $checks = [
++            ['Página sem sessão → redireciona ao login', 'GET', 'renovacoes.php', null, [], static fn($r) => $r['mod'] && in_array($r['code'], [302, 303], true)],
++            ['API sem sessão → 401', 'GET', 'renovacoes-api.php?acao=painel', null, [], static fn($r) => $r['mod'] && $r['code'] === 401],
++            ['Webhook GET sem token → 403 do módulo', 'GET', 'renovacoes-webhook.php', null, [], static fn($r) => $r['mod'] && $r['code'] === 403 && trim($r['body']) === 'forbidden'],
++            ['Webhook POST sem assinatura → 401', 'POST', 'renovacoes-webhook.php', '{}', ['Content-Type: application/json'], static fn($r) => $r['mod'] && $r['code'] === 401],
++            ['Webhook POST assinatura falsa → 401', 'POST', 'renovacoes-webhook.php', '{}', ['Content-Type: application/json', 'X-Hub-Signature-256: sha256=' . str_repeat('0', 64)], static fn($r) => $r['mod'] && $r['code'] === 401],
++            ['Painel api.php continua respondendo', 'GET', 'api.php?action=status', null, [], static fn($r) => $r['code'] === 200 && strpos($r['body'], 'authenticated') !== false],
++            ['PHP não autorizado continua bloqueado', 'GET', 'gr-verificacao-' . bin2hex(random_bytes(4)) . '.php', null, [], static fn($r) => !$r['mod'] && in_array($r['code'], [403, 404], true)],
++        ];
++        $fail = 0;
++        foreach ($checks as [$label, $m, $path, $body, $h, $ok]) {
++            $r = $req($m, $base . $path, $body, $h);
++            $pass = $ok($r);
++            $fail += $pass ? 0 : 1;
++            $why = $pass ? '' : ($r['code'] === 403 && !$r['mod'] ? ' ← bloqueado pelo servidor (.htaccess?)' : '');
++            printf("%s %-45s HTTP %d%s%s\n", $pass ? 'OK  ' : 'FALHA', $label, $r['code'], $r['mod'] ? ' (módulo)' : '', $why);
++        }
++        echo $fail ? "Há $fail falha(s). Veja docs/HTACCESS.md.\n" : "Tudo conforme.\n";
++        exit($fail ? 2 : 0);
++
+     default:
+-        echo "Comandos: diagnostico | migrar | integridade [arq] | integridade-comparar a b | menu verificar|aplicar|remover index.html | backup [arq] | status\n";
++        echo "Comandos: diagnostico | migrar | integridade [arq] | integridade-comparar a b | menu verificar|aplicar|remover index.html | htaccess verificar|aplicar|remover | verificar-http URL | backup [arq] | status\n";
+         exit(1);
+ }
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/bootstrap.php b/gmax-renovacoes/src/privado/gmax-renovacoes/bootstrap.php
+index 47e03ae..9aeccff 100644
+--- a/gmax-renovacoes/src/privado/gmax-renovacoes/bootstrap.php
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/bootstrap.php
+@@ -2,7 +2,7 @@
+ /**
+  * GMAX Renovações — ponto de entrada da biblioteca privada.
+  *
+- * Esta pasta deve ficar FORA de public_html (ex.: /home/USUARIO/gmax-renovacoes).
++ * Esta pasta deve ficar FORA da pasta pública do site (ex.: /home1/gust1922/gmax-renovacoes; o painel fica em /home1/gust1922/gmaxcanais.com.br/painel).
+  * Os arquivos públicos em /painel/ apenas incluem este bootstrap.
+  */
+ declare(strict_types=1);
+@@ -10,7 +10,7 @@ declare(strict_types=1);
+ if (!defined('GR_ROOT')) {
+     define('GR_ROOT', __DIR__);
+ }
+-define('GR_VERSION', '1.1.0');
++define('GR_VERSION', '1.2.0');
+ 
+ if (PHP_SAPI !== 'cli') {
+     // Nunca exibir avisos do PHP na web (revelariam caminhos privados); tudo vai para o log.
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/config.example.php b/gmax-renovacoes/src/privado/gmax-renovacoes/config.example.php
+index b1e8b62..3a07111 100644
+--- a/gmax-renovacoes/src/privado/gmax-renovacoes/config.example.php
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/config.example.php
+@@ -1,7 +1,7 @@
+ <?php
+ /**
+  * GMAX Renovações — configuração de exemplo para o painel GMAX — Central de Gestão. SEM SEGREDOS.
+- * Copie para config.php NESTA MESMA PASTA (fora de public_html) e confira os caminhos. chmod 600 config.php
++ * Copie para config.php NESTA MESMA PASTA (fora da pasta pública do site, /home1/gust1922/gmaxcanais.com.br) e confira os caminhos. chmod 600 config.php
+  *
+  * Banco: o módulo LÊ o config.php privado do painel (dsn/db_user/db_password). Nenhuma senha é copiada para cá.
+  * Login: reaproveita a sessão do painel (gmax_session, $_SESSION['admin'], $_SESSION['csrf'], 3600 s).
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/cron/renovacoes-cron.php b/gmax-renovacoes/src/privado/gmax-renovacoes/cron/renovacoes-cron.php
+index 3494890..5609ebf 100644
+--- a/gmax-renovacoes/src/privado/gmax-renovacoes/cron/renovacoes-cron.php
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/cron/renovacoes-cron.php
+@@ -1,6 +1,6 @@
+ <?php
+ // Agendador dos lembretes. Rodar pelo Cron do cPanel a cada 15 minutos:
+-//   */15 * * * * /usr/local/bin/php /home/USUARIO/gmax-renovacoes/cron/renovacoes-cron.php >/dev/null 2>&1
++//   */15 * * * * /usr/local/bin/php /home1/gust1922/gmax-renovacoes/cron/renovacoes-cron.php >/dev/null 2>&1
+ /*
+  * O horário de geração/envio (padrão 09:00, fuso America/Sao_Paulo) é controlado pela aba Renovações,
+  * então o fuso do servidor não importa. Execuções repetidas ou simultâneas são seguras.
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/lib/Auth.php b/gmax-renovacoes/src/privado/gmax-renovacoes/lib/Auth.php
+index 3a288ed..bb52d8c 100644
+--- a/gmax-renovacoes/src/privado/gmax-renovacoes/lib/Auth.php
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/lib/Auth.php
+@@ -117,6 +117,7 @@ final class Auth
+ 
+     public static function securityHeaders(): void
+     {
++        header('X-GMAX-Renovacoes: 1'); // permite distinguir "respondido pelo módulo" de "bloqueado pelo servidor"
+         header('X-Frame-Options: DENY');
+         header('X-Content-Type-Options: nosniff');
+         header('Referrer-Policy: same-origin');
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/lib/HtaccessPatch.php b/gmax-renovacoes/src/privado/gmax-renovacoes/lib/HtaccessPatch.php
+new file mode 100644
+index 0000000..505c703
+--- /dev/null
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/lib/HtaccessPatch.php
+@@ -0,0 +1,216 @@
++<?php
++declare(strict_types=1);
++
++namespace GmaxRenov;
++
++/**
++ * Diagnóstico e patch MÍNIMO do .htaccess para liberar SOMENTE:
++ *   renovacoes.php, renovacoes-api.php, renovacoes-webhook.php
++ * quando existe uma regra que bloqueia PHP e libera apenas o api.php.
++ *
++ * Nunca libera PHP em geral. Dois formatos reconhecidos:
++ *  A) blocos <Files>/<FilesMatch>: um bloco nega PHP e outro libera api.php →
++ *     inserimos, logo após a exceção do api.php, uma CÓPIA dela restrita aos 3 arquivos (mesmas diretivas, mesmo estilo).
++ *  B) mod_rewrite: RewriteRule ... [F] que bloqueia .php (com exceção para api.php) →
++ *     inserimos, antes da regra de bloqueio, uma regra que deixa passar só os 3 arquivos, ancorada na pasta do painel.
++ * Formato não reconhecido = NÃO altera nada e explica o que fazer.
++ */
++final class HtaccessPatch
++{
++    public const BEGIN = '# BEGIN GMAX Renovacoes (liberar somente os 3 arquivos do modulo)';
++    public const END = '# END GMAX Renovacoes';
++    public const FILES = ['renovacoes.php', 'renovacoes-api.php', 'renovacoes-webhook.php'];
++    public const FILES_REGEX = '^renovacoes(-api|-webhook)?\.php$';
++
++    /** Arquivos que NÃO podem ser liberados pelo patch (controle). */
++    public const MUST_STAY = ['renovacoes-caminho.php', 'teste.php', 'shell.php', 'renovacoes.php.bak', 'xrenovacoes.php'];
++
++    private static function apacheRegexMatches(string $pattern, string $name): bool
++    {
++        $re = '~' . str_replace('~', '\~', $pattern) . '~i';
++        return @preg_match($re, $name) === 1;
++    }
++
++    /** Blocos <Files>/<FilesMatch> com posição, padrão e tipo (nega/libera). */
++    public static function fileBlocks(string $h): array
++    {
++        preg_match_all('#<(Files|FilesMatch)\s+(~\s+)?"?([^">]+?)"?\s*>(.*?)</\1\s*>#is', $h, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
++        $out = [];
++        foreach ($m as $b) {
++            $tag = strtolower($b[1][0]);
++            $isRegex = $tag === 'filesmatch' || trim($b[2][0] ?? '') === '~';
++            $pattern = $b[3][0];
++            $body = $b[4][0];
++            $deny = (bool)preg_match('~^\s*(Require\s+all\s+denied|Deny\s+from\s+all)\s*$~im', $body);
++            $grant = (bool)preg_match('~^\s*(Require\s+all\s+granted|Allow\s+from\s+all)\s*$~im', $body);
++            $out[] = [
++                'inicio' => $b[0][1],
++                'fim' => $b[0][1] + strlen($b[0][0]),
++                'texto' => $b[0][0],
++                'regex' => $isRegex,
++                'padrao' => $pattern,
++                'corpo' => $body,
++                'nega' => $deny && !$grant,
++                'libera' => $grant && !$deny,
++            ];
++        }
++        return $out;
++    }
++
++    private static function blockMatches(array $b, string $file): bool
++    {
++        if ($b['regex']) {
++            return self::apacheRegexMatches($b['padrao'], $file);
++        }
++        // <Files> sem ~ aceita curingas * e ?
++        return fnmatch(strtolower($b['padrao']), strtolower($file));
++    }
++
++    /**
++     * Analisa um .htaccess. $relPainel = caminho da pasta do painel relativo à pasta deste .htaccess ('' se for a mesma).
++     * @return array{formato:string, bloqueia:string[], aplicado:bool, plano:?string, motivo:string}
++     */
++    public static function analyze(string $h, string $relPainel = ''): array
++    {
++        $applied = strpos($h, self::BEGIN) !== false;
++        $blocks = self::fileBlocks($h);
++        // Avalia blocos em ordem (o último que casa vence, como no Apache sem AuthMerging).
++        $blockedBy = [];
++        foreach (array_merge(self::FILES, ['api.php']) as $f) {
++            $state = null;
++            foreach ($blocks as $b) {
++                if (($b['nega'] || $b['libera']) && self::blockMatches($b, $f)) {
++                    $state = $b['nega'] ? 'nega' : 'libera';
++                }
++            }
++            if ($state === 'nega') {
++                $blockedBy[$f] = 'Files';
++            }
++        }
++        $rw = self::rewriteBlock($h, $relPainel);
++        if ($rw) {
++            foreach (self::FILES as $f) {
++                if (self::rewriteBlocks($rw, ($relPainel !== '' ? rtrim($relPainel, '/') . '/' : '') . $f) && !$applied) {
++                    $blockedBy[$f] = $blockedBy[$f] ?? 'Rewrite';
++                }
++            }
++        }
++        $blockedOurs = array_values(array_intersect(self::FILES, array_keys($blockedBy)));
++        $res = ['formato' => 'nenhum', 'bloqueia' => $blockedOurs, 'aplicado' => $applied, 'plano' => null, 'motivo' => ''];
++        if (isset($blockedBy['api.php'])) {
++            $res['motivo'] = 'Este .htaccess também bloqueia o api.php pela análise automática. Formato não reconhecido com segurança: nada será alterado; envie o arquivo para análise.';
++            $res['formato'] = 'desconhecido';
++            return $res;
++        }
++        if (!$blockedOurs) {
++            $res['motivo'] = $applied ? 'Liberação do módulo já aplicada.' : 'Nenhuma regra deste arquivo bloqueia os arquivos do módulo. Nenhuma alteração necessária.';
++            return $res;
++        }
++        $viaFiles = array_filter($blockedOurs, static fn($f) => $blockedBy[$f] === 'Files');
++        if ($viaFiles) {
++            $res['formato'] = 'Files';
++            // Exceções que liberam api.php sem liberar PHP em geral.
++            $grants = array_values(array_filter($blocks, fn($b) => $b['libera'] && self::blockMatches($b, 'api.php') && !self::blockMatches($b, 'qualquer-outro.php')));
++            $denyIdx = max(array_keys(array_filter($blocks, fn($b) => $b['nega'] && self::blockMatches($b, 'renovacoes.php'))));
++            $grants = array_values(array_filter($grants, fn($g) => $g['inicio'] > $blocks[$denyIdx]['inicio']));
++            if (!$grants) {
++                $res['motivo'] = 'Há bloqueio de PHP por <Files>/<FilesMatch>, mas não encontrei a exceção do api.php depois dele. Nada será alterado.';
++                return $res;
++            }
++            $plan = $h;
++            foreach (array_reverse($grants) as $g) {
++                $copy = preg_replace('#^<(Files|FilesMatch)\s+(~\s+)?"?[^">]+?"?\s*>#i', '<FilesMatch "' . self::FILES_REGEX . '">', $g['texto']);
++                $copy = preg_replace('~</(Files|FilesMatch)\s*>$~i', '</FilesMatch>', $copy);
++                $plan = self::insertAfterLine($plan, $g['fim'], self::BEGIN . "\n" . $copy . "\n" . self::END . "\n");
++            }
++            $res['plano'] = $plan;
++            return $res;
++        }
++        // Formato rewrite
++        $res['formato'] = 'Rewrite';
++        if (!$rw) {
++            $res['formato'] = 'desconhecido';
++            $res['motivo'] = 'Formato não reconhecido. Nada será alterado.';
++            return $res;
++        }
++        $anchor = '^' . ($relPainel !== '' ? preg_quote(rtrim($relPainel, '/'), '') . '/' : '') . 'renovacoes(-api|-webhook)?\.php$';
++        $ins = self::BEGIN . "\nRewriteRule " . $anchor . " - [L]\n" . self::END . "\n";
++        $res['plano'] = substr($h, 0, $rw['inicio_cadeia']) . $ins . substr($h, $rw['inicio_cadeia']);
++        return $res;
++    }
++
++    /** Localiza a regra RewriteRule [F] que bloqueia .php e o início da sua cadeia de RewriteCond. */
++    private static function rewriteBlock(string $h, string $rel = ''): ?array
++    {
++        if (!preg_match('~^\s*RewriteEngine\s+On~im', $h)) {
++            return null;
++        }
++        $lines = preg_split('~(?<=\n)~', $h);
++        $offset = 0;
++        $chainStart = null;
++        $conds = [];
++        foreach ($lines as $line) {
++            $t = trim($line);
++            if (preg_match('~^RewriteCond\s+(\S+)\s+(\S+)(\s+\[([^\]]*)\])?~i', $t, $c)) {
++                if ($chainStart === null) {
++                    $chainStart = $offset;
++                }
++                $conds[] = ['var' => $c[1], 'pat' => $c[2], 'flags' => strtoupper($c[4] ?? '')];
++            } elseif (preg_match('~^RewriteRule\s+(\S+)\s+(\S+)(\s+\[([^\]]*)\])?~i', $t, $r)) {
++                $flags = strtoupper($r[4] ?? '');
++                if ((preg_match('~(^|,)\s*F\s*(,|$)~', $flags) || preg_match('~(^|,)\s*G\s*(,|$)~', $flags)) && (self::apacheRegexMatches($r[1], 'x.php') || self::apacheRegexMatches($r[1], ($rel !== '' ? rtrim($rel, '/') . '/' : '') . 'x.php'))) {
++                    return ['inicio_cadeia' => $chainStart ?? $offset, 'padrao' => $r[1], 'conds' => $conds];
++                }
++                $chainStart = null;
++                $conds = [];
++            } elseif ($t !== '' && $t[0] !== '#') {
++                $chainStart = null;
++                $conds = [];
++            }
++            $offset += strlen($line);
++        }
++        return null;
++    }
++
++    /** A regra de bloqueio (com suas condições de exceção) bloquearia este caminho? Avaliação simplificada. */
++    private static function rewriteBlocks(array $rw, string $path): bool
++    {
++        if (!self::apacheRegexMatches($rw['padrao'], $path) && !self::apacheRegexMatches($rw['padrao'], basename($path))) {
++            return false;
++        }
++        foreach ($rw['conds'] as $c) {
++            if (strpos($c['flags'], 'OR') !== false) {
++                return true; // cadeia com OR: tratamos como bloqueio (conservador)
++            }
++            $neg = $c['pat'][0] === '!';
++            $pat = $neg ? substr($c['pat'], 1) : $c['pat'];
++            if (stripos($c['var'], 'REQUEST_FILENAME') !== false && in_array($pat, ['-f', '-d', '-s', '-l'], true)) {
++                continue; // arquivo existe: verdadeiro para nossos arquivos
++            }
++            $m = self::apacheRegexMatches($pat, '/' . $path) || self::apacheRegexMatches($pat, basename($path));
++            if ($neg ? $m : !$m) {
++                return false; // condição falha → regra não se aplica
++            }
++        }
++        return true;
++    }
++
++    /** Insere $block no início da linha seguinte a $pos (ou no fim do arquivo). */
++    private static function insertAfterLine(string $h, int $pos, string $block): string
++    {
++        $nl = strpos($h, "\n", $pos);
++        if ($nl === false) {
++            return $h . "\n" . rtrim($block, "\n"); // arquivo sem quebra final
++        }
++        return substr($h, 0, $nl + 1) . $block . substr($h, $nl + 1);
++    }
++
++    /** Remove exatamente o que foi inserido (reversão byte a byte). */
++    public static function revert(string $h): string
++    {
++        $b = preg_quote(self::BEGIN, '~');
++        $e = preg_quote(self::END, '~');
++        $h = preg_replace('~(?<=\n|^)' . $b . '.*?' . $e . '\n~s', '', $h) ?? $h;
++        return preg_replace('~\n' . $b . '.*?' . $e . '$~s', '', $h) ?? $h;
++    }
++}
+diff --git a/gmax-renovacoes/src/privado/gmax-renovacoes/logs/.htaccess b/gmax-renovacoes/src/privado/gmax-renovacoes/logs/.htaccess
+index 5b18fef..d00c96d 100644
+--- a/gmax-renovacoes/src/privado/gmax-renovacoes/logs/.htaccess
++++ b/gmax-renovacoes/src/privado/gmax-renovacoes/logs/.htaccess
+@@ -1,4 +1,4 @@
+-# Proteção extra caso esta pasta seja enviada por engano para dentro de public_html.
++# Proteção extra caso esta pasta seja enviada por engano para dentro da pasta pública do site (gmaxcanais.com.br).
+ <IfModule mod_authz_core.c>
+   Require all denied
+ </IfModule>
+diff --git a/gmax-renovacoes/src/publico/painel/renovacoes-webhook.php b/gmax-renovacoes/src/publico/painel/renovacoes-webhook.php
+index 4da90f8..7d9a3c9 100644
+--- a/gmax-renovacoes/src/publico/painel/renovacoes-webhook.php
++++ b/gmax-renovacoes/src/publico/painel/renovacoes-webhook.php
+@@ -12,6 +12,7 @@ $grDir = is_file(__DIR__ . '/renovacoes-caminho.php') ? (require __DIR__ . '/ren
+ require $grDir . '/bootstrap.php';
+ 
+ header('Content-Type: text/plain; charset=utf-8');
++header('X-GMAX-Renovacoes: 1');
+ header('X-Content-Type-Options: nosniff');
+ header('Cache-Control: no-store');
+ 
+diff --git a/gmax-renovacoes/tests/lib.php b/gmax-renovacoes/tests/lib.php
+index 41438c4..85ade3d 100644
+--- a/gmax-renovacoes/tests/lib.php
++++ b/gmax-renovacoes/tests/lib.php
+@@ -192,3 +192,10 @@ function test(string $name, callable $fn, string $now = '2026-11-10 09:30:00'):
+         }
+     }
+ }
++
++/** Registra um teste que NÃO pôde ser executado (não conta como aprovado). */
++function skipTest(string $name, string $reason): void
++{
++    T::$results[] = [$name, null, $reason, 0.0];
++    echo "  ⏭ $name — PULADO: $reason\n";
++}
+diff --git a/gmax-renovacoes/tests/run.php b/gmax-renovacoes/tests/run.php
+index 7f9b2ba..199b27d 100644
+--- a/gmax-renovacoes/tests/run.php
++++ b/gmax-renovacoes/tests/run.php
+@@ -18,17 +18,18 @@ foreach ($files as $f) {
+     require $f;
+ }
+ 
+-$ok = count(array_filter(T::$results, fn($r) => $r[1]));
+-$total = count(T::$results);
+-echo "\n$ok/$total testes passaram.\n";
++$ok = count(array_filter(T::$results, fn($r) => $r[1] === true));
++$skipped = count(array_filter(T::$results, fn($r) => $r[1] === null));
++$total = count(T::$results) - $skipped;
++echo "\n$ok/$total testes passaram." . ($skipped ? " $skipped PULADO(S) — não executado(s), ver motivo acima." : '') . "\n";
+ 
+ if (!$only) {
+     $md = "# Resultado dos testes executados\n\n";
+     $md .= "Gerado automaticamente por `php tests/run.php` em " . date('d/m/Y H:i') . " (America/Sao_Paulo).\n\n";
+     $md .= "Ambiente: PHP " . PHP_VERSION . ", " . (new PDO('mysql:host=' . T::env('GR_TEST_HOST', 'localhost'), T::env('GR_TEST_USER', 'grtest'), T::env('GR_TEST_PASS', 'grtest')))->query('SELECT VERSION()')->fetchColumn() . ". Dados fictícios. Nenhuma chamada de rede.\n\n";
+-    $md .= "**$ok de $total testes passaram.**\n\n| # | Teste | Resultado | Tempo |\n|---|---|---|---|\n";
++    $md .= "**$ok de $total testes executados passaram.**" . ($skipped ? " **$skipped teste(s) NÃO executado(s)** (marcados como PULADO, com o motivo)." : ' Nenhum teste pulado.') . "\n\n| # | Teste | Resultado | Tempo |\n|---|---|---|---|\n";
+     foreach (T::$results as $i => [$name, $pass, $err, $time]) {
+-        $md .= '| ' . ($i + 1) . ' | ' . str_replace('|', '\\|', $name) . ' | ' . ($pass ? '✅ passou' : '❌ ' . str_replace('|', '\\|', $err)) . ' | ' . number_format($time, 2) . 's |' . "\n";
++        $md .= '| ' . ($i + 1) . ' | ' . str_replace('|', '\\|', $name) . ' | ' . ($pass === null ? '⏭ PULADO: ' . str_replace('|', '\\|', $err) : ($pass ? '✅ passou' : '❌ ' . str_replace('|', '\\|', $err))) . ' | ' . number_format($time, 2) . 's |' . "\n";
+     }
+     file_put_contents(dirname(__DIR__) . '/docs/TESTES_RESULTADO.md', $md);
+ }
+diff --git a/gmax-renovacoes/tests/t_apache.php b/gmax-renovacoes/tests/t_apache.php
+new file mode 100644
+index 0000000..a75cbef
+--- /dev/null
++++ b/gmax-renovacoes/tests/t_apache.php
+@@ -0,0 +1,256 @@
++<?php
++/**
++ * Testes no APACHE real (o servidor embutido do PHP ignora .htaccess).
++ * Monta a estrutura da hospedagem em um diretório temporário:
++ *   home1/gust1922/gmaxcanais.com.br/painel/   ← painel real (base 15/10) + arquivos do módulo + menu
++ *   home1/gust1922/gmax-renovacoes/            ← biblioteca privada (localizada sem renovacoes-caminho.php)
++ *   home1/gust1922/gmax-painel/private/config.php ← config do painel (banco descartável)
++ * e testa quatro formatos de .htaccess que bloqueiam PHP e liberam só o api.php.
++ * Requer: apache2 + libapache2-mod-php, MariaDB local e a base do painel (GR_PAINEL_BASE).
++ */
++declare(strict_types=1);
++
++use GmaxRenov\HtaccessPatch;
++
++final class GrApache
++{
++    public string $root;
++    public string $home;
++    public string $painel;
++    public string $lib;
++    public int $port;
++    public string $base;
++    private $proc = null;
++    public string $panelSecret;
++    public string $appSecret = 'segredo-webhook-apache';
++
++    public static function available(): ?string
++    {
++        if (!is_file('/usr/sbin/apache2')) {
++            return 'apache2 não instalado';
++        }
++        if (!is_file('/usr/lib/apache2/modules/libphp8.3.so')) {
++            return 'mod_php (libapache2-mod-php8.3) não instalado';
++        }
++        $base = getenv('GR_PAINEL_BASE') ?: '/tmp/claude-0/-home-user-gumax2/4551f546-0fe0-5e94-ba09-9252bba9ea1c/scratchpad/base/gmax-base-painel';
++        if (!is_file($base . '/painel/api.php')) {
++            return 'base do painel não encontrada (defina GR_PAINEL_BASE)';
++        }
++        return null;
++    }
++
++    public function __construct(T $t, string $htaccess, string $htaccessAt = 'painel')
++    {
++        $src = dirname(__DIR__) . '/src';
++        $baseDir = getenv('GR_PAINEL_BASE') ?: '/tmp/claude-0/-home-user-gumax2/4551f546-0fe0-5e94-ba09-9252bba9ea1c/scratchpad/base/gmax-base-painel';
++        $this->root = sys_get_temp_dir() . '/gr-apache-' . bin2hex(random_bytes(4));
++        $this->home = $this->root . '/home1/gust1922';
++        $docroot = $this->home . '/gmaxcanais.com.br';
++        $this->painel = $docroot . '/painel';
++        $this->lib = $this->home . '/gmax-renovacoes';
++        $private = $this->home . '/gmax-painel/private';
++        GrWeb::copyDir($baseDir . '/painel', $this->painel);
++        GrWeb::copyDir($src . '/publico/painel', $this->painel);
++        GrWeb::copyDir($src . '/privado/gmax-renovacoes', $this->lib);
++        @mkdir($private, 0755, true);
++        $this->panelSecret = bin2hex(random_bytes(20));
++        file_put_contents($private . '/config.php', '<?php return ' . var_export([
++            'dsn' => 'mysql:host=localhost;dbname=' . $t->dbName . ';charset=utf8mb4',
++            'db_user' => T::env('GR_TEST_USER', 'grtest'), 'db_password' => T::env('GR_TEST_PASS', 'grtest'),
++            'require_https' => false, 'timezone' => 'America/Sao_Paulo', 'setup_secret' => $this->panelSecret,
++        ], true) . ';');
++        // Somente na CÓPIA de teste: aponta o caminho fixo do api.php para o config temporário.
++        $api = file_get_contents($this->painel . '/api.php');
++        $api = str_replace("'/home1/gust1922/gmax-painel/private/config.php'", var_export($private . '/config.php', true), $api, $n);
++        if ($n !== 1) {
++            throw new RuntimeException('Caminho do config não encontrado exatamente uma vez no api.php');
++        }
++        file_put_contents($this->painel . '/api.php', $api);
++        // Menu
++        $idx = file_get_contents($this->painel . '/index.html');
++        file_put_contents($this->painel . '/index.html', \GmaxRenov\PanelMenuPatch::plan($idx)['novo']);
++        // Config do módulo: banco lido do config do painel; sem renovacoes-caminho.php (testa a localização padrão).
++        @mkdir($this->lib . '/logs', 0777, true);
++        chmod($this->lib . '/logs', 0777);
++        file_put_contents($this->lib . '/config.php', '<?php return ' . var_export([
++            'fuso' => 'America/Sao_Paulo',
++            'db' => ['config_painel' => $private . '/config.php'],
++            'auth' => ['exigir_https' => false],
++            'esquema' => [],
++            'provedor' => ['driver' => 'simulado', 'meta' => ['app_secret' => $this->appSecret, 'verify_token' => 'verifica-apache']],
++            'pasta_logs' => $this->lib . '/logs',
++        ], true) . ';');
++        // Arquivo PHP "suspeito" que deve continuar bloqueado.
++        file_put_contents($this->painel . '/suspeito.php', "<?php echo 'EXECUTOU';");
++        file_put_contents(($htaccessAt === 'raiz' ? $docroot : $this->painel) . '/.htaccess', $htaccess);
++        // Permissões para o usuário do Apache (www-data) ler a árvore de teste.
++        exec('chmod -R a+rX ' . escapeshellarg($this->root));
++        $this->port = GrWeb::freePort();
++        $this->base = "http://127.0.0.1:{$this->port}/painel/";
++        $conf = $this->root . '/httpd.conf';
++        $m = '/usr/lib/apache2/modules';
++        file_put_contents($conf, "ServerRoot /etc/apache2\nServerName 127.0.0.1\nListen 127.0.0.1:{$this->port}\nPidFile {$this->root}/httpd.pid\n"
++            . "LoadModule mpm_prefork_module $m/mod_mpm_prefork.so\nLoadModule authz_core_module $m/mod_authz_core.so\nLoadModule authz_host_module $m/mod_authz_host.so\n"
++            . "LoadModule access_compat_module $m/mod_access_compat.so\nLoadModule rewrite_module $m/mod_rewrite.so\nLoadModule dir_module $m/mod_dir.so\n"
++            . "LoadModule mime_module $m/mod_mime.so\nLoadModule php_module $m/libphp8.3.so\n"
++            . "User www-data\nGroup www-data\nErrorLog {$this->root}/error.log\nLogLevel warn\nTypesConfig /etc/mime.types\n"
++            . "DocumentRoot $docroot\nDirectoryIndex index.html\n<Directory />\n AllowOverride None\n Require all denied\n</Directory>\n"
++            . "<Directory $docroot>\n AllowOverride All\n Options FollowSymLinks\n Require all granted\n</Directory>\n"
++            . "<FilesMatch \"\\.php$\">\n SetHandler application/x-httpd-php\n</FilesMatch>\nStartServers 2\nMaxRequestWorkers 10\n");
++        $this->proc = proc_open(['setsid', '/usr/sbin/apache2', '-f', $conf, '-DFOREGROUND'], [1 => ['file', $this->root . '/stdout.log', 'a'], 2 => ['file', $this->root . '/stderr.log', 'a']], $pipes);
++        for ($i = 0; $i < 50; $i++) {
++            if (@fsockopen('127.0.0.1', $this->port)) {
++                return;
++            }
++            usleep(100000);
++        }
++        throw new RuntimeException('Apache não subiu: ' . @file_get_contents($this->root . '/stderr.log') . @file_get_contents($this->root . '/error.log'));
++    }
++
++    public function htaccessFile(string $at = 'painel'): string
++    {
++        return ($at === 'raiz' ? dirname($this->painel) : $this->painel) . '/.htaccess';
++    }
++
++    public function admin(array $args): array
++    {
++        exec('GR_CONFIG=' . escapeshellarg($this->lib . '/config.php') . ' ' . escapeshellarg(PHP_BINARY) . ' '
++            . escapeshellarg($this->lib . '/bin/renovacoes-admin.php') . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1', $out, $code);
++        return [$code, implode("\n", $out)];
++    }
++
++    public function stop(): void
++    {
++        // Encerramento com prazo: TERM, espera até 5 s, depois KILL só nos processos desta árvore de teste.
++        $pattern = escapeshellarg('[a]pache2 -f ' . $this->root . '/httpd.conf');
++        exec("pkill -TERM -f $pattern 2>/dev/null");
++        for ($i = 0; $i < 50; $i++) {
++            $o = [];
++            exec("pgrep -f $pattern", $o, $code);
++            if ($code !== 0) {
++                break;
++            }
++            usleep(100000);
++        }
++        exec("pkill -KILL -f $pattern 2>/dev/null");
++        if ($this->proc) {
++            @proc_close($this->proc);
++        }
++        exec('rm -rf ' . escapeshellarg($this->root));
++    }
++}
++
++function apacheTest(string $name, string $htaccess, string $at, callable $fn): void
++{
++    test($name, function (T $t) use ($htaccess, $at, $fn) {
++        $a = new GrApache($t, $htaccess, $at);
++        try {
++            $fn($t, $a);
++        } finally {
++            $errors = @file_get_contents($a->root . '/error.log') ?: '';
++            $a->stop();
++            check(!preg_match('~PHP (Fatal|Warning|Parse)~', $errors), 'erros de PHP no Apache: ' . substr($errors, 0, 400)); fwrite(STDERR, "[dbg 8079]\n");
++        }
++    });
++}
++
++$why = GrApache::available();
++if ($why !== null) {
++    echo "Apache (.htaccess)\n";
++    foreach (['Files 2.4', 'Files 2.2', 'Rewrite na pasta', 'Rewrite na raiz', 'sem bloqueio'] as $n) {
++        skipTest("apache: .htaccess $n", $why);
++    }
++    return;
++}
++require_once __DIR__ . '/web/ambiente.php'; // GrWeb::copyDir/freePort, GrHttp
++
++echo "Apache real: .htaccess, sessão e webhook\n";
++
++$variants = [
++    'Files 2.4 (Require)' => ["Options -Indexes\n<FilesMatch \"\\.php$\">\n  Require all denied\n</FilesMatch>\n<Files \"api.php\">\n  Require all granted\n</Files>\n", 'painel'],
++    'Files 2.2 (Order/Deny)' => ["<FilesMatch \"\\.(php|phtml)$\">\nOrder allow,deny\nDeny from all\n</FilesMatch>\n<FilesMatch \"^api\\.php$\">\nOrder allow,deny\nAllow from all\n</FilesMatch>\n", 'painel'],
++    'Rewrite na pasta do painel' => ["Options -Indexes\nRewriteEngine On\nRewriteCond %{REQUEST_URI} !/api\\.php$\nRewriteRule \\.php$ - [F,L]\n", 'painel'],
++    'Rewrite na raiz do domínio' => ["RewriteEngine On\nRewriteRule ^painel/(?!api\\.php$).*\\.php$ - [F]\n", 'raiz'],
++];
++
++foreach ($variants as $label => [$ht, $at]) {
++    apacheTest("apache: .htaccess $label — bloqueia antes, patch libera só os 3 arquivos, sessão e assinatura mantidas, remover restaura", $ht, $at,
++        function (T $t, GrApache $a) use ($ht, $at) {
++            $http = new GrHttp(rtrim(str_replace('/painel/', '', $a->base), '/'));
++            $hdr = static fn(array $r) => trim((string)(($r['headers']['x-gmax-renovacoes'] ?? [])[0] ?? '')) === '1';
++            // ANTES: regra antiga bloqueia o módulo; api.php funciona; suspeito bloqueado.
++            foreach (['renovacoes.php', 'renovacoes-api.php?acao=painel', 'renovacoes-webhook.php'] as $p) {
++                $r = $http->get('/painel/' . $p);
++                eq(403, $r['status'], "antes: $p bloqueado pelo servidor");
++                check(!$hdr($r), "antes: $p não chegou ao módulo");
++            }
++            eq(200, $http->get('/painel/api.php?action=status')['status'], 'antes: api.php ok'); fwrite(STDERR, "[dbg 10158]\n");
++            eq(403, $http->get('/painel/suspeito.php')['status'], 'antes: suspeito bloqueado'); fwrite(STDERR, "[dbg 10255]\n");
++            // Diagnóstico
++            [$c, $out] = $a->admin(['htaccess', 'verificar', $a->painel]); fwrite(STDERR, "[dbg 10378]\n");
++            eq(2, $c, 'verificar indica patch necessário: ' . $out); fwrite(STDERR, "[dbg 10453]\n");
++            check(strpos($out, 'renovacoes.php') !== false, 'lista os arquivos bloqueados'); fwrite(STDERR, "[dbg 10522]\n");
++            [$c, $out] = $a->admin(['verificar-http', $a->base]); fwrite(STDERR, "[dbg 10615]\n");
++            eq(2, $c, 'verificar-http aponta bloqueio antes do patch'); fwrite(STDERR, "[dbg 10681]\n");
++            check(strpos($out, 'bloqueado pelo servidor') !== false, 'explica o bloqueio'); fwrite(STDERR, "[dbg 10753]\n");
++            // Aplicar
++            $file = $a->htaccessFile($at);
++            [$c, $out] = $a->admin(['htaccess', 'aplicar', $file, $a->painel]); fwrite(STDERR, "[dbg 10911]\n");
++            eq(0, $c, 'aplicar: ' . $out); fwrite(STDERR, "[dbg 10991]\n");
++            check(count(glob($file . '.antes-renovacoes-*')) === 1, 'backup do .htaccess criado'); fwrite(STDERR, "[dbg 11034]\n");
++            eq($ht, file_get_contents(glob($file . '.antes-renovacoes-*')[0]), 'backup idêntico ao original'); fwrite(STDERR, "[dbg 11133]\n");
++            $patched = file_get_contents($file);
++            check(strpos($patched, $ht === '' ? '' : explode("\n", $ht)[1]) !== false, 'regras originais mantidas'); fwrite(STDERR, "[dbg 11293]\n");
++            // DEPOIS: módulo responde, mas exige sessão; webhook exige assinatura; nada mais foi liberado.
++            $r = $http->get('/painel/renovacoes.php');
++            check($hdr($r) && in_array($r['status'], [302, 303], true), 'página sem sessão → redireciona (módulo): ' . $r['status']); fwrite(STDERR, "[dbg 11573]\n");
++            $r = $http->get('/painel/renovacoes-api.php?acao=painel');
++            check($hdr($r) && $r['status'] === 401, 'API sem sessão → 401'); fwrite(STDERR, "[dbg 11778]\n");
++            $r = $http->get('/painel/renovacoes-webhook.php');
++            check($hdr($r) && $r['status'] === 403 && trim($r['body']) === 'forbidden', 'webhook GET sem token → 403 do módulo'); fwrite(STDERR, "[dbg 11918]\n");
++            $r = $http->request('POST', '/painel/renovacoes-webhook.php', '{"entry":[]}', ['Content-Type' => 'application/json', 'X-Hub-Signature-256' => 'sha256=' . str_repeat('0', 64)]);
++            check($hdr($r) && $r['status'] === 401, 'webhook assinatura falsa → 401'); fwrite(STDERR, "[dbg 12229]\n");
++            $raw = '{"entry":[]}';
++            $r = $http->request('POST', '/painel/renovacoes-webhook.php', $raw, ['Content-Type' => 'application/json', 'X-Hub-Signature-256' => 'sha256=' . hash_hmac('sha256', $raw, $a->appSecret)]);
++            check($hdr($r) && $r['status'] === 200, 'webhook assinatura válida → 200: ' . $r['status'] . ' ' . substr($r['body'], 0, 200)); fwrite(STDERR, "[dbg 12543]\n");
++            eq(403, $http->get('/painel/suspeito.php')['status'], 'depois: suspeito.php continua bloqueado'); fwrite(STDERR, "[dbg 12631]\n");
++            eq(403, $http->get('/painel/renovacoes-caminho.php')['status'], 'depois: renovacoes-caminho.php continua bloqueado'); fwrite(STDERR, "[dbg 12741]\n");
++            file_put_contents($a->painel . '/xrenovacoes.php', "<?php echo 'X';");
++            file_put_contents($a->painel . '/renovacoes-teste.php', "<?php echo 'X';");
++            eq(403, $http->get('/painel/xrenovacoes.php')['status'], 'xrenovacoes.php bloqueado'); fwrite(STDERR, "[dbg 13042]\n");
++            eq(403, $http->get('/painel/renovacoes-teste.php')['status'], 'renovacoes-teste.php bloqueado'); fwrite(STDERR, "[dbg 13141]\n");
++            eq(200, $http->get('/painel/index.html')['status'], 'index.html ok'); fwrite(STDERR, "[dbg 13250]\n");
++            eq(200, $http->get('/painel/renovacoes-assets/renovacoes.js')['status'], 'assets ok'); fwrite(STDERR, "[dbg 13332]\n");
++            // Login real pelo api.php sob Apache e acesso à aba com a mesma sessão.
++            $st = json_decode($http->get('/painel/api.php?action=status')['body'], true);
++            $r = $http->request('POST', '/painel/api.php?action=setup', json_encode(['username' => 'admin', 'password' => 'senha-de-teste-123', 'secret' => $a->panelSecret]), ['Content-Type' => 'application/json', 'X-CSRF-Token' => $st['csrf']]);
++            eq(200, $r['status'], 'login (setup) pelo api.php: ' . $r['body']); fwrite(STDERR, "[dbg 13850]\n");
++            $r = $http->get('/painel/renovacoes.php');
++            check($r['status'] === 200 && $hdr($r) && strpos($r['body'], 'Renovações') !== false, 'aba abre com a sessão do painel'); fwrite(STDERR, "[dbg 13985]\n");
++            eq(200, $http->get('/painel/renovacoes-api.php?acao=painel')['status'], 'API com sessão → 200'); fwrite(STDERR, "[dbg 14119]\n");
++            check(strpos($http->get('/painel/index.html')['body'], 'href="renovacoes.php"') !== false, 'link no menu'); fwrite(STDERR, "[dbg 14228]\n");
++            [$c, $out] = $a->admin(['verificar-http', $a->base]); fwrite(STDERR, "[dbg 14348]\n");
++            eq(0, $c, 'verificar-http depois do patch: ' . $out); fwrite(STDERR, "[dbg 14414]\n");
++            // Remover
++            [$c, $out] = $a->admin(['htaccess', 'remover', $file]); fwrite(STDERR, "[dbg 14503]\n");
++            eq(0, $c, 'remover: ' . $out); fwrite(STDERR, "[dbg 14571]\n");
++            eq($ht, file_get_contents($file), '.htaccess idêntico ao original após remover'); fwrite(STDERR, "[dbg 14614]\n");
++            $r = (new GrHttp(rtrim(str_replace('/painel/', '', $a->base), '/')))->get('/painel/renovacoes.php');
++            eq(403, $r['status'], 'após remover, volta a bloquear'); fwrite(STDERR, "[dbg 14821]\n");
++        });
++}
++
++apacheTest('apache: sem regra de bloqueio — verificar não propõe mudança e o módulo responde', "Options -Indexes\n", 'painel', function (T $t, GrApache $a) {
++    [$c, $out] = $a->admin(['htaccess', 'verificar', $a->painel]);
++    eq(0, $c, 'nada a fazer: ' . $out);
++    [$c, $out] = $a->admin(['htaccess', 'aplicar', $a->htaccessFile(), $a->painel]);
++    eq(0, $c, 'aplicar não grava nada');
++    eq("Options -Indexes\n", file_get_contents($a->htaccessFile()), '.htaccess intocado');
++    check(count(glob($a->htaccessFile() . '.antes-renovacoes-*')) === 0, 'sem backup porque nada mudou');
++});
++
++apacheTest('apache: formato desconhecido (bloqueia tudo, inclusive api.php) — recusa sem alterar', "<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n", 'painel', function (T $t, GrApache $a) {
++    [$c, $out] = $a->admin(['htaccess', 'aplicar', $a->htaccessFile(), $a->painel]);
++    eq(2, $c, 'recusado: ' . $out);
++    eq("<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n", file_get_contents($a->htaccessFile()), 'intocado');
++});
+diff --git a/gmax-renovacoes/tests/t_regras.php b/gmax-renovacoes/tests/t_regras.php
+index 8ee2bdf..d4a53fd 100644
+--- a/gmax-renovacoes/tests/t_regras.php
++++ b/gmax-renovacoes/tests/t_regras.php
+@@ -1077,3 +1077,86 @@ test('CLI: integridade antes/depois + migrar + comparar, e menu recusa modo inv
+     array_map('unlink', glob("$dir/*"));
+     rmdir($dir);
+ });
++
++echo "Ajustes da revisão do Codex (caminho da hospedagem e .htaccess)\n";
++
++test('documentação e exemplos usam o caminho real do painel (gmaxcanais.com.br/painel), nunca public_html', function (T $t) {
++    $root = dirname(__DIR__);
++    $files = array_merge([$root . '/LEIA_PRIMEIRO.md'], glob($root . '/docs/*.md'), glob($root . '/patch-painel/*'),
++        iterator_to_array(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/src', FilesystemIterator::SKIP_DOTS))));
++    foreach ($files as $f) {
++        $f = (string)$f;
++        if (basename($f) === 'REVISAO_SEGURANCA.md' || basename($f) === 'TESTES_RESULTADO.md') {
++            continue; // registros históricos
++        }
++        $s = file_get_contents($f);
++        check(stripos($s, 'public_html') === false, 'public_html em ' . basename($f));
++        check(strpos($s, '/home/USUARIO') === false, '/home/USUARIO em ' . basename($f));
++    }
++    foreach (['docs/INSTALACAO.md', 'docs/HTACCESS.md', 'patch-painel/LEIA.md', 'docs/BACKUP_E_RECUPERACAO.md'] as $d) {
++        check(strpos(file_get_contents("$root/$d"), '/home1/gust1922/gmaxcanais.com.br/painel') !== false, "caminho do painel em $d");
++    }
++    check(strpos(file_get_contents("$root/docs/INSTALACAO.md"), '/home1/gust1922/gmax-painel/private/config.php') !== false, 'config privado do painel');
++    // As páginas públicas localizam a biblioteca em dirname(painel, 2)/gmax-renovacoes.
++    eq('/home1/gust1922/gmax-renovacoes', dirname('/home1/gust1922/gmaxcanais.com.br/painel', 2) . '/gmax-renovacoes', 'localização padrão da biblioteca');
++    foreach (['renovacoes.php', 'renovacoes-api.php', 'renovacoes-webhook.php'] as $p) {
++        check(strpos(file_get_contents("$root/src/publico/painel/$p"), "dirname(__DIR__, 2) . '/gmax-renovacoes'") !== false, "$p usa a localização padrão");
++    }
++});
++
++test('.htaccess: 4 formatos liberam só os 3 arquivos, reversão exata; sem bloqueio não muda; desconhecido recusa', function (T $t) {
++    $H = \GmaxRenov\HtaccessPatch::class;
++    $cases = [
++        'files24' => ["Options -Indexes\n<FilesMatch \"\\.php$\">\n  Require all denied\n</FilesMatch>\n<Files \"api.php\">\n  Require all granted\n</Files>\n", '', 'Files'],
++        'files22' => ["<FilesMatch \"\\.(php|phtml)$\">\nOrder allow,deny\nDeny from all\n</FilesMatch>\n<FilesMatch \"^api\\.php$\">\nOrder allow,deny\nAllow from all\n</FilesMatch>", '', 'Files'], // sem quebra final
++        'rewrite' => ["RewriteEngine On\nRewriteCond %{REQUEST_URI} !/api\\.php$\nRewriteRule \\.php$ - [F,L]\n", '', 'Rewrite'],
++        'raiz' => ["RewriteEngine On\nRewriteRule ^painel/(?!api\\.php$).*\\.php$ - [F]\n", 'painel', 'Rewrite'],
++    ];
++    foreach ($cases as $k => [$h, $rel, $fmt]) {
++        $r = $H::analyze($h, $rel);
++        eq($fmt, $r['formato'], "$k: formato");
++        eq(\GmaxRenov\HtaccessPatch::FILES, $r['bloqueia'], "$k: detecta os 3 bloqueados");
++        check($r['plano'] !== null && strpos($r['plano'], $h === '' ? '' : trim(explode("\n", $h)[1])) !== false, "$k: regras originais mantidas");
++        check(strpos($r['plano'], 'Require all granted' . "\n</FilesMatch>\n<FilesMatch") === false, "$k: nada além do bloco marcado");
++        $after = $H::analyze($r['plano'], $rel);
++        eq([], $after['bloqueia'], "$k: depois do patch nada bloqueado");
++        check($after['aplicado'] && $after['plano'] === null, "$k: não aplica duas vezes");
++        eq($h, $H::revert($r['plano']), "$k: reversão byte a byte");
++        check(!preg_match('~granted|Allow from all|\[L\]~', str_replace(explode("\n", $h), '', preg_replace('~# BEGIN GMAX.*?# END GMAX Renovacoes~s', '', $r['plano']))), "$k: nenhuma liberação fora do bloco");
++        preg_match('~# BEGIN GMAX.*?# END GMAX Renovacoes~s', $r['plano'], $blk);
++        foreach (['renovacoes.php', 'renovacoes-api.php', 'renovacoes-webhook.php'] as $ok) {
++            check((bool)preg_match('~renovacoes\(-api\|-webhook\)\?\\\\\.php\$~', $blk[0]), "$k: regex exata dos 3 nomes");
++        }
++    }
++    foreach (['renovacoes.php', 'renovacoes-api.php', 'renovacoes-webhook.php'] as $n) {
++        check(preg_match('~' . \GmaxRenov\HtaccessPatch::FILES_REGEX . '~', $n) === 1, "$n liberado");
++    }
++    foreach (['api2.php', 'renovacoes-caminho.php', 'xrenovacoes.php', 'renovacoes.php.bak', 'renovacoes-teste.php', 'suspeito.php', 'renovacoes.phtml'] as $n) {
++        check(preg_match('~' . \GmaxRenov\HtaccessPatch::FILES_REGEX . '~', $n) === 0, "$n NÃO liberado");
++    }
++    eq('nenhum', $H::analyze("Options -Indexes\n")['formato'], 'sem bloqueio: nada a fazer');
++    $u = $H::analyze("<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n");
++    check($u['plano'] === null && $u['formato'] === 'desconhecido', 'bloqueio sem exceção do api.php: recusa');
++});
++
++test('.htaccess: casos de borda — exceção comentada recusa, IfModule preservado, maiúsculas e symlink não liberados', function (T $t) {
++    $H = \GmaxRenov\HtaccessPatch::class;
++    $commented = "<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n#<Files \"api.php\">\n#  Require all granted\n#</Files>\n";
++    check($H::analyze($commented)['plano'] === null, 'exceção só em comentário: recusa');
++    $ifm = "<IfModule mod_authz_core.c>\n<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n<Files api.php>\nRequire all granted\n</Files>\n</IfModule>\n";
++    $p = $H::analyze($ifm)['plano'];
++    check(strpos($p, "# END GMAX Renovacoes\n</IfModule>") !== false, 'bloco dentro do mesmo IfModule');
++    eq($ifm, $H::revert($p), 'reversão exata com IfModule');
++    eq(0, preg_match('~' . $H::FILES_REGEX . '~', 'RENOVACOES.PHP'), 'maiúsculas não liberadas');
++    // CLI recusa .htaccess que é link simbólico
++    $dir = sys_get_temp_dir() . '/gr-ht-' . $t->dbName;
++    @mkdir("$dir/painel", 0700, true);
++    file_put_contents("$dir/real.htaccess", "Options -Indexes\nRewriteEngine On\nRewriteCond %{REQUEST_URI} !/api\\.php$\nRewriteRule \\.php$ - [F,L]\n");
++    symlink("$dir/real.htaccess", "$dir/painel/.htaccess");
++    $cfg = $t->writeConfig();
++    exec('GR_CONFIG=' . escapeshellarg($cfg) . ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(GR_TEST_SRC . '/bin/renovacoes-admin.php')
++        . ' htaccess aplicar ' . escapeshellarg("$dir/painel/.htaccess") . ' ' . escapeshellarg("$dir/painel") . ' 2>&1', $o, $c);
++    eq(2, $c, 'symlink recusado: ' . implode(' ', $o));
++    check(is_link("$dir/painel/.htaccess") && strpos(file_get_contents("$dir/real.htaccess"), 'GMAX') === false, 'nada alterado');
++    exec('rm -rf ' . escapeshellarg($dir));
++});

@@ -208,6 +208,10 @@ switch ($cmd) {
             exit(1);
         }
         $file = $argv[3];
+        if (is_link($file)) {
+            echo "O .htaccess é um link simbólico; nada foi alterado. Edite o arquivo de destino manualmente (docs/HTACCESS.md).\n";
+            exit(2);
+        }
         $orig = (string)file_get_contents($file);
         if ($mode === 'aplicar') {
             $painel = rtrim((string)realpath($argv[4] ?? ''), '/');

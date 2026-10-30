@@ -9,7 +9,7 @@ Módulo adicional para o painel **GMAX — Central de Gestão** (`/painel/`), in
 | Item | Estado |
 |---|---|
 | Leitura de clientes e pacotes reais (`clients`, `client_plans.due_date`, `client_exclusions`, `price_cents`) | **pronto**, testado em banco descartável com a estrutura real |
-| Sessão do painel (`gmax_session`, `admin`, `csrf`, expiração 3600 s, HTTPS) | **pronto**, testado com o `api.php` real em servidor local (89/89 em 30/10/2026, duas execuções completas) |
+| Sessão do painel (`gmax_session`, `admin`, `csrf`, expiração 3600 s, HTTPS) | **pronto**, testado com o `api.php` real em servidor local (98/98 em 30/10/2026, nenhum teste pulado: inclui Apache 2.4.58 real e Chromium) |
 | Preservação dos dados (clientes, pacotes, vencimentos, preços, custos, financeiro, exclusões) | **verificada em banco descartável** com dados fictícios. **Na produção, só depois do comparativo de integridade** do passo 5 da instalação |
 | Regras, fila, agendador, revalidação, webhook, aba Renovações | **pronto e testado** |
 | Envio pelo WhatsApp | **simulado**. O simulado **não prova entrega real** |
@@ -38,7 +38,7 @@ Módulo adicional para o painel **GMAX — Central de Gestão** (`/painel/`), in
 | `docs/DIAGNOSTICO.md` | base, mapeamento e arquitetura |
 | `docs/WHATSAPP_API.md` | provedor, custos, coexistência, modelos, consentimento |
 | `docs/TESTES_RESULTADO.md` | testes executados (gerado automaticamente) |
-| `docs/REVISAO_SEGURANCA.md` | revisões de segurança (2 rodadas) |
+| `docs/REVISAO_SEGURANCA.md` | revisões de segurança (3 rodadas; a 3ª feita pelo coordenador, ver o arquivo) |
 | `docs/PENDENCIAS.md` | o que realmente falta para ativar |
 | `docs/capturas/` | telas com dados fictícios |
 | `MANIFESTO.txt` | arquivos e hashes |

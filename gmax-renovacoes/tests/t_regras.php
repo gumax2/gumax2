@@ -1138,3 +1138,25 @@ test('.htaccess: 4 formatos liberam só os 3 arquivos, reversão exata; sem bloq
     $u = $H::analyze("<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n");
     check($u['plano'] === null && $u['formato'] === 'desconhecido', 'bloqueio sem exceção do api.php: recusa');
 });
+
+test('.htaccess: casos de borda — exceção comentada recusa, IfModule preservado, maiúsculas e symlink não liberados', function (T $t) {
+    $H = \GmaxRenov\HtaccessPatch::class;
+    $commented = "<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n#<Files \"api.php\">\n#  Require all granted\n#</Files>\n";
+    check($H::analyze($commented)['plano'] === null, 'exceção só em comentário: recusa');
+    $ifm = "<IfModule mod_authz_core.c>\n<FilesMatch \"\\.php$\">\nRequire all denied\n</FilesMatch>\n<Files api.php>\nRequire all granted\n</Files>\n</IfModule>\n";
+    $p = $H::analyze($ifm)['plano'];
+    check(strpos($p, "# END GMAX Renovacoes\n</IfModule>") !== false, 'bloco dentro do mesmo IfModule');
+    eq($ifm, $H::revert($p), 'reversão exata com IfModule');
+    eq(0, preg_match('~' . $H::FILES_REGEX . '~', 'RENOVACOES.PHP'), 'maiúsculas não liberadas');
+    // CLI recusa .htaccess que é link simbólico
+    $dir = sys_get_temp_dir() . '/gr-ht-' . $t->dbName;
+    @mkdir("$dir/painel", 0700, true);
+    file_put_contents("$dir/real.htaccess", "Options -Indexes\nRewriteEngine On\nRewriteCond %{REQUEST_URI} !/api\\.php$\nRewriteRule \\.php$ - [F,L]\n");
+    symlink("$dir/real.htaccess", "$dir/painel/.htaccess");
+    $cfg = $t->writeConfig();
+    exec('GR_CONFIG=' . escapeshellarg($cfg) . ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(GR_TEST_SRC . '/bin/renovacoes-admin.php')
+        . ' htaccess aplicar ' . escapeshellarg("$dir/painel/.htaccess") . ' ' . escapeshellarg("$dir/painel") . ' 2>&1', $o, $c);
+    eq(2, $c, 'symlink recusado: ' . implode(' ', $o));
+    check(is_link("$dir/painel/.htaccess") && strpos(file_get_contents("$dir/real.htaccess"), 'GMAX') === false, 'nada alterado');
+    exec('rm -rf ' . escapeshellarg($dir));
+});

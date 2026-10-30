@@ -12,9 +12,15 @@
 | IDs | texto |
 | Login | sessão do painel reaproveitada; módulo **sem credencial própria**, lê o config privado do painel |
 | Menu | link inserido com conferência, cópia e reversão |
+| Caminho | painel em `/home1/gust1922/gmaxcanais.com.br/painel/`; biblioteca em `/home1/gust1922/gmax-renovacoes` |
+| `.htaccess` | diagnóstico + liberação mínima só dos 3 arquivos, com cópia e reversão |
 
-- 89 testes executados em bancos **descartáveis**, incluindo o `api.php` real: login, CSRF, logout, expiração, renovação por `entry`, `delete_client` e regressão do `action=data`. Resultado em `TESTES_RESULTADO.md`.
-- Duas rodadas de revisão de segurança, sem achado de gravidade alta. Correções aplicadas e cobertas por testes (`REVISAO_SEGURANCA.md`).
+- 98 testes executados em bancos **descartáveis**, sem nenhum pulado. Incluem:
+  - o `api.php` real: login, CSRF, logout, expiração, renovação por `entry`, `delete_client` e regressão do `action=data`;
+  - **Apache 2.4.58 real** com 4 formatos de `.htaccess`;
+  - o teste visual no **Chromium**.
+  Resultado em `TESTES_RESULTADO.md`.
+- Três rodadas de revisão de segurança, sem achado de gravidade alta. A 3ª, sobre o `.htaccess`, foi feita pelo coordenador porque o agente parou por limite de uso. Correções aplicadas e cobertas por testes (`REVISAO_SEGURANCA.md`).
 
 ## Para INSTALAR (depende de você)
 1. **Revisão do pacote** (Codex/você): ZIP `dist/GMAX_Renovacoes_1.2.0_incremental.zip` e a branch `claude/gmax-whatsapp-renewal-reminders-poplk0`.

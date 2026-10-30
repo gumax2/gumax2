@@ -147,3 +147,23 @@ Testes: `php -l` passou em todos os PHP. `php tests/run.php` deu 73/77; as 4 fal
 | R2-11 textos | **Corrigido** em DIAGNOSTICO; LEIA_PRIMEIRO só diz "testado" com o resultado da execução completa |
 
 Testes de regressão: `tests/t_regras.php`, seção "rodada 2".
+
+---
+
+## Rodada 3 (.htaccess e caminho da hospedagem) — versão 1.2.0
+
+**Quem revisou:** o agente de segurança foi acionado, mas **parou por limite de uso da API antes de concluir** e não registrou achados. Esta rodada foi feita pelo coordenador, com verificação por testes no Apache real. Recomenda-se que a revisão do Codex inclua `lib/HtaccessPatch.php`.
+
+| # | Ponto verificado | Resultado |
+|---|---|---|
+| R3-1 | Liberar mais que os 3 arquivos | Regex `^renovacoes(-api|-webhook)?\.php$` com âncoras. Testado no Apache 2.4.58: `suspeito.php`, `xrenovacoes.php`, `renovacoes-teste.php` e `renovacoes-caminho.php` continuam 403. Controle negativo: patch propositalmente amplo (`\.php$`) **é detectado** pelos testes. Maiúsculas não são liberadas |
+| R3-2 | `<FilesMatch>` vale para o nome em qualquer subpasta | **Aceito/documentado**: mesmo comportamento da exceção existente do `api.php`; nenhum arquivo com esses nomes em subpastas. O formato Rewrite é ancorado na pasta `painel/` |
+| R3-3 | `[L]` no formato Rewrite pula regras **posteriores** à de bloqueio (ex.: redirecionamento HTTPS colocado depois) | **Aceito/documentado**: a regra é inserida imediatamente antes da regra de bloqueio, então as regras anteriores continuam valendo. As 3 páginas exigem HTTPS por conta própria (403 em HTTP) |
+| R3-4 | Detecção errada (blocos em comentário, `<Files ~>`, IfModule, `[OR]`, raiz do domínio) | Exceção comentada **não** conta como exceção (recusa). `<Files ~>` reconhecido. Bloco inserido dentro do mesmo `<IfModule>`. Cadeia com `[OR]` tratada de forma conservadora. Formato desconhecido ou bloqueio sem exceção do `api.php` → **não altera nada** |
+| R3-5 | `remover` apagar conteúdo do usuário | Remove apenas o trecho entre os marcadores `# BEGIN/END GMAX Renovacoes`. Reversão byte a byte testada nos 4 formatos, com e sem quebra de linha final. Também grava cópia antes |
+| R3-6 | Gravação insegura | Cópia conferida por hash antes de gravar, escrita atômica preservando permissões, só aceita arquivo chamado `.htaccess`, pasta do painel precisa estar dentro da pasta do `.htaccess`. **Corrigido nesta rodada:** `.htaccess` que é link simbólico é recusado (antes, a gravação atômica trocaria o link por um arquivo) |
+| R3-7 | Cabeçalho `X-GMAX-Renovacoes: 1` | Revela apenas que o módulo existe (o nome dos arquivos já revela). Serve para distinguir "respondido pelo módulo" de "bloqueado pelo servidor" no diagnóstico |
+| R3-8 | Sessão e assinatura depois da liberação | Testado no Apache: sem login, a página redireciona e a API dá 401. Webhook sem assinatura ou com assinatura falsa → 401; com assinatura válida → 200. Login real pelo `api.php` sob Apache dá acesso à aba |
+| R3-9 | Caminho da hospedagem | `dirname(painel, 2)/gmax-renovacoes` = `/home1/gust1922/gmax-renovacoes`; testado no Apache com a árvore `home1/gust1922/gmaxcanais.com.br/painel/` **sem** `renovacoes-caminho.php` |
+
+Limitação: o `.htaccess` real da produção não foi visto. Só os 4 formatos comuns foram testados. Qualquer outro formato é recusado pelo comando e precisa de análise manual.
