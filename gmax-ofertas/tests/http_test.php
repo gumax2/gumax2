@@ -374,12 +374,16 @@ test('Integrações: conectar gera redirecionamento S256 com state; callback exi
     $r = http('GET', 'painel.php?p=integracoes');
     no_php_errors($r, 'integracoes com app');
     ok(!str_contains($r['body'], 'segredo-de-teste-muito-longo-123'), 'segredo nunca aparece na tela');
-    ok(str_contains(header_value($r, 'Content-Security-Policy'), 'form-action \'self\' https://auth.mercadolivre.com.br'), 'CSP permite só o autorizador oficial');
+    ok(str_contains(header_value($r, 'Content-Security-Policy'), "form-action 'self';"), 'CSP: formulários só para o próprio painel');
     $t = csrf($r['body']);
     eq(303, http('POST', 'painel.php', ['action' => 'ml_oauth_start', 'csrf' => 'x', 'back' => 'integracoes'])['status']);
     $r = http('POST', 'painel.php', ['action' => 'ml_oauth_start', 'csrf' => $t, 'back' => 'integracoes']);
-    $loc = header_value($r, 'Location');
+    eq(200, $r['status'], 'POST não redireciona (form-action não segue para o login do ML)');
+    eq('', header_value($r, 'Location'));
+    ok(preg_match('/<a [^>]*href="([^"]+)" data-autonav/', $r['body'], $m) === 1, 'página intermediária com link');
+    $loc = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5);
     ok(str_starts_with($loc, 'https://auth.mercadolivre.com.br/authorization?'), $loc);
+    ok(str_contains($r['body'], 'http-equiv="refresh" content="0;url=' . $m[1] . '"'), 'meta refresh para o mesmo endereço');
     parse_str((string)parse_url($loc, PHP_URL_QUERY), $q);
     eq('S256', $q['code_challenge_method']);
     ok(strlen($q['state']) >= 40, 'state forte');
@@ -394,6 +398,30 @@ test('Integrações: conectar gera redirecionamento S256 com state; callback exi
     ok(!is_file("$secrets/mercadolivre-token.enc"), 'nenhum token gravado');
     unlink("$secrets/mercadolivre-app.php");
 });
+
+// Navegador real (Chromium): o botão Conectar não pode esbarrar em form-action quando o
+// autorizador do ML redireciona para o login em outro host (falha relatada no Edge).
+$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+$hasPw = $node !== '' && trim((string)shell_exec('command -v openssl 2>/dev/null')) !== ''
+    && str_contains((string)shell_exec('NODE_PATH=$(npm root -g 2>/dev/null) node -e "require(\'playwright\');console.log(\'pw-ok\')" 2>/dev/null'), 'pw-ok');
+if (!$hasPw) {
+    echo "  (teste de navegador PULADO: node/playwright/openssl indisponível)\n";
+} else {
+    $secrets = t_sandbox() . '/gmax-secrets';
+    file_put_contents("$secrets/mercadolivre-app.php", "<?php return ['client_id' => '1234567890123456', 'client_secret' => 'segredo-de-teste-muito-longo-123', 'redirect_uri' => 'https://gmaxcanais.com.br/gmax-auto/ml-oauth-callback.php'];");
+    $cmd = 'env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy NODE_PATH=$(npm root -g) node '
+        . escapeshellarg(__DIR__ . '/browser_oauth.js') . ' ' . escapeshellarg($base) . ' ' . escapeshellarg(T_PASSWORD) . ' 2>&1';
+    $out = (string)shell_exec($cmd);
+    $lines = array_filter(array_map(static fn($l) => json_decode($l, true), explode("\n", $out)));
+    if (!$lines) {
+        test('Navegador: teste executado', fn() => ok(false, mb_substr($out, 0, 500)));
+    }
+    foreach ($lines as $l) {
+        test('Navegador (Chromium) — ' . $l['nome'], fn() => ok($l['ok'], $l['erro']));
+    }
+    @unlink("$secrets/mercadolivre-app.php");
+    @unlink("$secrets/mercadolivre-token.enc");
+}
 
 echo "\n== Agendadores existentes e CLI (sem rede)\n";
 $cli = static function (array $cmd) use ($env, $app): array {

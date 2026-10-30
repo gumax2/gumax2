@@ -20,6 +20,10 @@
     });
   });
 
+  // Página intermediária do OAuth: navegação por GET (não é envio de formulário).
+  var autonav = document.querySelector('a[data-autonav]');
+  if (autonav) { window.location.replace(autonav.href); }
+
   // Menu no celular.
   document.querySelectorAll('[data-toggle]').forEach(function (btn) {
     btn.addEventListener('click', function () {

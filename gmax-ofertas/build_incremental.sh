@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Pacote INCREMENTAL 3.0.3 (sobre a 3.0.2): roda todos os testes e empacota só os arquivos alterados/novos.
+# Pacote INCREMENTAL: roda todos os testes e empacota só os arquivos alterados/novos desde BASE_COMMIT.
 set -euo pipefail
 cd "$(dirname "$0")"
-NAME="${NAME:-GMAX_Ofertas_3.1.1_incremental}"
-BASE_COMMIT="cd8ac74"   # pacote 3.0.2
+NAME="${NAME:-GMAX_Ofertas_3.1.2_incremental}"
+BASE_COMMIT="${BASE_COMMIT:-645659a}"   # 645659a = 3.1.1 instalada; cd8ac74 = 3.0.2
 OUT="dist-inc/$NAME"
 rm -rf dist-inc && mkdir -p "$OUT"
 find src -name '*.php' -print0 | xargs -0 -n1 php -l | grep -v '^No syntax errors' || true
@@ -21,7 +21,7 @@ FILES=$(cd .. && git diff --name-only "$BASE_COMMIT" -- gmax-ofertas/src/gmax-au
 FILES=$(echo "$FILES" | sed 's#^gmax-ofertas/src/gmax-auto/##' | sort -u)
 ( cd src/gmax-auto && zip -q -X "../../$OUT/${NAME}_arquivos.zip" $FILES )
 {
-  echo "$NAME (sobre 3.0.2; inclui 3.0.3 e 3.1) — MANIFESTO ($(date -u +%Y-%m-%dT%H:%MZ))"
+  echo "$NAME (sobre o commit $BASE_COMMIT) — MANIFESTO ($(date -u +%Y-%m-%dT%H:%MZ))"
   echo "Destino: /home1/gust1922/gmaxcanais.com.br/gmax-auto/"
   echo
   for f in $FILES; do
@@ -29,13 +29,10 @@ FILES=$(echo "$FILES" | sed 's#^gmax-ofertas/src/gmax-auto/##' | sort -u)
     printf '  %s  %s  %s\n' "$tipo" "$(sha256sum "src/gmax-auto/$f" | cut -c1-16)" "$f"
   done
   echo
-  echo "BANCO: migração 002 (somente tabelas novas, backup automático antes). ARQUIVOS ANTIGOS (app.php, index.php, cron.php, publicador...): não tocados."
+  echo "BANCO: nenhuma migração nova. ARQUIVOS ANTIGOS (app.php, index.php, cron.php, publicador...): não tocados."
   echo "ENVIOS: nenhum habilitado. Cron e credenciais: não alterados."
 } > "$OUT/MANIFESTO.txt"
-cp docs/ATUALIZACAO_3.1.1_OAUTH_MERCADOLIVRE.md "$OUT/00_LEIA_PRIMEIRO_OAUTH_3.1.1.md"
-cp docs/ATUALIZACAO_3.1_AUTOMACOES.md "$OUT/01_INSTALACAO_3.1_AUTOMACOES.md"
-cp docs/LIMITACOES_APIS.md docs/ATUALIZACAO_3.0.3_LINKS_EM_LOTE.md docs/ROLLBACK.md "$OUT/"
-mkdir -p "$OUT/capturas" && cp docs/capturas/*automacoes*.png "$OUT/capturas/" 2>/dev/null || true
+cp docs/ATUALIZACAO_3.1.2_CSP_OAUTH.md "$OUT/00_LEIA_PRIMEIRO_3.1.2.md"
 cp docs/TESTES.md "$OUT/TESTES.md"
 ( cd dist-inc && zip -q -X -r "$NAME.zip" "$NAME" )
 ls -la dist-inc

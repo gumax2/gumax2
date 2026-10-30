@@ -15,7 +15,7 @@ header('Cache-Control: no-store, private');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: no-referrer');
-header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self' https://auth.mercadolivre.com.br; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
 header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 
 Auth::start();
@@ -170,8 +170,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'ml_oauth_start':
                 $url = (new Gmax\OAuth\MercadoLivreOAuth())->begin($_SESSION);
                 Audit::log($pdo, $actor, 'ml_oauth_iniciado', 'integracao', 'mercadolivre');
-                // Redirecionamento externo somente para o endereço fixo de autorização do Mercado Livre.
-                header('Location: ' . $url, true, 303);
+                // Sem 303 aqui: o Chromium (Chrome/Edge) aplica form-action a todos os redirecionamentos
+                // que seguem um POST, e o autorizador do ML redireciona para o login em outro host quando
+                // o navegador não está logado. A página intermediária navega por GET (fora de form-action).
+                if (!str_starts_with($url, Gmax\OAuth\MercadoLivreOAuth::AUTH_URL . '?')) {
+                    throw new RuntimeException('Endereço de autorização inesperado.');
+                }
+                $u = View::e($url);
+                echo '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                    . '<meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=' . $u . '">'
+                    . '<title>Redirecionando ao Mercado Livre</title><link rel="stylesheet" href="gmax-assets/painel.css"></head>'
+                    . '<body><main class="wrap"><div class="card"><p>Redirecionando para a autorização do Mercado Livre…</p>'
+                    . '<p><a class="btn btn-primary" href="' . $u . '" data-autonav rel="noreferrer">Continuar no Mercado Livre</a></p>'
+                    . '<p><a href="' . View::e(View::url('integracoes')) . '">Cancelar</a></p></div></main>'
+                    . '<script src="gmax-assets/painel.js"></script></body></html>';
                 exit;
             case 'ml_oauth_disconnect':
                 if (gmax_post_str('confirm', 20) !== 'DESCONECTAR') {
