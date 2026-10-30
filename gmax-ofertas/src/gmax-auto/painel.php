@@ -27,7 +27,7 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'automacoes', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
@@ -154,6 +154,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $r = LinkImporter::revert($pdo, gmax_post_int('batch'), $actor);
                 View::flash($r['ignorados'] ? 'aviso' : 'ok', "Lote desfeito: {$r['restaurados']} link(s) restaurado(s)." . ($r['ignorados'] ? ' Preservados: ' . implode('; ', $r['ignorados']) : ''));
                 gmax_redirect('lote_links', ['id' => gmax_post_int('batch')]);
+            case 'auto_run':
+                if (!in_array('002', Migrator::applied($pdo), true)) {
+                    throw new RuntimeException('Aplique a migração 002 em Sistema.');
+                }
+                $r = Gmax\Automation\Runner::runManual($pdo, gmax_post_str('job', 40), $actor);
+                $msg = match ($r['resultado']) {
+                    'ja_em_execucao' => 'Outra execução está em andamento. Tente em alguns minutos.',
+                    'trava_indisponivel' => 'Pasta privada sem permissão de escrita: execução não realizada.',
+                    default => sprintf('Execução %s: %d encontrado(s), %d novo(s), %d atualizado(s), %d aprovado(s), %d bloqueado(s), %d erro(s). Nenhuma mensagem foi enviada.',
+                        $r['resultado'], $r['found'] ?? 0, $r['created'] ?? 0, $r['updated'] ?? 0, $r['approved'] ?? 0, $r['blocked'] ?? 0, $r['errors'] ?? 0),
+                };
+                View::flash(in_array($r['resultado'], ['concluido'], true) ? 'ok' : 'aviso', $msg);
+                gmax_redirect('automacoes');
+            case 'auto_pause':
+                Settings::set($pdo, 'automacoes_pausadas', '1', $actor);
+                View::flash('ok', 'Todas as automações foram pausadas.');
+                gmax_redirect('automacoes');
+            case 'auto_resume':
+                if (gmax_post_str('confirm', 20) !== 'RETOMAR') {
+                    throw new RuntimeException('Digite RETOMAR para confirmar.');
+                }
+                Settings::set($pdo, 'automacoes_pausadas', '0', $actor);
+                View::flash('aviso', 'Automações retomadas: pesquisa, revisão e seleção seguem os horários. Envios continuam bloqueados pelas travas de publicação.');
+                gmax_redirect('automacoes');
+            case 'auto_job_save':
+                Gmax\Automation\Runner::setJob($pdo, gmax_post_str('job', 40), !empty($_POST['enabled']), gmax_post_str('times', 120), implode(',', array_map('intval', (array)($_POST['weekdays'] ?? []))), $actor);
+                View::flash('ok', 'Agendamento salvo.');
+                gmax_redirect('automacoes');
+            case 'auto_alert_resolve':
+                Gmax\Automation\Alerts::resolve($pdo, gmax_post_int('id'), $actor);
+                gmax_redirect('automacoes');
+            case 'template_save':
+                $body = str_replace("\r\n", "\n", (string)($_POST['body'] ?? ''));
+                $body = mb_substr($body, 0, 1500);
+                if ($errs = Gmax\Message::validateTemplate($body)) {
+                    throw new RuntimeException(implode(' ', $errs));
+                }
+                $mpT = gmax_post_str('marketplace', 20);
+                if ($mpT !== '*' && !isset(Url::MARKETPLACES[$mpT])) {
+                    throw new RuntimeException('Marketplace inválido.');
+                }
+                $catT = gmax_post_str('category', 80) ?: '*';
+                Db::run($pdo, 'INSERT INTO gmax3_templates(marketplace,category,body,active,updated_at) VALUES(?,?,?,1,?) ON CONFLICT(marketplace,category) DO UPDATE SET body=excluded.body, active=1, updated_at=excluded.updated_at', [$mpT, $catT, $body, Time::nowSql()]);
+                Audit::log($pdo, $actor, 'modelo_salvo', 'template', "$mpT/$catT");
+                View::flash('ok', 'Modelo de mensagem salvo.');
+                gmax_redirect('automacoes');
+            case 'template_delete':
+                $tid = gmax_post_int('id');
+                Db::run($pdo, "DELETE FROM gmax3_templates WHERE id=? AND NOT (marketplace='*' AND category='*')", [$tid]);
+                Audit::log($pdo, $actor, 'modelo_removido', 'template', $tid);
+                View::flash('ok', 'Modelo removido (o modelo padrão não pode ser removido).');
+                gmax_redirect('automacoes');
             case 'offer_save':
                 $id = gmax_post_int('id');
                 [$data, $errors] = gmax_offer_form($pdo);
@@ -289,12 +341,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 gmax_redirect('categorias');
             case 'settings_save':
                 foreach (Settings::WEB_EDITABLE as $k) {
-                    if (isset($_POST[$k]) && gmax_post_str($k, 200) !== Settings::get($pdo, $k)) {
-                        Settings::setFromWeb($pdo, $k, gmax_post_str($k, 200), $actor);
+                    if (isset($_POST[$k]) && gmax_post_str($k, 2000) !== Settings::get($pdo, $k)) {
+                        Settings::setFromWeb($pdo, $k, gmax_post_str($k, 2000), $actor);
                     }
                 }
                 View::flash('ok', 'Configurações salvas.');
-                gmax_redirect('sistema');
+                gmax_redirect($back === 'automacoes' ? 'automacoes' : 'sistema');
             default:
                 throw new RuntimeException('Ação desconhecida.');
         }
@@ -442,7 +494,7 @@ if ($page === 'exportar') {
 $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
-$titles = ['painel' => 'Visão geral', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
+$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
     'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';

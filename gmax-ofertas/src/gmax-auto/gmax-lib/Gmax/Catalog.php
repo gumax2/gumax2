@@ -255,6 +255,24 @@ final class Catalog
         return [];
     }
 
+    /**
+     * Preço/condição confirmados por fonte OFICIAL autorizada (API do marketplace) neste instante.
+     * Registra a origem ("api:mercadolivre") e grava o histórico como verificado.
+     */
+    public static function markVerifiedByApi(PDO $pdo, int $id, string $marketplace, string $actor): void
+    {
+        $r = self::get($pdo, $id);
+        if (!$r || empty($r['price_promo_cents'])) {
+            return;
+        }
+        $now = Time::nowSql();
+        Db::run($pdo, 'UPDATE gmax3_catalog SET price_verified_at=?, price_verified_by=?, price_source=?, price_seen_at=? WHERE id=?', [
+            $now, 'api:' . $marketplace, 'api_' . $marketplace, substr($now, 0, 10), $id,
+        ]);
+        self::recordPrice($pdo, $id, $r, 'api_' . $marketplace, true, $now);
+        Audit::log($pdo, $actor, 'preco_confirmado_api', 'catalog', $id, ['fonte' => 'api:' . $marketplace, 'por' => $r['price_promo_cents'], 'de' => $r['price_original_cents']]);
+    }
+
     /** O administrador declara que conferiu agora, na loja, o preço e a condição cadastrados. */
     public static function confirmPrice(PDO $pdo, int $id, string $actor): bool
     {

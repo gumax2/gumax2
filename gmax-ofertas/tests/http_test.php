@@ -170,7 +170,7 @@ test('Páginas antigas continuam funcionando após a migração', function () {
     ok(str_contains($r['body'], 'Fone Bluetooth TWS Teste A'), 'index.php lista ofertas Shopee');
 });
 test('Todas as páginas do painel abrem sem erros', function () {
-    foreach (['painel', 'ofertas', 'oferta', 'importar', 'links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema'] as $p) {
+    foreach (['painel', 'automacoes', 'ofertas', 'oferta', 'importar', 'links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema'] as $p) {
         $r = http('GET', "painel.php?p=$p");
         eq(200, $r['status'], $p);
         no_php_errors($r, $p);
@@ -330,6 +330,38 @@ test('Importar links em lote: botão na aba, prévia, CSRF, aplicar e desfazer',
     ok(str_contains($r['body'], '17 link(s) restaurado(s)'), 'desfeito');
     no_php_errors(http('GET', "painel.php?p=lote_links&id=$batch"), 'lote desfeito');
     eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE affiliate_url LIKE 'https://meli.la/Gx%'"));
+});
+
+echo "\n== Central de Automações pelo navegador\n";
+test('Central: execução manual, agendamento validado, pausa/retomada, modelo escapado, nada enviado', function () {
+    $pdo = Db::get();
+    $r = http('GET', 'painel.php?p=automacoes');
+    no_php_errors($r, 'central');
+    ok(str_contains($r['body'], 'Automações pausadas') && str_contains($r['body'], 'Executar agora'), 'tela');
+    $t = csrf($r['body']);
+    $r = follow(http('POST', 'painel.php', ['action' => 'auto_run', 'job' => 'saude_catalogo', 'csrf' => 'x', 'back' => 'automacoes']));
+    ok(str_contains($r['body'], 'Sessão expirada ou formulário inválido'), 'CSRF');
+    $r = follow(http('POST', 'painel.php', ['action' => 'auto_run', 'job' => 'saude_catalogo', 'csrf' => $t, 'back' => 'automacoes']));
+    ok(str_contains($r['body'], 'Nenhuma mensagem foi enviada'), substr(strip_tags($r['body']), 0, 300));
+    $r = follow(http('POST', 'painel.php', ['action' => 'auto_run', 'job' => 'descoberta', 'csrf' => $t, 'back' => 'automacoes']));
+    ok(str_contains($r['body'], 'Execução'), 'descoberta sem integração não quebra');
+    $r = follow(http('POST', 'painel.php', ['action' => 'auto_job_save', 'job' => 'descoberta', 'enabled' => '1', 'times' => '07:00,25:99', 'weekdays' => ['1', '2'], 'csrf' => $t, 'back' => 'automacoes']));
+    ok(str_contains($r['body'], 'Horário inválido'), 'horário validado');
+    follow(http('POST', 'painel.php', ['action' => 'auto_job_save', 'job' => 'descoberta', 'enabled' => '1', 'times' => '07:15', 'weekdays' => ['1', '3', '5'], 'csrf' => $t, 'back' => 'automacoes']));
+    eq([1, '07:15', '1,3,5'], array_values(Db::one($pdo, "SELECT enabled, times, weekdays FROM gmax3_jobs WHERE job='descoberta'")));
+    $r = follow(http('POST', 'painel.php', ['action' => 'auto_resume', 'confirm' => 'nao', 'csrf' => $t, 'back' => 'automacoes']));
+    ok(str_contains($r['body'], 'Digite RETOMAR'), 'confirmação');
+    follow(http('POST', 'painel.php', ['action' => 'auto_resume', 'confirm' => 'RETOMAR', 'csrf' => $t, 'back' => 'automacoes']));
+    eq('0', Db::value($pdo, "SELECT value FROM gmax3_settings WHERE key='automacoes_pausadas'"));
+    follow(http('POST', 'painel.php', ['action' => 'auto_pause', 'csrf' => $t, 'back' => 'automacoes']));
+    eq('1', Db::value($pdo, "SELECT value FROM gmax3_settings WHERE key='automacoes_pausadas'"));
+    $r = follow(http('POST', 'painel.php', ['action' => 'template_save', 'marketplace' => 'shopee', 'category' => '<b>Casa</b>', 'body' => "<script>x</script> {titulo}\nPor: {por}\n{link}", 'csrf' => $t, 'back' => 'automacoes']));
+    ok(str_contains($r['body'], 'Modelo de mensagem salvo'), 'modelo salvo');
+    ok(!str_contains($r['body'], '<script>x</script>') && !str_contains($r['body'], '<b>Casa</b>'), 'modelo escapado na tela');
+    $r = follow(http('POST', 'painel.php', ['action' => 'settings_save', 'automacao_comercial' => '1', 'aprovacao_automatica' => '1', 'termos_descoberta_shopee' => "garrafa\nfone", 'csrf' => $t, 'back' => 'automacoes']));
+    eq('0', Db::value($pdo, "SELECT value FROM gmax3_settings WHERE key='aprovacao_automatica'"), 'aprovação automática não liga pela web');
+    eq("garrafa\nfone", Db::value($pdo, "SELECT value FROM gmax3_settings WHERE key='termos_descoberta_shopee'"));
+    eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('reservado','confirmado','incerto')"), 'nada enviado');
 });
 
 echo "\n== Agendadores existentes e CLI (sem rede)\n";

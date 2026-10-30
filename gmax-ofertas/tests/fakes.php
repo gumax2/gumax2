@@ -52,3 +52,38 @@ final class FakeProbeHttp extends Gmax\Http
         return $this->map[$url] ?? ['status' => 0, 'location' => null, 'error' => 'Falha de rede ou timeout'];
     }
 }
+
+/** Conector falso de marketplace: busca e consulta programáveis, sem rede. */
+final class FakeMarketConnector implements Gmax\Connectors\Discovery, Gmax\Connectors\Connector
+{
+    public int $searches = 0;
+    public int $fetches = 0;
+
+    public function __construct(public string $mp, public mixed $searchResult = ['ok' => true, 'error' => null, 'items' => []], public array $fetchMap = [], public bool $ok = true)
+    {
+    }
+
+    public function marketplace(): string { return $this->mp; }
+    public function name(): string { return 'Falso ' . $this->mp; }
+    public function configured(): bool { return $this->ok; }
+    public function status(): string { return $this->ok ? 'configurado (teste)' : 'não configurado (teste)'; }
+
+    public function search(string $query, int $limit): array
+    {
+        $this->searches++;
+        if ($this->searchResult instanceof Throwable) {
+            throw $this->searchResult;
+        }
+        return $this->searchResult;
+    }
+
+    public function fetch(array $row): array
+    {
+        $this->fetches++;
+        $r = $this->fetchMap[$row['external_id']] ?? ['ok' => false, 'error' => 'sem resposta', 'data' => []];
+        if ($r instanceof Throwable) {
+            throw $r;
+        }
+        return $r;
+    }
+}

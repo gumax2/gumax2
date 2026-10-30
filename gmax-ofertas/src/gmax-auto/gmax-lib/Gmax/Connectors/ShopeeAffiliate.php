@@ -13,7 +13,7 @@ use Gmax\Money;
  * Assinatura: SHA256(AppId + Timestamp + Payload + Secret), conforme documentação pública
  * da Shopee Affiliate. Confirme endpoint e campos na documentação entregue com o acesso.
  */
-final class ShopeeAffiliate implements Connector
+final class ShopeeAffiliate implements Connector, Discovery
 {
     public const ENDPOINT = 'https://open-api.affiliate.shopee.com.br/graphql';
 
@@ -32,6 +32,11 @@ final class ShopeeAffiliate implements Connector
         }
         $c = require $file;
         return is_array($c) ? $c : null;
+    }
+
+    public function marketplace(): string
+    {
+        return 'shopee';
     }
 
     public function name(): string
@@ -105,5 +110,56 @@ final class ShopeeAffiliate implements Connector
             $data['commission_rate'] = (string)$node['commissionRate'];
         }
         return ['ok' => true, 'error' => null, 'data' => $data];
+    }
+
+    /**
+     * Busca oficial por palavra-chave (productOfferV2). offerLink é o link de afiliado gerado
+     * pela própria Shopee (conversão autorizada). A API informa % de desconto, mas não o preço
+     * original: o "De" fica vazio em vez de ser calculado.
+     */
+    public function search(string $query, int $limit): array
+    {
+        $q = 'query($kw: String, $limit: Int){ productOfferV2(keyword: $kw, sortType: 2, page: 1, limit: $limit){ nodes { itemId productName priceMin priceMax priceDiscountRate sales ratingStar shopName productLink offerLink commissionRate } } }';
+        $res = $this->graphql($q, ['kw' => mb_substr($query, 0, 80), 'limit' => max(1, min(50, $limit))]);
+        if (!$res['ok']) {
+            return ['ok' => false, 'error' => $res['error'], 'items' => []];
+        }
+        $items = [];
+        foreach ($res['data']['productOfferV2']['nodes'] ?? [] as $n) {
+            $id = (string)($n['itemId'] ?? '');
+            if (!preg_match('/^\d{3,20}$/D', $id)) {
+                continue;
+            }
+            $min = Money::tryParse((string)($n['priceMin'] ?? ''));
+            $max = Money::tryParse((string)($n['priceMax'] ?? ''));
+            $item = [
+                'marketplace' => 'shopee',
+                'external_id' => $id,
+                'codigo' => $id,
+                'title' => mb_substr((string)($n['productName'] ?? ''), 0, 300),
+                'store_name' => isset($n['shopName']) ? mb_substr((string)$n['shopName'], 0, 120) : null,
+                'original_url' => is_string($n['productLink'] ?? null) ? $n['productLink'] : null,
+                'affiliate_url' => is_string($n['offerLink'] ?? null) ? $n['offerLink'] : null,
+                'commission_rate' => isset($n['commissionRate']) ? (string)$n['commissionRate'] : null,
+            ];
+            if ($min !== null && $min === $max) {
+                $item['price_promo_cents'] = $min;
+            } elseif ($min !== null) {
+                $item['variation_pending'] = 1;
+                $item['variation_note'] = 'Faixa entre variações: ' . Money::format($min) . ' a ' . Money::format($max);
+            }
+            if (isset($n['sales']) && is_numeric($n['sales'])) {
+                $item['sales_min'] = (int)$n['sales'];
+                $item['sales_public'] = (string)(int)$n['sales'];
+            }
+            if (isset($n['ratingStar']) && is_numeric($n['ratingStar']) && $n['ratingStar'] > 0) {
+                $item['rating'] = round((float)$n['ratingStar'], 2);
+            }
+            if (isset($n['priceDiscountRate']) && is_numeric($n['priceDiscountRate']) && $n['priceDiscountRate'] > 0) {
+                $item['notes'] = 'Shopee informa desconto de ' . (int)$n['priceDiscountRate'] . '% (preço original não informado pela API)';
+            }
+            $items[] = $item;
+        }
+        return ['ok' => true, 'error' => null, 'items' => $items];
     }
 }

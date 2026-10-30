@@ -3,7 +3,7 @@ declare(strict_types=1);
 defined('GMAX_VERSION') || exit;
 use Gmax\View;
 /** @var string $page @var string $title @var array $flash @var bool $paused @var bool $migrated */
-$nav = ['painel' => 'Visão geral', 'ofertas' => 'Ofertas', 'importar' => 'Importar', 'links' => 'Links afiliados', 'ranking' => 'Ranking',
+$nav = ['painel' => 'Visão geral', 'automacoes' => 'Automações', 'ofertas' => 'Ofertas', 'importar' => 'Importar', 'links' => 'Links afiliados', 'ranking' => 'Ranking',
     'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema'];
 $active = ['oferta' => 'ofertas', 'lote' => 'importar', 'lote_links' => 'links'][$page] ?? $page;
 ?>

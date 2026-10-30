@@ -13,14 +13,19 @@ use PDO;
 final class Ranking
 {
     public const WEIGHTS = [
-        'desconto' => 30,
-        'popularidade' => 20,
-        'avaliacao' => 15,
-        'reputacao' => 10,
-        'disponibilidade' => 10,
-        'categoria' => 10,
+        'desconto' => 24,
+        'popularidade' => 14,
+        'avaliacao' => 12,
+        'qualidade_dados' => 10,
+        'reputacao' => 9,
+        'disponibilidade' => 8,
+        'comentarios' => 8,
+        'preco' => 5,
+        'categoria' => 5,
         'pagamento' => 5,
     ];
+    /** Faixa de preço (em reais) com maior potencial de conversão; configurável em gmax3_settings. */
+    public const DEFAULT_PRICE_BAND = [20, 300];
 
     private const REPUTATION = [
         'platinum' => 1.0, 'loja oficial' => 1.0, 'oficial' => 1.0, 'gold' => 0.85, 'mercadolider' => 0.8,
@@ -28,7 +33,7 @@ final class Ranking
     ];
 
     /** @return array{score:?int,confidence:int,components:list<array>,price_note:?string} */
-    public static function evaluate(array $r, ?int $categoryPotential, array $verifiedHistory = []): array
+    public static function evaluate(array $r, ?int $categoryPotential, array $verifiedHistory = [], array $priceBand = self::DEFAULT_PRICE_BAND, int $freshHours = 24): array
     {
         $c = [];
         $d = Money::discount(isset($r['price_original_cents']) ? (int)$r['price_original_cents'] : null, isset($r['price_promo_cents']) ? (int)$r['price_promo_cents'] : null);
@@ -82,6 +87,30 @@ final class Ranking
             default => [null, 'Condição de pagamento não identificada'],
         };
 
+        $count = isset($r['rating_count']) ? (int)$r['rating_count'] : null;
+        $c['comentarios'] = $count === null || $count <= 0
+            ? [null, 'Quantidade de avaliações não informada']
+            : [min(log10($count) / 4, 1.0), "$count avaliações publicadas (potencial de conversão)"];
+
+        $promo = isset($r['price_promo_cents']) ? (int)$r['price_promo_cents'] : null;
+        if ($promo === null) {
+            $c['preco'] = [null, 'Sem preço'];
+        } else {
+            [$lo, $hi] = $priceBand;
+            $reais = $promo / 100;
+            $v = $reais >= $lo && $reais <= $hi ? 1.0 : (($reais >= $lo / 2 && $reais <= $hi * 2) ? 0.5 : 0.2);
+            $c['preco'] = [$v, sprintf('Preço %s %s da faixa de maior conversão (R$ %d–%d, configurável)', Money::format($promo), $v === 1.0 ? 'dentro' : 'fora', $lo, $hi)];
+        }
+
+        $fields = ['price_original_cents', 'price_promo_cents', 'payment_condition', 'sales_min', 'rating', 'seller_reputation'];
+        $filled = count(array_filter($fields, static fn($f) => isset($r[$f]) && $r[$f] !== ''));
+        $filled += (($r['availability'] ?? 'desconhecida') !== 'desconhecida') ? 1 : 0;
+        $filled += Url::isAffiliate((string)($r['marketplace'] ?? ''), $r['affiliate_url'] ?? null) ? 1 : 0;
+        $age = Time::hoursSince($r['price_verified_at'] ?? null);
+        $fresh = $age === null ? 0.3 : ($age <= $freshHours ? 1.0 : 0.5);
+        $c['qualidade_dados'] = [round($filled / 8 * $fresh, 3), sprintf('%d de 8 informações essenciais; preço %s', $filled,
+            $age === null ? 'nunca conferido' : ($age <= $freshHours ? 'conferido recentemente' : 'conferido há mais de ' . $freshHours . ' h'))];
+
         $sum = 0.0;
         $available = 0;
         $components = [];
@@ -121,13 +150,19 @@ final class Ranking
         }
         $potentials = $pdo->query('SELECT name, potential FROM gmax3_categories WHERE potential IS NOT NULL')->fetchAll(PDO::FETCH_KEY_PAIR);
         $history = [];
+        $band = self::DEFAULT_PRICE_BAND;
+        $cfg = Settings::get($pdo, 'faixa_preco_conversao', '');
+        if (preg_match('/^(\d{1,5})-(\d{1,6})$/D', $cfg, $m) && (int)$m[1] < (int)$m[2]) {
+            $band = [(int)$m[1], (int)$m[2]];
+        }
+        $fresh = Settings::int($pdo, 'validade_preco_horas', 24);
         foreach ($pdo->query('SELECT catalog_id, price_promo_cents FROM gmax3_price_history WHERE verified = 1')->fetchAll() as $h) {
             $history[$h['catalog_id']][] = $h['price_promo_cents'];
         }
         $out = [];
         foreach (Db::all($pdo, "SELECT * FROM gmax3_catalog WHERE $where", $args) as $r) {
             $pot = isset($potentials[$r['category'] ?? '']) ? (int)$potentials[$r['category']] : null;
-            $out[] = ['item' => $r] + self::evaluate($r, $pot, $history[$r['id']] ?? []);
+            $out[] = ['item' => $r] + self::evaluate($r, $pot, $history[$r['id']] ?? [], $band, $fresh);
         }
         usort($out, static fn($a, $b) => [($b['score'] ?? -1), $b['confidence']] <=> [($a['score'] ?? -1), $a['confidence']]);
         return array_slice($out, 0, $limit);

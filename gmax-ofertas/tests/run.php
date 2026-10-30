@@ -89,7 +89,7 @@ echo "\n== Migração, preservação e rollback\n";
 test('Migração preserva tabelas antigas e copia 5 Shopee + 1 Mercado Livre', function () {
     $pdo = t_seed();
     $before = t_legacy_snapshot($pdo);
-    eq(['001'], Migrator::pending($pdo));
+    eq(['001', '002'], Migrator::pending($pdo));
     $done = Migrator::up($pdo, 'teste');
     eq(['shopee' => 5, 'mercadolivre' => 1], $done[0]['result']);
     ok(is_file($done[0]['backup']), 'backup prévio criado');
@@ -129,6 +129,7 @@ test('Reverter migração remove apenas tabelas gmax3_ e mantém dados antigos',
     $pdo = t_seed();
     $before = t_legacy_snapshot($pdo);
     Migrator::up($pdo, 'teste');
+    eq('002', Migrator::down($pdo, 'teste')['version'], 'reverte a mais recente primeiro');
     $r = Migrator::down($pdo, 'teste');
     eq('001', $r['version']);
     eq(0, (int)$pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'gmax3%'")->fetchColumn());
@@ -300,7 +301,7 @@ test('Arquivos fora do padrão são recusados (cabeçalho desconhecido, binário
 echo "\n== Mensagem, aprovação e regras\n";
 test('Mensagem no modelo GMAX com De/Por/% OFF/Economize/Pix', function () {
     $msg = Message::render(['marketplace' => 'mercadolivre', 'title' => 'Nome do produto', 'price_original_cents' => 19990, 'price_promo_cents' => 11990, 'payment_condition' => 'pix', 'payment_note' => null, 'affiliate_url' => 'https://meli.la/XXXX123']);
-    eq("GMAX OFERTAS | MERCADO LIVRE\n\nNome do produto\n\nDe: R$ 199,90\nPor: R$ 119,90\n40% OFF\nEconomize R$ 80,00\n\nCondição: pagamento via Pix\n\nhttps://meli.la/XXXX123\n\n" . Message::DISCLAIMER, $msg);
+    eq("🛍️ GMAX OFERTAS | MERCADO LIVRE\n\n🔥 Nome do produto\n\nDe: R$ 199,90\nPor: R$ 119,90\n✅ 40% OFF\n💰 Economize R$ 80,00\n💳 Condição: pagamento via Pix\n\n🛒 https://meli.la/XXXX123\n\nPreço e disponibilidade sujeitos a alterações.", $msg);
 });
 test('Sem preço original a mensagem não inventa De nem desconto', function () {
     $msg = Message::render(['marketplace' => 'shopee', 'title' => 'X', 'price_original_cents' => null, 'price_promo_cents' => 4990, 'payment_condition' => 'normal', 'affiliate_url' => 'https://s.shopee.com.br/AaaAaa1']);
@@ -609,14 +610,17 @@ test('Mercado Livre: consulta de anúncio, sem conversão de links', function ()
 echo "\n== Ranking comercial\n";
 test('Ranking transparente: sem dados não inventa pontuação', function () {
     $r = Ranking::evaluate(['price_original_cents' => null, 'price_promo_cents' => 1000, 'availability' => 'desconhecida'], null);
-    eq(null, $r['score']);
-    eq(0, $r['confidence']);
-    $full = Ranking::evaluate(['price_original_cents' => 20000, 'price_promo_cents' => 8000, 'sales_min' => 100000, 'sales_public' => '+100 mil', 'rating' => 5.0, 'rating_count' => 500,
-        'seller_reputation' => 'MercadoLíder Platinum', 'availability' => 'disponivel', 'payment_condition' => 'normal', 'category' => 'Casa', 'price_verified_at' => '2026-10-29 10:00:00'], 100);
+    ok($r['score'] <= 5, 'só preço: pontuação mínima (' . $r['score'] . ')');
+    ok($r['confidence'] <= 20, 'confiança baixa (' . $r['confidence'] . '%)');
+    $full = Ranking::evaluate(['price_original_cents' => 20000, 'price_promo_cents' => 8000, 'sales_min' => 100000, 'sales_public' => '+100 mil', 'rating' => 5.0,
+        'seller_reputation' => 'MercadoLíder Platinum', 'availability' => 'disponivel', 'payment_condition' => 'normal', 'category' => 'Casa', 'price_verified_at' => Time::nowSql(),
+        'marketplace' => 'mercadolivre', 'affiliate_url' => 'https://meli.la/Full001', 'rating_count' => 10000], 100);
     eq(100, $full['score']);
     eq(100, $full['confidence']);
     $few = Ranking::evaluate(['rating' => 5.0, 'rating_count' => 2, 'availability' => 'desconhecida'], null);
-    eq(null, $few['score'], '2 avaliações não pontuam');
+    $aval = array_values(array_filter($few['components'], fn($c) => $c['criterio'] === 'avaliacao'))[0];
+    eq(null, $aval['valor'], 'nota com 2 avaliações não pontua');
+    ok($few['score'] <= 3, 'pontuação mínima com dados escassos');
 });
 test('Produto com um único dado não supera produto bem documentado', function () {
     $thin = Ranking::evaluate(['payment_condition' => 'normal', 'availability' => 'desconhecida'], null);

@@ -30,15 +30,26 @@ final class Queue
     public static function nextSlot(PDO $pdo, ?DateTimeImmutable $from = null): string
     {
         $taken = array_flip($pdo->query("SELECT scheduled_for FROM gmax3_pub_queue WHERE state IN ('agendado','reservado')")->fetchAll(PDO::FETCH_COLUMN));
+        $limit = Settings::int($pdo, 'limite_diario_telegram_privado', 6);
+        $tz = new DateTimeZone(Config::TZ);
         $at = $from;
-        for ($i = 0; $i < 200; $i++) {
+        for ($i = 0; $i < 400; $i++) {
             $slot = self::slotAfter($pdo, $at);
-            if (!isset($taken[$slot])) {
+            $slotDt = new DateTimeImmutable($slot, new DateTimeZone('UTC'));
+            if (!isset($taken[$slot]) && self::countOnDay($pdo, $slotDt->setTimezone($tz)) < $limit) {
                 return $slot;
             }
-            $at = new DateTimeImmutable($slot, new DateTimeZone('UTC'));
+            $at = $slotDt;
         }
         throw new RuntimeException('Sem horários livres nos próximos dias');
+    }
+
+    /** Publicações agendadas/feitas no dia local (limite diário do canal). */
+    public static function countOnDay(PDO $pdo, DateTimeImmutable $localDay): int
+    {
+        $start = $localDay->setTime(0, 0)->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $end = $localDay->setTime(0, 0)->modify('+1 day')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        return (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('agendado','reservado','confirmado','incerto') AND scheduled_for >= ? AND scheduled_for < ?", [$start, $end]);
     }
 
     private static function slotAfter(PDO $pdo, ?DateTimeImmutable $from): string
@@ -75,7 +86,7 @@ final class Queue
             if ($reasons) {
                 return $reasons;
             }
-            $text = Message::render($r);
+            $text = Message::render($r, $pdo);
             Db::run($pdo, 'INSERT INTO gmax3_pub_queue(catalog_id,channel,state,scheduled_for,message_text,message_hash,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)', [
                 $catalogId, $channel, 'agendado', $scheduledUtc ?? self::nextSlot($pdo), $text, hash('sha256', $text), $actor, Time::nowSql(),
             ]);
@@ -224,7 +235,7 @@ final class Queue
                 }
                 return ['resultado' => 'bloqueado', 'fila_id' => (int)$item['id'], 'motivos' => $reasons];
             }
-            $text = Message::render($r);
+            $text = Message::render($r, $pdo);
             if ($simulate) {
                 return ['resultado' => 'simulacao_sem_envio', 'fila_id' => (int)$item['id'], 'mensagem' => $text, 'travas' => self::gates($pdo)];
             }

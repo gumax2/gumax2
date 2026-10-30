@@ -8,7 +8,7 @@ declare(strict_types=1);
 if (!defined('GMAX_APP_DIR')) {
     define('GMAX_APP_DIR', dirname(__DIR__));
 }
-const GMAX_VERSION = '3.0.3-p0';
+const GMAX_VERSION = '3.1.0';
 
 spl_autoload_register(static function (string $class): void {
     if (str_starts_with($class, 'Gmax\\')) {

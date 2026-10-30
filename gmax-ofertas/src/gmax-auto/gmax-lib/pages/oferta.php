@@ -89,7 +89,7 @@ $mp = $v('marketplace') ?: 'mercadolivre';
   </section>
   <section class="card">
     <h2>Prévia da mensagem</h2>
-    <pre class="msg" id="msg-<?= (int)$id ?>"><?= View::e(Message::render($r)) ?></pre>
+    <pre class="msg" id="msg-<?= (int)$id ?>"><?= View::e(Message::render($r, $pdo)) ?></pre>
     <button type="button" class="btn" data-copy="#msg-<?= (int)$id ?>">Copiar mensagem</button>
     <?php if ($blockers || $dup): ?>
       <div class="alert alert-aviso"><strong>Publicação bloqueada:</strong><ul><?php foreach ($blockers as $b): ?><li><?= View::e($b) ?></li><?php endforeach; ?><?= $dup ? '<li>' . View::e($dup) . '</li>' : '' ?></ul></div>
