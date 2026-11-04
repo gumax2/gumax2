@@ -66,7 +66,7 @@ $label = static fn(string $k, string $v) => match ($k) {
   <div class="card empty"><strong>Nenhum produto encontrado</strong><?= $keep ? 'Nenhum produto corresponde aos filtros escolhidos. <a href="' . View::e(View::url('ofertas')) . '">Limpar filtros</a>.' : 'Importe um lote em <a href="' . View::e(View::url('importar')) . '">Importar</a> ou cadastre um produto.' ?></div>
 <?php else: ?>
 
-<ul class="offer-cards only-mobile" aria-label="Produtos">
+<ul class="offer-cards only-mobile" role="list" aria-label="Produtos">
 <?php foreach ($res['rows'] as $r):
     $id = (int)$r['id'];
     $src = Catalog::verificationSource($r);
@@ -92,13 +92,13 @@ $label = static fn(string $k, string $v) => match ($k) {
       <div><?= View::freshness($r, $staleHours) ?></div>
     </div>
     <div class="offer-quick">
-      <a class="btn btn-primary" href="<?= View::e(View::url('conferir', ['id' => $id])) ?>">✓ Conferir preço</a>
-      <a class="btn" href="<?= View::e(View::url('oferta', ['id' => $id])) ?>">Editar</a>
+      <a class="btn btn-primary" href="<?= View::e(View::url('conferir', ['id' => $id])) ?>"><span aria-hidden="true">✓</span> Conferir preço<span class="sr-only"> de <?= View::e(mb_substr((string)$r['title'], 0, 80)) ?></span></a>
+      <a class="btn" href="<?= View::e(View::url('oferta', ['id' => $id])) ?>">Editar<span class="sr-only"> <?= View::e(mb_substr((string)$r['title'], 0, 80)) ?></span></a>
     </div>
-    <?= View::storeButtons($r) ?>
+    <?= View::storeButtons($r, '', (string)$r['title']) ?>
     <div class="offer-more">
       <pre class="sr-only" id="msg-c<?= $id ?>"><?= View::e(Message::render($r, $pdo)) ?></pre>
-      <button type="button" class="btn btn-sm" data-copy="#msg-c<?= $id ?>">Copiar mensagem</button>
+      <button type="button" class="btn btn-sm" data-copy="#msg-c<?= $id ?>" aria-live="polite">Copiar mensagem<span class="sr-only"> de <?= View::e(mb_substr((string)$r['title'], 0, 80)) ?></span></button>
       <?php if ($r['validation_status'] !== 'arquivado'): ?>
         <?= View::actionButton('offer_status', ['id' => $id, 'status' => 'arquivado', 'back' => 'ofertas'], 'Arquivar', 'btn btn-ghost btn-sm', 'Arquivar "' . mb_substr((string)$r['title'], 0, 60) . '"? O histórico é preservado e o produto pode ser restaurado.') ?>
       <?php endif; ?>
@@ -136,7 +136,7 @@ $label = static fn(string $k, string $v) => match ($k) {
         <td><?= View::priceBlock($r) ?><?= isset($prev[$id]) ? '<div class="muted small">antes: ' . View::e(Money::format($prev[$id])) . '</div>' : '' ?></td>
         <td><?= View::e(Catalog::PAYMENT[$r['payment_condition'] ?? ''] ?? 'não identificada') ?></td>
         <td><?= View::badge($r['validation_status']) ?><?= $r['variation_pending'] ? ' <span class="tag tag-warn">variação</span>' : '' ?><?= ($r['availability'] ?? '') === 'indisponivel' ? ' <span class="tag tag-warn">indisponível</span>' : '' ?><?= View::affiliateUrl($r) ? '' : ' <span class="tag tag-warn">sem link afiliado</span>' ?></td>
-        <td class="col-actions"><a class="btn btn-sm btn-primary btn-block" href="<?= View::e(View::url('conferir', ['id' => $id])) ?>">Conferir</a><?= View::storeButtons($r) ?></td>
+        <td class="col-actions"><a class="btn btn-sm btn-primary btn-block" href="<?= View::e(View::url('conferir', ['id' => $id])) ?>">Conferir<span class="sr-only"> preço de <?= View::e(mb_substr((string)$r['title'], 0, 80)) ?></span></a><?= View::storeButtons($r, '', (string)$r['title']) ?></td>
       </tr>
     <?php endforeach; ?>
     </tbody>

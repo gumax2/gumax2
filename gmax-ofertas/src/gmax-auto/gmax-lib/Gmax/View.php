@@ -106,19 +106,20 @@ final class View
      * Links https comuns (target=_blank): o sistema operacional decide abrir o aplicativo
      * oficial (Universal Links / App Links) ou o navegador. Sem redirecionamento intermediário.
      */
-    public static function storeButtons(array $r, string $size = ''): string
+    public static function storeButtons(array $r, string $size = '', string $context = ''): string
     {
         $shopee = $r['marketplace'] === 'shopee';
         $store = self::storeUrl($r);
         $aff = self::affiliateUrl($r);
         $cls = $size !== '' ? ' ' . $size : '';
+        $ctx = ($context !== '' ? '<span class="sr-only"> de ' . self::e(mb_substr($context, 0, 80)) . '</span>' : '') . '<span class="sr-only"> (abre em nova aba)</span>';
         $h = $store
             ? '<a class="btn btn-store btn-store-' . self::e($r['marketplace']) . $cls . '" href="' . self::e($store) . '" target="_blank" rel="noopener noreferrer">'
-                . ($shopee ? '🛍️ Conferir na Shopee' : '🛒 Conferir no Mercado Livre') . '</a>'
-            : '<span class="btn btn-disabled' . $cls . '" aria-disabled="true" title="Cadastre a URL do anúncio individual">Sem URL do anúncio</span>';
+                . ($shopee ? '<span aria-hidden="true">🛍️</span> Conferir na Shopee' : '<span aria-hidden="true">🛒</span> Conferir no Mercado Livre') . $ctx . '</a>'
+            : '<span class="btn btn-disabled' . $cls . '">Sem URL do anúncio</span>';
         $h .= $aff
-            ? '<a class="btn btn-affiliate' . $cls . '" href="' . self::e($aff) . '" target="_blank" rel="noopener noreferrer" title="Link de divulgação: abrir registra um clique de afiliado">🔗 Abrir link afiliado</a>'
-            : '<span class="btn btn-disabled' . $cls . '" aria-disabled="true">Sem link afiliado</span>';
+            ? '<a class="btn btn-affiliate' . $cls . '" href="' . self::e($aff) . '" target="_blank" rel="noopener noreferrer" title="Link de divulgação: abrir registra um clique de afiliado"><span aria-hidden="true">🔗</span> Abrir link afiliado' . $ctx . '</a>'
+            : '<span class="btn btn-disabled' . $cls . '">Sem link afiliado</span>';
         return '<div class="store-actions">' . $h . '</div>';
     }
 

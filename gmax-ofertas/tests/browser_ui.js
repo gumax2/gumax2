@@ -95,7 +95,7 @@ async function overflow(page) {
         const hiddenBefore = !(await page.isVisible('#mainnav'));
         await page.click('.nav-toggle');
         const openOk = (await page.isVisible('#mainnav')) && (await page.getAttribute('.nav-toggle', 'aria-expanded')) === 'true';
-        const focusInNav = await page.evaluate(() => !!document.activeElement.closest('#mainnav'));
+        const focusInNav = await page.evaluate(() => !!document.activeElement.closest('#mainnav') && document.getElementById('conteudo').hasAttribute('inert'));
         const navOver = await overflow(page);
         if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-menu.png` });
         await page.keyboard.press('Escape');
@@ -108,7 +108,8 @@ async function overflow(page) {
       await page.goto(`${C.base}/painel.php?p=painel`); // foco do zero (o Esc acima devolve o foco ao botão de menu)
       await page.keyboard.press('Tab');
       out(G, 'Teclado: primeiro Tab leva ao link "Pular para o conteúdo"', await page.evaluate(() => document.activeElement.classList.contains('skip')), await page.evaluate(() => document.activeElement.outerHTML.slice(0, 80)));
-      out(G, 'Estado de pausa dos envios visível no cabeçalho', /paus/i.test(await page.textContent('.top-actions')), await page.textContent('.top-actions'));
+      const pauseA11y = await page.evaluate(() => [...document.querySelectorAll('.top-actions .pill span')].some((e) => e.offsetParent !== null && !e.closest('[aria-hidden=true]') && /pausad/i.test(e.textContent)));
+      out(G, 'Estado de pausa dos envios visível e anunciado por leitores de tela', pauseA11y, await page.textContent('.top-actions'));
 
       // 3. Toque e zoom (celular): campos ≥ 16 px; botões ≥ 44 px (≥ 36 px nos pequenos).
       if (p.mobile) {

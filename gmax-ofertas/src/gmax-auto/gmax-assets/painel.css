@@ -33,14 +33,15 @@ h1,h2,h3{line-height:1.25}h2{font-size:17px;margin:0 0 12px}h3{font-size:15px;ma
 
 /* ---------- menu: gaveta no celular, lateral no desktop ---------- */
 .shell{max-width:1600px;margin:auto}
-.sidenav{display:none;flex-direction:column;gap:2px;padding:8px 12px 14px;background:#0b1729;border-bottom:1px solid var(--line)}
+.sidenav{display:none;flex-direction:column;gap:2px;padding:8px max(12px,env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));background:#0b1729;border-bottom:1px solid var(--line)}
 .sidenav.open{display:flex;position:fixed;inset:var(--nav-top,112px) 0 0 0;z-index:25;overflow-y:auto;overscroll-behavior:contain}
 .sidenav a{display:flex;align-items:center;gap:12px;color:var(--muted);text-decoration:none;padding:0 12px;min-height:48px;border-radius:10px;font-size:16px}
 .sidenav a:hover,.sidenav a.active{color:var(--text);background:var(--surface)}
 .sidenav a.active{box-shadow:inset 3px 0 0 var(--accent)}
 .nav-ico{width:22px;text-align:center;opacity:.85}
 body.nav-open{overflow:hidden}
-.net-status{position:sticky;top:0;z-index:35;background:#5a1f2b;color:#ffd2d2;text-align:center;padding:8px 12px;font-size:14px;font-weight:600}
+.net-status:empty{display:none}
+.net-status{background:#5a1f2b;color:#ffd2d2;text-align:center;padding:8px 12px;font-size:14px;font-weight:600}
 
 /* ---------- conteúdo ---------- */
 .wrap{padding:14px 12px calc(32px + env(safe-area-inset-bottom));min-width:0}
@@ -57,10 +58,10 @@ body.nav-open{overflow:hidden}
 a.stat:hover{border-color:var(--primary)}
 .stat strong{display:block;font-size:24px;margin:2px 0;line-height:1.1}
 .stat .muted{font-size:13px}
-.stat .small{display:none}
+.stat .small{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .stat-warn{border-color:var(--warn)}
 .stat-danger{border-color:var(--danger)}
-.kpi-group{margin:0 0 6px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.kpi-group{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 
 /* ---------- botões e formulários (alvos de toque ≥ 44 px; 16 px evita zoom no iPhone) ---------- */
 .btn,button{font:inherit;font-size:15px;border:1px solid var(--line);background:var(--surface-2);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.2;min-height:var(--tap);text-align:center;touch-action:manipulation}
@@ -129,7 +130,7 @@ label.check{display:flex;align-items:center;gap:10px;color:var(--text);font-size
 
 /* ---------- cartões de oferta (celular) ---------- */
 .offer-cards{display:grid;gap:12px;margin:0;padding:0;list-style:none}
-.offer-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;display:grid;gap:10px;scroll-margin-top:130px}
+.offer-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;display:grid;gap:10px;scroll-margin-top:calc(var(--nav-top,112px) + 12px)}
 .offer-card:target{border-color:var(--accent);box-shadow:0 0 0 2px #73e1bd55}
 .offer-head{display:grid;grid-template-columns:56px 1fr;gap:10px;align-items:start}
 .thumb{width:56px;height:56px;border-radius:10px;display:grid;place-items:center;font-size:26px;background:var(--surface-2);border:1px solid var(--line)}
@@ -211,7 +212,7 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0;min-height:32px}
   .wrap{padding:18px 16px 40px}
   .stats{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
   .small-stats{grid-template-columns:repeat(auto-fit,minmax(110px,1fr))}
-  .stat .small{display:block}
+  .stat .small{position:static;width:auto;height:auto;overflow:visible;clip:auto;white-space:normal;display:block}
   .form-grid{grid-template-columns:1fr 1fr}
   .span2{grid-column:span 2}
   .filters{grid-template-columns:1fr 1fr}
@@ -225,7 +226,6 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0;min-height:32px}
 /* ---------- ≥ 768 px: tabelas completas, desktop produtivo ---------- */
 @media (min-width:768px){
   body{font-size:15px}
-  input,select,textarea{font-size:15px}
   .table:not(.keep-table){display:table}
   .table:not(.keep-table) thead{display:table-header-group}
   .table:not(.keep-table) tbody{display:table-row-group}

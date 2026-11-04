@@ -25,7 +25,7 @@ $tile = static function (string $label, int $n, array $filter, string $hint, str
     return '<a class="stat' . ($n && $tone ? ' ' . $tone : '') . '" href="' . View::e(View::url('ofertas', $filter)) . '"><span class="muted">' . View::e($label) . '</span><strong>' . $n . '</strong><span class="small">' . View::e($hint) . '</span></a>';
 };
 ?>
-<p class="kpi-group">Catálogo</p>
+<h2 class="kpi-group">Catálogo</h2>
 <section class="grid stats" aria-label="Catálogo">
   <?= $tile('Total de produtos', $k['total'], [], 'exceto arquivados') ?>
   <?php foreach (Url::MARKETPLACES as $mp => $label): ?>
@@ -34,7 +34,7 @@ $tile = static function (string $label, int $n, array $filter, string $hint, str
   <?= $tile('Rascunhos', $k['rascunho'], ['status' => 'rascunho'], 'completar cadastro') ?>
   <?= $tile('Aguardando validação', $k['aguardando'], ['status' => 'aguardando_validacao'], 'conferir e aprovar') ?>
 </section>
-<p class="kpi-group">Precisam de atenção</p>
+<h2 class="kpi-group">Precisam de atenção</h2>
 <section class="grid stats" aria-label="Precisam de atenção">
   <?= $tile('Preços desatualizados', $k['stale'], ['stale' => 1], "sem conferência há mais de {$staleHours} h", 'stat-warn') ?>
   <?= $tile('Sem link afiliado', $k['nolink'], ['nolink' => 1], 'associar link oficial', 'stat-warn') ?>

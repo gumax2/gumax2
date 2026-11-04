@@ -36,13 +36,13 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
     <h3>1. Abra o anúncio</h3>
     <?php if ($store): ?>
       <a class="btn btn-lg btn-block btn-store btn-store-<?= View::e($r['marketplace']) ?>" href="<?= View::e($store) ?>" target="_blank" rel="noopener noreferrer">
-        <?= $r['marketplace'] === 'shopee' ? '🛍️ Conferir na Shopee' : '🛒 Conferir no Mercado Livre' ?></a>
+        <span aria-hidden="true"><?= $r['marketplace'] === 'shopee' ? '🛍️' : '🛒' ?></span> <?= $r['marketplace'] === 'shopee' ? 'Conferir na Shopee' : 'Conferir no Mercado Livre' ?><span class="sr-only"> (abre em nova aba)</span></a>
       <p class="muted small">Abre o anúncio oficial no aplicativo da loja (se instalado) ou no navegador. Abrir o anúncio <strong>não</strong> confirma o preço.</p>
     <?php else: ?>
       <div class="alert alert-aviso">Sem URL do anúncio individual. <a href="<?= View::e(View::url('oferta', ['id' => $id])) ?>">Cadastre a URL original</a> (ex.: <?= $r['marketplace'] === 'shopee' ? 'shopee.com.br/product/LOJA/ITEM' : 'produto.mercadolivre.com.br/MLB-…' ?>) para conferir direto na loja.</div>
     <?php endif; ?>
     <?php if (View::affiliateUrl($r)): ?>
-      <p class="small"><a class="btn btn-affiliate btn-sm" href="<?= View::e((string)View::affiliateUrl($r)) ?>" target="_blank" rel="noopener noreferrer">🔗 Abrir link afiliado</a>
+      <p class="small"><a class="btn btn-affiliate btn-sm" href="<?= View::e((string)View::affiliateUrl($r)) ?>" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">🔗</span> Abrir link afiliado<span class="sr-only"> (abre em nova aba)</span></a>
       <span class="muted">Link de divulgação: use só para testar o link (registra um clique).</span></p>
     <?php else: ?>
       <p class="small warn">Sem link afiliado oficial: o produto não pode ser publicado.</p>
@@ -53,6 +53,7 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
   <form method="post" action="painel.php" class="card stack" data-loading data-discount>
     <?= View::csrfField() ?><input type="hidden" name="action" value="offer_check"><input type="hidden" name="back" value="conferir"><input type="hidden" name="id" value="<?= (int)$id ?>">
     <h2>2. Registre o que encontrou na loja</h2>
+    <p class="muted small">Campos com * são obrigatórios.</p>
     <div class="form-grid">
       <label>Preço promocional (Por) *
         <input name="price_promo" inputmode="decimal" required autocomplete="off" placeholder="119,90" data-price="promo" value="<?= View::e($fv('price_promo', Money::input($r['price_promo_cents'] === null ? null : (int)$r['price_promo_cents']))) ?>"></label>

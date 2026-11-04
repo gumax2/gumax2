@@ -37,8 +37,10 @@
     function set(open) {
       el.classList.toggle('open', open);
       btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      btn.setAttribute('aria-label', open ? 'Fechar menu' : 'Abrir menu');
       document.body.classList.toggle('nav-open', open);
+      // Com a gaveta aberta (celular/tablet), o conteúdo atrás fica inerte para teclado e leitores de tela.
+      var mainEl = document.getElementById('conteudo');
+      if (mainEl) { if (open && window.innerWidth < 1024) mainEl.setAttribute('inert', ''); else mainEl.removeAttribute('inert'); }
       if (open) { setNavTop(); var first = el.querySelector('a'); if (first) first.focus(); }
     }
     btn.addEventListener('click', function () { set(!el.classList.contains('open')); });
@@ -52,6 +54,11 @@
   document.querySelectorAll('table.table:not(.keep-table)').forEach(function (t) {
     var heads = Array.prototype.map.call(t.querySelectorAll('thead th'), function (th) { return th.textContent.trim(); });
     if (!heads.length) return;
+    // Papéis explícitos: display:block (cartões) faz alguns leitores de tela perderem a semântica de tabela.
+    t.setAttribute('role', 'table');
+    t.querySelectorAll('tr').forEach(function (tr) { tr.setAttribute('role', 'row'); });
+    t.querySelectorAll('th').forEach(function (th) { th.setAttribute('role', 'columnheader'); });
+    t.querySelectorAll('td').forEach(function (td) { td.setAttribute('role', 'cell'); });
     t.querySelectorAll('tbody tr').forEach(function (tr) {
       var col = 0;
       Array.prototype.forEach.call(tr.children, function (td) {
@@ -62,16 +69,28 @@
   });
 
   // Filtros: abertos no computador; recolhidos no celular quando nenhum filtro está ativo.
-  if (window.matchMedia && window.matchMedia('(max-width: 767px)').matches) {
-    document.querySelectorAll('details.filters-box[data-collapse-mobile]').forEach(function (d) { d.open = false; });
+  // Ao girar/redimensionar para ≥ 768 px (onde o título some), reabre para não ficarem inacessíveis.
+  if (window.matchMedia) {
+    var small = window.matchMedia('(max-width: 767px)');
+    if (small.matches) document.querySelectorAll('details.filters-box[data-collapse-mobile]').forEach(function (d) { d.open = false; });
+    var reopen = function (e) { if (!e.matches) document.querySelectorAll('details.filters-box').forEach(function (d) { d.open = true; }); };
+    if (small.addEventListener) small.addEventListener('change', reopen); else if (small.addListener) small.addListener(reopen);
   }
+
+  // Áreas com rolagem horizontal própria alcançáveis pelo teclado.
+  document.querySelectorAll('.table-wrap').forEach(function (w) {
+    if (w.scrollWidth > w.clientWidth + 1) {
+      w.setAttribute('tabindex', '0'); w.setAttribute('role', 'region');
+      var h = w.closest('section, .card'); h = h && h.querySelector('h2');
+      w.setAttribute('aria-label', h ? h.textContent.trim() : 'Tabela');
+    }
+  });
 
   // Conectividade: avisa quando o aparelho fica sem rede e evita envio de formulário perdido.
   var net = document.querySelector('[data-net-status]');
   function netState() {
     if (!net) return;
-    net.hidden = navigator.onLine !== false;
-    net.textContent = 'Sem conexão com a internet: as ações não serão enviadas até a rede voltar.';
+    net.textContent = navigator.onLine === false ? 'Sem conexão com a internet: as ações não serão enviadas até a rede voltar.' : '';
   }
   window.addEventListener('online', netState);
   window.addEventListener('offline', netState);

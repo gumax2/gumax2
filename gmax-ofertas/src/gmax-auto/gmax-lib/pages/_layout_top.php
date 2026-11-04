@@ -28,7 +28,7 @@ $v = View::e(GMAX_VERSION);
 <a class="skip" href="#conteudo">Pular para o conteúdo</a>
 <header class="top">
   <div class="top-inner">
-    <button type="button" class="nav-toggle" data-toggle="#mainnav" aria-controls="mainnav" aria-expanded="false" aria-label="Abrir menu"><span aria-hidden="true">☰</span><span class="nav-toggle-label">Menu</span></button>
+    <button type="button" class="nav-toggle" data-toggle="#mainnav" aria-controls="mainnav" aria-expanded="false" aria-label="Menu"><span aria-hidden="true">☰</span><span class="nav-toggle-label" aria-hidden="true">Menu</span></button>
     <a class="brand" href="painel.php">GMAX <span class="accent">Ofertas</span></a>
     <?php if ($migrated): ?>
     <form class="global-search" method="get" action="painel.php" role="search">
@@ -45,13 +45,13 @@ $v = View::e(GMAX_VERSION);
           <button type="submit" class="btn btn-danger btn-sm">Pausa emergencial</button>
         </form>
       <?php else: ?>
-        <span class="pill pill-paused" title="Nenhum envio será processado"><span class="pill-long">Envios pausados</span><span class="pill-short" aria-hidden="true">Pausado</span></span>
+        <span class="pill pill-paused" title="Nenhum envio será processado"><span class="pill-long">Envios pausados</span><span class="pill-short">Envios pausados</span></span>
       <?php endif; ?>
       <?= View::actionButton('logout', [], 'Sair', 'btn btn-ghost btn-sm') ?>
     </div>
   </div>
 </header>
-<div class="net-status" data-net-status role="status" aria-live="polite" hidden></div>
+<div class="net-status" data-net-status role="status" aria-live="polite"></div>
 <div class="shell">
   <nav id="mainnav" class="sidenav" aria-label="Principal">
     <?php foreach ($nav as $k => [$label, $icon]): ?>
