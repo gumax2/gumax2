@@ -10,6 +10,10 @@ $probe = $_SESSION['gmax3_ml_probe'] ?? null;
 unset($_SESSION['gmax3_ml_probe']);
 $itemProbe = $_SESSION['gmax3_ml_item_probe'] ?? null;
 unset($_SESSION['gmax3_ml_item_probe']);
+$shopeeProbe = $_SESSION['gmax3_shopee_probe'] ?? null;
+unset($_SESSION['gmax3_shopee_probe']);
+$shopee = new \Gmax\Connectors\ShopeeAffiliate();
+$shopeeIds = $pdo->query("SELECT external_id FROM gmax3_catalog WHERE marketplace='shopee' AND external_id IS NOT NULL ORDER BY id DESC LIMIT 30")->fetchAll(PDO::FETCH_COLUMN);
 $mlbIds = $pdo->query("SELECT DISTINCT substr(external_id, 6) FROM gmax3_catalog WHERE external_id LIKE 'item:MLB%' ORDER BY id DESC LIMIT 30")->fetchAll(PDO::FETCH_COLUMN);
 $host = $_SERVER['HTTP_HOST'] ?? 'gmaxcanais.com.br';
 $path = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/gmax-auto/painel.php'), '/');
@@ -65,6 +69,32 @@ $suggested = 'https://' . preg_replace('/[^a-z0-9.\-]/i', '', $host) . $path . '
       <input name="confirm" maxlength="12" placeholder="Digite DESCONECTAR" required autocomplete="off" aria-label="Confirmação"><button class="btn btn-danger" type="submit">Remover token do servidor</button>
     </form>
   </details>
+  <?php endif; ?>
+</section>
+<section class="card" id="shopee">
+  <h2>Shopee — Affiliate Open API (somente leitura)</h2>
+  <p class="muted small">Consulta preço, comissão e link oficial de produtos. Os testes abaixo não alteram o catálogo e não mostram o AppId completo nem o Secret.</p>
+  <p class="small">Credenciais (gmax-secrets/shopee-api.php): <?= $shopee->configured() ? '<span class="ok">presentes</span> · AppId terminado em ' . View::e($shopee->appIdEnd()) : '<span class="warn">ausentes ou incompletas</span>' ?></p>
+  <?php if ($shopee->configured()): ?>
+  <div class="actions"><?= View::actionButton('shopee_test', ['back' => 'integracoes'], 'Testar conexão Shopee', 'btn') ?></div>
+  <form method="post" action="painel.php" class="inline-form" data-loading>
+    <?= View::csrfField() ?><input type="hidden" name="action" value="shopee_item_test"><input type="hidden" name="back" value="integracoes">
+    <input name="item" maxlength="20" inputmode="numeric" placeholder="Item Id" required list="gmax-shopee-ids" aria-label="Item Id">
+    <datalist id="gmax-shopee-ids"><?php foreach ($shopeeIds as $m): ?><option value="<?= View::e($m) ?>"><?php endforeach; ?></datalist>
+    <input name="shop" maxlength="20" inputmode="numeric" placeholder="Shop Id (opcional)" aria-label="Shop Id">
+    <button class="btn" type="submit">Consultar produto</button>
+  </form>
+  <?php endif; ?>
+  <?php if ($shopeeProbe): ?>
+    <div class="alert <?= $shopeeProbe['ok'] ? 'alert-ok' : 'alert-aviso' ?>">
+      <strong><?= $shopeeProbe['tipo'] === 'shopee_test' ? 'Teste de conexão' : 'Consulta de produto' ?> em <?= View::e(Time::show($shopeeProbe['em'])) ?>:</strong>
+      <code><?= View::e($shopeeProbe['endpoint']) ?></code> · <?= $shopeeProbe['http'] !== null ? 'HTTP ' . (int)$shopeeProbe['http'] : 'sem resposta HTTP' ?>
+      <?= $shopeeProbe['gql_code'] !== null ? ' · GraphQL ' . (int)$shopeeProbe['gql_code'] : '' ?><br><?= View::e($shopeeProbe['detalhe']) ?>
+      <?php if (($shopeeProbe['tipo'] ?? '') === 'shopee_test'): ?><br><span class="small">Relógio do servidor (UTC): <?= View::e($shopeeProbe['relogio_servidor_utc']) ?> — um erro 10020 com relógio errado indica horário do servidor fora da janela aceita.</span><?php endif; ?>
+      <?php if (($shopeeProbe['tipo'] ?? '') === 'shopee_item_test' && $shopeeProbe['ok']): ?><br>
+        <?= View::e($shopeeProbe['nome'] ?? '') ?> · Preço: <?= $shopeeProbe['preco'] !== null ? View::e(\Gmax\Money::format((int)$shopeeProbe['preco'])) : View::e($shopeeProbe['faixa'] ?? 'não informado') ?>
+        · Comissão: <?= View::e($shopeeProbe['comissao'] ?? '—') ?> · Link oficial: <?= $shopeeProbe['link_oficial'] ? 'informado pela API' : 'não informado' ?> · Formato aceito: <?= View::e($shopeeProbe['formato'] ?? '—') ?><?php endif; ?>
+    </div>
   <?php endif; ?>
 </section>
 <section class="card">

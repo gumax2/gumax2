@@ -11,6 +11,7 @@ declare(strict_types=1);
  *   pausar | retomar              Pausa geral das automações
  *   aprovacao-automatica --autorizar AUTORIZO_APROVACAO_AUTOMATICA | --desativar
  *   ml-oauth status | renovar | testar   Situação/renovação do token OAuth do Mercado Livre (sem exibir tokens)
+ *   shopee testar | shopee item ITEM_ID [SHOP_ID]   Testa a Shopee Affiliate API (somente leitura, sem segredos)
  *   ml-oauth item MLB123456789          Testa só a consulta /items/{id} (somente leitura; mostra HTTP, preço e situação)
  */
 // Aceita o binário CGI usado por alguns Crons de cPanel, mas nunca uma requisição web.
@@ -74,6 +75,11 @@ try {
                 unset($st['scope']);
                 $print($st);
             }
+            break;
+        case 'shopee':
+            // Somente leitura: teste de conexão ou consulta de um produto, sem alterar o catálogo.
+            $sh = new Gmax\Connectors\ShopeeAffiliate(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'shopee'));
+            $print(($args[1] ?? 'testar') === 'item' ? $sh->probeItem((string)($args[2] ?? ''), isset($args[3]) ? (string)$args[3] : null) : $sh->probe());
             break;
         case 'aprovacao-automatica':
             if (in_array('--desativar', $args, true)) {

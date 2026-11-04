@@ -207,6 +207,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['gmax3_ml_item_probe'] = $p + ['em' => Time::nowSql()];
                 Audit::log($pdo, $actor, 'ml_item_testado', 'integracao', 'mercadolivre', ['endpoint' => $p['endpoint'], 'http' => $p['http'], 'ok' => $p['ok']]);
                 gmax_redirect('integracoes');
+            case 'shopee_test':
+            case 'shopee_item_test':
+                // Somente leitura: nenhuma alteração no catálogo; o resultado fica só na sessão.
+                $conn = new Gmax\Connectors\ShopeeAffiliate(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'shopee'));
+                $p = $action === 'shopee_test' ? $conn->probe() : $conn->probeItem(gmax_post_str('item', 30), gmax_post_str('shop', 30) ?: null);
+                $_SESSION['gmax3_shopee_probe'] = $p + ['tipo' => $action, 'em' => Time::nowSql()];
+                Audit::log($pdo, $actor, $action === 'shopee_test' ? 'shopee_conexao_testada' : 'shopee_item_testado', 'integracao', 'shopee', ['http' => $p['http'], 'graphql' => $p['gql_code'], 'ok' => $p['ok']]);
+                gmax_redirect('integracoes');
             case 'auto_pause':
                 Settings::set($pdo, 'automacoes_pausadas', '1', $actor);
                 View::flash('ok', 'Todas as automações foram pausadas.');

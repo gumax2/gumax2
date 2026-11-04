@@ -212,7 +212,8 @@ final class Jobs
                 $c['errors']++;
                 $c['blocked']++;
                 Alerts::raise($pdo, 'preco_nao_confirmado', 'Preço não confirmado pela API: ' . RunLog::sanitize((string)$res['error']), (int)$r['id']);
-                RunLog::add($pdo, $runId, $r, 'bloqueado', 'Consulta à API falhou' . ($api['http'] ? ' (HTTP ' . $api['http'] . ')' : '') . ': preço não validado e dados do produto mantidos. Detalhe na coluna da consulta', $api + ['error' => $res['error']]);
+                $codes = array_filter([$api['http'] ? 'HTTP ' . $api['http'] : null, isset($res['gql_code']) ? 'GraphQL ' . $res['gql_code'] : null]);
+                RunLog::add($pdo, $runId, $r, 'bloqueado', 'Consulta à API falhou' . ($codes ? ' (' . implode(', ', $codes) . ')' : '') . ': preço não validado e dados do produto mantidos. Detalhe na coluna da consulta', $api + ['error' => $res['error']]);
                 continue;
             }
             $d = $res['data'];

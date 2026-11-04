@@ -109,6 +109,19 @@ final class Url
         return null;
     }
 
+    /** ID da loja Shopee em /product/LOJA/ITEM ou ...-i.LOJA.ITEM (null se o link não informa). */
+    public static function shopeeShopId(?string $url): ?string
+    {
+        $p = self::parts($url);
+        if ($p === null) {
+            return null;
+        }
+        if (preg_match('~/product/(\d{1,20})/\d{3,20}/?$~', $p['path'], $m) || preg_match('~-i\.(\d{1,20})\.\d{3,20}$~', $p['path'], $m)) {
+            return $m[1];
+        }
+        return null;
+    }
+
     public static function normalizeAffiliate(?string $url): ?string
     {
         $p = self::parts($url);

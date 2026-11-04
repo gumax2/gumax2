@@ -388,6 +388,29 @@ test('Histórico: "Ver detalhes" abre produtos, motivos e filtros; nada é envia
     eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('reservado','confirmado','incerto')"), 'nada enviado');
 });
 
+echo "\n== Shopee pelo navegador\n";
+test('Integrações: Testar conexão e Consultar produto da Shopee sem alterar o catálogo nem mostrar segredos', function () {
+    $pdo = Db::get();
+    $secrets = t_sandbox() . '/gmax-secrets';
+    $r = http('GET', 'painel.php?p=integracoes');
+    ok(str_contains($r['body'], 'ausentes ou incompletas') && !str_contains($r['body'], 'Testar conexão Shopee'), 'sem credenciais: sem botões');
+    file_put_contents("$secrets/shopee-api.php", "<?php return ['app_id' => '18812345678', 'secret' => 'SEGREDO-SHOPEE-DE-TESTE-0123456789'];");
+    $snap = json_encode(Db::all($pdo, 'SELECT * FROM gmax3_catalog'));
+    $r = http('GET', 'painel.php?p=integracoes');
+    no_php_errors($r, 'integracoes shopee');
+    ok(str_contains($r['body'], 'Testar conexão Shopee') && str_contains($r['body'], 'terminado em 5678'), 'botões e final do AppId');
+    $t = csrf($r['body']);
+    $r = follow(http('POST', 'painel.php', ['action' => 'shopee_test', 'csrf' => $t, 'back' => 'integracoes']));
+    ok(str_contains($r['body'], 'Teste de conexão') && str_contains($r['body'], 'Requisição não realizada'), 'resultado exibido (rede proibida no teste)');
+    $r = follow(http('POST', 'painel.php', ['action' => 'shopee_item_test', 'item' => '22812345602', 'shop' => '', 'csrf' => $t, 'back' => 'integracoes']));
+    ok(str_contains($r['body'], 'Consulta de produto'), 'consulta individual exibida');
+    $r = follow(http('POST', 'painel.php', ['action' => 'shopee_item_test', 'item' => '<b>1', 'csrf' => $t, 'back' => 'integracoes']));
+    ok(str_contains($r['body'], 'só com números') && !str_contains($r['body'], '<b>1'), 'entrada inválida recusada e escapada');
+    ok(!str_contains($r['body'], 'SEGREDO-SHOPEE') && !str_contains($r['body'], '18812345678'), 'segredos não aparecem');
+    eq($snap, json_encode(Db::all($pdo, 'SELECT * FROM gmax3_catalog')), 'catálogo intacto');
+    unlink("$secrets/shopee-api.php");
+});
+
 echo "\n== OAuth Mercado Livre pelo navegador\n";
 test('Integrações: conectar gera redirecionamento S256 com state; callback exige login e state válido', function () {
     $secrets = t_sandbox() . '/gmax-secrets';
