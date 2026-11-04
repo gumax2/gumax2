@@ -64,7 +64,7 @@ $heart = $pdo->query('SELECT * FROM gmax3_heartbeats ORDER BY name')->fetchAll()
         <td data-label="Agendado"><?= View::e(Time::show($q['scheduled_for'])) ?></td>
         <td data-label="Concluído"><?= View::e(Time::show($q['finished_at'])) ?></td>
         <td data-label="Detalhe" class="small"><?= View::e(mb_substr((string)$q['note'], 0, 220)) ?><?= $q['telegram_message_id'] ? ' · msg ' . (int)$q['telegram_message_id'] : '' ?></td>
-        <td><?= in_array($q['state'], ['agendado', 'bloqueado'], true) ? View::actionButton('queue_cancel', ['id' => $q['id'], 'back' => 'publicacoes'], 'Cancelar', 'btn btn-ghost btn-sm') : '' ?></td>
+        <td><?= in_array($q['state'], ['agendado', 'bloqueado'], true) ? View::actionButton('queue_cancel', ['id' => $q['id'], 'back' => 'publicacoes'], 'Cancelar', 'btn btn-ghost btn-sm', 'Cancelar esta publicação agendada?') : '' ?></td>
       </tr>
     <?php endforeach; ?>
     <?php if (!$rows): ?><tr><td colspan="7" class="muted">Fila vazia.</td></tr><?php endif; ?>

@@ -18,7 +18,16 @@ $v = static function (string $field, ?string $fromRow = null) use ($form, $r): s
     return (string)($r[$fromRow ?? $field] ?? '');
 };
 $mp = $v('marketplace') ?: 'mercadolivre';
+$backF = is_array($_SESSION['gmax3_ofertas_f'] ?? null) ? $_SESSION['gmax3_ofertas_f'] : [];
 ?>
+<a class="back-link" href="<?= View::e(View::url('ofertas', $backF) . ($id ? '#p' . $id : '')) ?>">← Voltar aos resultados</a>
+<?php if ($r): ?>
+<section class="card">
+  <div class="actions"><a class="btn btn-primary" href="<?= View::e(View::url('conferir', ['id' => $id])) ?>">✓ Conferência rápida</a></div>
+  <div class="small"><?= View::freshness($r, $staleHours) ?></div>
+  <?= View::storeButtons($r) ?>
+</section>
+<?php endif; ?>
 <div class="grid two-wide">
 <form method="post" action="painel.php" class="card" data-loading data-discount>
   <?= View::csrfField() ?>
@@ -57,7 +66,7 @@ $mp = $v('marketplace') ?: 'mercadolivre';
     <label class="check span2"><input type="checkbox" name="confirm_price" value="1"> Conferi agora na loja: preço, condição e disponibilidade estão corretos</label>
   </div>
   <datalist id="cats"><?php foreach ($pdo->query('SELECT name FROM gmax3_categories ORDER BY name')->fetchAll(PDO::FETCH_COLUMN) as $c): ?><option value="<?= View::e($c) ?>"><?php endforeach; ?></datalist>
-  <button type="submit" class="btn btn-primary">Salvar</button>
+  <div class="form-actions"><button type="submit" class="btn btn-primary btn-block-mobile">Salvar</button></div>
   <p class="muted small">Alterar preço ou link retira a aprovação e exige nova conferência. Nenhum valor é preenchido automaticamente.</p>
 </form>
 
@@ -77,9 +86,9 @@ $mp = $v('marketplace') ?: 'mercadolivre';
     <p class="small"><?= View::freshness($r, $staleHours) ?></p>
     <?php if ($legacy !== null): ?><p class="muted small">Registro original (<?= View::e($r['legacy_table']) ?>): <?= View::e($legacy) ?></p><?php endif; ?>
     <div class="actions">
-      <?= View::actionButton('offer_confirm_price', ['id' => $id, 'back' => 'oferta'], 'Confirmar preço agora', 'btn') ?>
+      <?= View::actionButton('offer_confirm_price', ['id' => $id, 'back' => 'oferta'], 'Confirmar preço agora', 'btn', 'Confirmar que você conferiu AGORA, na loja, o preço cadastrado? (conferência manual)') ?>
       <?php if ($r['validation_status'] !== 'aprovado'): ?>
-        <?= View::actionButton('offer_status', ['id' => $id, 'status' => 'aprovado', 'back' => 'oferta'], 'Aprovar', 'btn btn-primary') ?>
+        <?= View::actionButton('offer_status', ['id' => $id, 'status' => 'aprovado', 'back' => 'oferta'], 'Aprovar', 'btn btn-primary', 'Aprovar este produto? Ele poderá entrar na fila de publicação (o envio continua bloqueado pelas travas).') ?>
       <?php else: ?>
         <?= View::actionButton('offer_status', ['id' => $id, 'status' => 'aguardando_validacao', 'back' => 'oferta'], 'Retirar aprovação', 'btn') ?>
       <?php endif; ?>
@@ -94,7 +103,7 @@ $mp = $v('marketplace') ?: 'mercadolivre';
     <?php if ($blockers || $dup): ?>
       <div class="alert alert-aviso"><strong>Publicação bloqueada:</strong><ul><?php foreach ($blockers as $b): ?><li><?= View::e($b) ?></li><?php endforeach; ?><?= $dup ? '<li>' . View::e($dup) . '</li>' : '' ?></ul></div>
     <?php else: ?>
-      <form method="post" action="painel.php" data-loading class="stack">
+      <form method="post" action="painel.php" data-loading class="stack" data-confirm="Adicionar à fila de publicação do Telegram privado? (o envio real continua bloqueado pelas travas)">
         <?= View::csrfField() ?><input type="hidden" name="action" value="queue_add"><input type="hidden" name="id" value="<?= (int)$id ?>"><input type="hidden" name="back" value="oferta">
         <label>Agendar para (opcional) <input type="datetime-local" name="when"></label>
         <button type="submit" class="btn btn-primary">Adicionar à fila do Telegram privado</button>
@@ -109,10 +118,10 @@ $mp = $v('marketplace') ?: 'mercadolivre';
   </section>
   <section class="card">
     <h2>Histórico de preços</h2>
-    <table class="table compact"><thead><tr><th>Registro</th><th>De</th><th>Por</th><th>Fonte</th></tr></thead><tbody>
+    <div class="table-wrap"><table class="table compact keep-table"><thead><tr><th>Registro</th><th>De</th><th>Por</th><th>Fonte</th></tr></thead><tbody>
     <?php foreach ($hist as $h): ?><tr><td><?= View::e(Time::show($h['recorded_at'])) ?></td><td><?= View::e(Money::format($h['price_original_cents'] === null ? null : (int)$h['price_original_cents'])) ?></td><td><?= View::e(Money::format($h['price_promo_cents'] === null ? null : (int)$h['price_promo_cents'])) ?></td><td><?= View::e($h['source']) ?><?= $h['verified'] ? ' ✓' : '' ?></td></tr><?php endforeach; ?>
-    </tbody></table>
-    <p class="muted small">✓ = conferido manualmente. Registros de planilha/pesquisa não são tratados como preço real.</p>
+    </tbody></table></div>
+    <p class="muted small">✓ = preço confirmado (fonte “conferencia_manual” = pessoa na loja; “api_…” = API oficial). Registros de planilha/pesquisa não são tratados como preço real.</p>
   </section>
   <?php if ($queue): ?>
   <section class="card">

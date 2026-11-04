@@ -24,15 +24,100 @@
   var autonav = document.querySelector('a[data-autonav]');
   if (autonav) { window.location.replace(autonav.href); }
 
-  // Menu no celular.
+  // Menu: gaveta no celular (abaixo do cabeçalho), fecha com Esc, ao tocar num link ou fora dele.
+  var top = document.querySelector('.top');
+  function setNavTop() {
+    if (top) document.documentElement.style.setProperty('--nav-top', top.getBoundingClientRect().height + 'px');
+  }
+  setNavTop();
+  window.addEventListener('resize', setNavTop);
   document.querySelectorAll('[data-toggle]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var el = document.querySelector(btn.getAttribute('data-toggle'));
-      if (!el) return;
-      var open = el.classList.toggle('open');
+    var el = document.querySelector(btn.getAttribute('data-toggle'));
+    if (!el) return;
+    function set(open) {
+      el.classList.toggle('open', open);
       btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.setAttribute('aria-label', open ? 'Fechar menu' : 'Abrir menu');
+      document.body.classList.toggle('nav-open', open);
+      if (open) { setNavTop(); var first = el.querySelector('a'); if (first) first.focus(); }
+    }
+    btn.addEventListener('click', function () { set(!el.classList.contains('open')); });
+    el.addEventListener('click', function (ev) { if (ev.target.closest('a')) set(false); });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && el.classList.contains('open')) { set(false); btn.focus(); }
     });
   });
+
+  // Tabelas viram cartões no celular: cada célula recebe o título da coluna (sem alterar o HTML do servidor).
+  document.querySelectorAll('table.table:not(.keep-table)').forEach(function (t) {
+    var heads = Array.prototype.map.call(t.querySelectorAll('thead th'), function (th) { return th.textContent.trim(); });
+    if (!heads.length) return;
+    t.querySelectorAll('tbody tr').forEach(function (tr) {
+      var col = 0;
+      Array.prototype.forEach.call(tr.children, function (td) {
+        if (!td.hasAttribute('data-label') && heads[col] && !td.hasAttribute('colspan')) td.setAttribute('data-label', heads[col]);
+        col += parseInt(td.getAttribute('colspan') || '1', 10);
+      });
+    });
+  });
+
+  // Filtros: abertos no computador; recolhidos no celular quando nenhum filtro está ativo.
+  if (window.matchMedia && window.matchMedia('(max-width: 767px)').matches) {
+    document.querySelectorAll('details.filters-box[data-collapse-mobile]').forEach(function (d) { d.open = false; });
+  }
+
+  // Conectividade: avisa quando o aparelho fica sem rede e evita envio de formulário perdido.
+  var net = document.querySelector('[data-net-status]');
+  function netState() {
+    if (!net) return;
+    net.hidden = navigator.onLine !== false;
+    net.textContent = 'Sem conexão com a internet: as ações não serão enviadas até a rede voltar.';
+  }
+  window.addEventListener('online', netState);
+  window.addEventListener('offline', netState);
+  netState();
+  document.addEventListener('submit', function (ev) {
+    if (navigator.onLine === false) {
+      ev.preventDefault(); ev.stopImmediatePropagation(); netState();
+    }
+  }, true);
+
+  // Arquivo escolhido (iPhone/Android): mostra nome e tamanho e avisa antes do envio se passar de 5 MB.
+  document.querySelectorAll('input[type=file]').forEach(function (inp) {
+    var out = document.createElement('p');
+    out.className = 'small muted'; out.setAttribute('aria-live', 'polite');
+    inp.insertAdjacentElement('afterend', out);
+    inp.addEventListener('change', function () {
+      var f = inp.files && inp.files[0];
+      if (!f) { out.textContent = ''; return; }
+      var kb = Math.max(1, Math.round(f.size / 1024));
+      var big = f.size > 5 * 1024 * 1024;
+      out.textContent = 'Selecionado: ' + f.name + ' (' + (kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB') + ')' + (big ? ' — acima de 5 MB: o servidor vai recusar.' : '');
+      out.className = 'small ' + (big ? 'err' : 'muted');
+    });
+  });
+
+  // Lista de ofertas: guarda e restaura a posição da rolagem ao voltar (somente nesta aba).
+  // "Voltar aos resultados" aponta para o cartão (#p123); no desktop o cartão fica oculto e
+  // a linha equivalente da tabela é #t123: rola até ela e a destaca.
+  var hashM = /^#p(\d+)$/.exec(location.hash);
+  var hashEl = hashM && document.getElementById('p' + hashM[1]);
+  var rowEl = hashM && document.getElementById('t' + hashM[1]);
+  if (hashEl && hashEl.offsetParent === null && rowEl) {
+    rowEl.classList.add('row-target');
+    rowEl.scrollIntoView({ block: 'center' });
+  }
+  var listKey = document.querySelector('[data-scroll-key]');
+  if (listKey) {
+    var key = 'gmax-scroll:' + listKey.getAttribute('data-scroll-key');
+    try {
+      var y = sessionStorage.getItem(key);
+      if (y && !location.hash) window.scrollTo(0, parseInt(y, 10) || 0);
+    } catch (e) { /* armazenamento indisponível: segue sem restaurar */ }
+    window.addEventListener('pagehide', function () {
+      try { sessionStorage.setItem(key, String(window.scrollY || 0)); } catch (e) { /* ignora */ }
+    });
+  }
 
   // Selecionar todos.
   document.querySelectorAll('[data-checkall]').forEach(function (box) {

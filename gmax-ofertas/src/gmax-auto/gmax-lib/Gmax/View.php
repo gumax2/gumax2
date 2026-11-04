@@ -77,11 +77,49 @@ final class View
     {
         $age = Time::hoursSince($r['price_verified_at'] ?? null);
         if ($age === null) {
-            $seen = $r['price_seen_at'] ? ' (fonte: ' . self::e(Time::show($r['price_seen_at'] . ' 12:00:00', 'd/m/Y')) . ')' : '';
+            $seen = !empty($r['price_seen_at']) ? ' (fonte: ' . self::e(Time::show($r['price_seen_at'] . ' 12:00:00', 'd/m/Y')) . ')' : '';
             return '<span class="fresh fresh-no">Preço não conferido' . $seen . '</span>';
         }
         $cls = $age <= $maxHours ? 'fresh-ok' : 'fresh-old';
-        return '<span class="fresh ' . $cls . '">Conferido ' . self::e(Time::show($r['price_verified_at'])) . ($age > $maxHours ? ' — desatualizado' : '') . '</span>';
+        $src = Catalog::verificationSource($r) === 'api'
+            ? '<span class="src src-api" title="Preço devolvido pela API oficial">API ' . self::e(Url::MARKETPLACES[$r['marketplace']] ?? '') . '</span> Validado'
+            : '<span class="src src-manual" title="Conferido por uma pessoa na loja">Manual</span> Conferido';
+        return '<span class="fresh ' . $cls . '">' . $src . ' ' . self::e(Time::show($r['price_verified_at'])) . ($age > $maxHours ? ' — desatualizado' : '') . '</span>';
+    }
+
+    /** URL oficial do anúncio (para conferir na loja), só se for https do domínio da loja. */
+    public static function storeUrl(array $r): ?string
+    {
+        $u = $r['original_url'] ?? null;
+        return Url::isProduct((string)$r['marketplace'], $u) ? (string)$u : null;
+    }
+
+    /** Link afiliado oficial (o usado na divulgação), só se estiver no formato oficial. */
+    public static function affiliateUrl(array $r): ?string
+    {
+        $u = $r['affiliate_url'] ?? null;
+        return Url::isAffiliate((string)$r['marketplace'], $u) ? (string)$u : null;
+    }
+
+    /**
+     * Botões "Conferir na loja" e "Abrir link afiliado", visualmente distintos.
+     * Links https comuns (target=_blank): o sistema operacional decide abrir o aplicativo
+     * oficial (Universal Links / App Links) ou o navegador. Sem redirecionamento intermediário.
+     */
+    public static function storeButtons(array $r, string $size = ''): string
+    {
+        $shopee = $r['marketplace'] === 'shopee';
+        $store = self::storeUrl($r);
+        $aff = self::affiliateUrl($r);
+        $cls = $size !== '' ? ' ' . $size : '';
+        $h = $store
+            ? '<a class="btn btn-store btn-store-' . self::e($r['marketplace']) . $cls . '" href="' . self::e($store) . '" target="_blank" rel="noopener noreferrer">'
+                . ($shopee ? '🛍️ Conferir na Shopee' : '🛒 Conferir no Mercado Livre') . '</a>'
+            : '<span class="btn btn-disabled' . $cls . '" aria-disabled="true" title="Cadastre a URL do anúncio individual">Sem URL do anúncio</span>';
+        $h .= $aff
+            ? '<a class="btn btn-affiliate' . $cls . '" href="' . self::e($aff) . '" target="_blank" rel="noopener noreferrer" title="Link de divulgação: abrir registra um clique de afiliado">🔗 Abrir link afiliado</a>'
+            : '<span class="btn btn-disabled' . $cls . '" aria-disabled="true">Sem link afiliado</span>';
+        return '<div class="store-actions">' . $h . '</div>';
     }
 
     public static function pager(int $total, int $perPage, int $page, array $params, string $pageName): string

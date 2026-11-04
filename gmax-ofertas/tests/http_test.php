@@ -388,6 +388,39 @@ test('Histórico: "Ver detalhes" abre produtos, motivos e filtros; nada é envia
     eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('reservado','confirmado','incerto')"), 'nada enviado');
 });
 
+echo "\n== Conferência rápida (3.1.5)\n";
+test('Conferência: exige CSRF, login e confirmação explícita; salva como manual; páginas novas sem erros', function () {
+    global $jar;
+    $pdo = Db::get();
+    $id = (int)Db::value($pdo, "SELECT id FROM gmax3_catalog WHERE external_id='22812345603'");
+    $r = http('GET', 'painel.php?p=conferir&id=' . $id);
+    no_php_errors($r, 'conferir');
+    ok(str_contains($r['body'], 'Salvar conferência') && str_contains($r['body'], 'Conferir na Shopee') && str_contains($r['body'], 'rel="noopener noreferrer"'), 'tela de conferência');
+    $t = csrf($r['body']);
+    $snap = json_encode(Gmax\Catalog::get($pdo, $id));
+    $post = ['action' => 'offer_check', 'id' => $id, 'back' => 'conferir', 'price_promo' => '28,90', 'availability' => 'disponivel', 'payment_condition' => 'normal'];
+    follow(http('POST', 'painel.php', $post + ['csrf' => 'x', 'confirmo' => '1']));
+    $r = follow(http('POST', 'painel.php', $post + ['csrf' => $t]));
+    ok(str_contains($r['body'], 'Nada foi gravado'), 'sem confirmação: recusado');
+    ok(str_contains($r['body'], 'value="28,90"'), 'valores digitados preservados no formulário');
+    eq($snap, json_encode(Gmax\Catalog::get($pdo, $id)), 'nada alterado sem CSRF ou sem confirmação');
+    $saved = $jar;
+    $jar = [];
+    $x = http('POST', 'painel.php', $post + ['csrf' => $t, 'confirmo' => '1']);
+    $jar = $saved;
+    eq($snap, json_encode(Gmax\Catalog::get($pdo, $id)), 'sem login: nada alterado');
+    $r = follow(http('POST', 'painel.php', $post + ['csrf' => $t, 'confirmo' => '1']));
+    ok(str_contains($r['body'], 'Conferência manual salva') && str_contains($r['body'], 'não como validação pela API'), substr(strip_tags($r['body']), 0, 300));
+    $p = Gmax\Catalog::get($pdo, $id);
+    eq([2890, 'admin', 'conferencia_manual'], [(int)$p['price_promo_cents'], $p['price_verified_by'], $p['price_source']]);
+    foreach (['painel', 'ofertas&avail=indisponivel', 'ofertas&variation=1&marketplace=shopee', 'conferir&id=999999', 'conferir'] as $pg) {
+        no_php_errors(http('GET', 'painel.php?p=' . $pg), $pg);
+    }
+    $r = http('GET', 'painel.php?p=painel');
+    ok(str_contains($r['body'], 'rel="manifest"') && str_contains($r['body'], 'apple-touch-icon') && !str_contains($r['body'], 'serviceWorker'), 'PWA sem service worker');
+    ok(str_contains(header_value($r, 'Content-Security-Policy'), "form-action 'self';"), 'CSP preservada');
+});
+
 echo "\n== Shopee pelo navegador\n";
 test('Integrações: Testar conexão e Consultar produto da Shopee sem alterar o catálogo nem mostrar segredos', function () {
     $pdo = Db::get();

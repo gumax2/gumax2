@@ -1,0 +1,96 @@
+<?php
+declare(strict_types=1);
+/*
+ * Testes de interface 3.1.5 no navegador (Chromium/Playwright, emulação de dispositivos).
+ * Sobe o painel no servidor embutido do PHP (sem rede externa: os domínios das lojas são
+ * interceptados no navegador) e confere no banco que nada foi enviado nem confirmado indevidamente.
+ * Execução: php tests/ui_test.php   (requer node + playwright; caso contrário é PULADO)
+ */
+require __DIR__ . '/harness.php';
+define('GMAX_APP_DIR', t_app());
+require GMAX_APP_DIR . '/gmax-lib/bootstrap.php';
+
+use Gmax\{Catalog, Db, Migrator, Settings};
+
+$node = trim((string)shell_exec('command -v node 2>/dev/null'));
+if ($node === '' || !str_contains((string)shell_exec('NODE_PATH=$(npm root -g 2>/dev/null) node -e "require(\'playwright\');console.log(\'pw-ok\')" 2>/dev/null'), 'pw-ok')) {
+    echo "Teste de interface PULADO: node/playwright indisponível\n";
+    exit(0);
+}
+
+$pdo = t_seed('hostgator');
+Migrator::up($pdo, 'teste');
+// Catálogo variado: com e sem links, variação pendente, indisponível, validado pela API, rascunho sem link.
+$ids = array_map('intval', $pdo->query("SELECT id FROM gmax3_catalog WHERE marketplace='shopee' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
+$ml = (int)Db::value($pdo, "SELECT id FROM gmax3_catalog WHERE marketplace='mercadolivre'");
+Db::run($pdo, "UPDATE gmax3_catalog SET variation_pending=1, variation_note='Escolher voltagem 110 V ou 220 V' WHERE id=?", [$ids[1]]);
+Db::run($pdo, "UPDATE gmax3_catalog SET availability='indisponivel' WHERE id=?", [$ids[2]]);
+Catalog::markVerifiedByApi($pdo, $ids[3], 'shopee', 'teste');
+$noLink = Catalog::insert($pdo, ['marketplace' => 'shopee', 'external_id' => '22899999901', 'title' => 'Mochila Teste Sem Link <b>negrito</b>',
+    'original_url' => 'https://shopee.com.br/product/222222/22899999901', 'price_promo_cents' => 8990], 'rascunho', 'teste');
+Gmax\Automation\Runner::runManual($pdo, 'revisao_precos', 'teste'); // gera histórico de execução e alertas
+$before = [
+    'pausa' => Settings::paused($pdo), 'auto' => Settings::get($pdo, 'automacoes_pausadas'), 'aprov' => Settings::get($pdo, 'aprovacao_automatica'),
+    'links' => Db::all($pdo, 'SELECT id, affiliate_url FROM gmax3_catalog ORDER BY id'),
+];
+
+$app = t_app();
+$port = 19000 + random_int(0, 899);
+$base = "http://127.0.0.1:$port";
+$env = ['GMAX_SECRETS_DIR' => t_sandbox() . '/gmax-secrets', 'GMAX_TESTING' => '1', 'PATH' => getenv('PATH')];
+$server = proc_open([PHP_BINARY, '-d', 'allow_url_fopen=0', '-d', 'display_errors=1', '-S', "127.0.0.1:$port", '-t', $app], [1 => ['file', '/dev/null', 'w'], 2 => ['file', t_sandbox() . '/ui-server.log', 'w']], $pipes, $app, $env);
+register_shutdown_function(static fn() => proc_terminate($server));
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) {
+    usleep(100000);
+}
+$shots = __DIR__ . '/../docs/capturas/3.1.5';
+@mkdir($shots, 0755, true);
+$ctx = json_encode(['base' => $base, 'password' => T_PASSWORD, 'shots' => realpath($shots), 'fixture' => realpath(__DIR__ . '/fixtures/shopee-5-ofertas.csv'),
+    'ids' => ['shopee' => $ids, 'ml' => $ml, 'semLink' => $noLink, 'api' => $ids[3], 'variacao' => $ids[1], 'indisponivel' => $ids[2]],
+    'urls' => ['shopee0' => Catalog::get($pdo, $ids[0])['original_url'], 'aff0' => Catalog::get($pdo, $ids[0])['affiliate_url']]]);
+$cmd = 'env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy NODE_PATH=$(npm root -g) node ' . escapeshellarg(__DIR__ . '/browser_ui.js') . ' ' . escapeshellarg($ctx) . ' 2>&1';
+$out = (string)shell_exec($cmd);
+$lines = array_values(array_filter(array_map(static fn($l) => json_decode($l, true), explode("\n", $out)), 'is_array'));
+if (!$lines) {
+    test('Navegador: teste executado', fn() => ok(false, mb_substr($out, 0, 800)));
+}
+$current = '';
+foreach ($lines as $l) {
+    if (($l['grupo'] ?? '') !== $current) {
+        $current = (string)$l['grupo'];
+        echo "\n== $current\n";
+    }
+    test($l['nome'], fn() => ok((bool)$l['ok'], (string)$l['erro']));
+}
+
+echo "\n== Integridade após os testes de interface (banco)\n";
+test('Envios continuam pausados, automações pausadas, aprovação automática desligada; nada enviado', function () use ($pdo, $before) {
+    Db::reset();
+    $pdo = Db::get();
+    eq([$before['pausa'], $before['auto'], $before['aprov']], [Settings::paused($pdo), Settings::get($pdo, 'automacoes_pausadas'), Settings::get($pdo, 'aprovacao_automatica')]);
+    ok(Settings::paused($pdo), 'envios pausados');
+    eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state IN ('reservado','confirmado','incerto')"), 'nada enviado');
+});
+test('Links afiliados preservados (nenhum trocado pelo link comum)', function () use ($before) {
+    eq($before['links'], Db::all(Db::get(), 'SELECT id, affiliate_url FROM gmax3_catalog WHERE id IN (' . implode(',', array_column($before['links'], 'id')) . ') ORDER BY id'));
+});
+test('Abrir o anúncio não confirmou preço; só a conferência salva gerou registro manual', function () use ($ids, $ml) {
+    $pdo = Db::get();
+    eq(null, Catalog::get($pdo, $ids[0])['price_verified_at'], 'produto aberto na loja sem salvar: continua não conferido');
+    $p = Catalog::get($pdo, $ml);
+    ok($p['price_verified_at'] !== null && $p['price_verified_by'] === 'admin' && $p['price_source'] === 'conferencia_manual', json_encode([$p['price_verified_by'], $p['price_source']]));
+    eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_price_history WHERE catalog_id=? AND source LIKE 'api_%'", [$ml]), 'nunca registrado como API');
+    eq(1, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_audit WHERE action='conferencia_manual' AND entity_id=?", [(string)$ml]));
+});
+test('Nenhum service worker nem cache: o servidor não serve sw.js', function () use ($app) {
+    ok(!is_file("$app/sw.js") && !is_file("$app/gmax-assets/sw.js"), 'sem service worker');
+});
+
+$pass = count(array_filter($GLOBALS['t_results'], fn($r) => $r[1]));
+$total = count($GLOBALS['t_results']);
+echo "\nResultado interface: $pass/$total testes aprovados\n";
+file_put_contents(__DIR__ . '/../docs/resultado-testes-interface.json', json_encode([
+    'executado_em' => date('c'), 'php' => PHP_VERSION, 'aprovados' => $pass, 'total' => $total,
+    'testes' => array_map(fn($r) => ['nome' => $r[0], 'ok' => $r[1], 'erro' => $r[2], 'segundos' => round($r[3], 3)], $GLOBALS['t_results']),
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+exit($pass === $total ? 0 : 1);

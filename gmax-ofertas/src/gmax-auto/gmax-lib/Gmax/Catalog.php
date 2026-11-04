@@ -279,7 +279,7 @@ final class Catalog
     }
 
     /** O administrador declara que conferiu agora, na loja, o preço e a condição cadastrados. */
-    public static function confirmPrice(PDO $pdo, int $id, string $actor): bool
+    public static function confirmPrice(PDO $pdo, int $id, string $actor, bool $record = true): bool
     {
         $r = self::get($pdo, $id);
         if (!$r || empty($r['price_promo_cents'])) {
@@ -287,9 +287,94 @@ final class Catalog
         }
         $now = Time::nowSql();
         Db::run($pdo, 'UPDATE gmax3_catalog SET price_verified_at=?, price_verified_by=?, price_source=?, updated_at=? WHERE id=?', [$now, $actor, 'conferencia_manual', $now, $id]);
-        self::recordPrice($pdo, $id, $r, 'conferencia_manual', true, $now);
+        if ($record) {
+            self::recordPrice($pdo, $id, $r, 'conferencia_manual', true, $now);
+        }
         Audit::log($pdo, $actor, 'preco_confirmado', 'catalog', $id, ['por' => $r['price_promo_cents'], 'de' => $r['price_original_cents']]);
         return true;
+    }
+
+    /**
+     * Conferência manual na loja (fluxo "Conferir na loja" → "Salvar conferência").
+     * Exige confirmação explícita; grava como CONFERÊNCIA MANUAL (price_verified_by = usuário,
+     * fonte "conferencia_manual"), nunca como validação pela API. Preço alterado retira a
+     * aprovação (regra de Catalog::update). Sem confirmação, nada é gravado.
+     * @param array{confirmo?:bool,price_original?:string,price_promo?:string,payment_condition?:string,payment_note?:string,
+     *              availability?:string,variation_note?:string,variation_ok?:bool,store_name?:string,observacao?:string} $in
+     * @return array{changed:list<string>,status:string,status_before:string}
+     */
+    public static function manualCheck(PDO $pdo, int $id, array $in, string $actor): array
+    {
+        if (empty($in['confirmo'])) {
+            throw new \RuntimeException('Marque "Conferi agora na loja" para salvar. Nada foi gravado: abrir o anúncio não confirma o preço.');
+        }
+        $promo = Money::tryParse((string)($in['price_promo'] ?? ''), $err);
+        if ($promo === null || $promo <= 0) {
+            throw new \RuntimeException('Informe o preço promocional (Por) encontrado na loja, ex.: 119,90.');
+        }
+        $origRaw = trim((string)($in['price_original'] ?? ''));
+        $orig = $origRaw === '' ? null : Money::tryParse($origRaw);
+        if ($origRaw !== '' && ($orig === null || $orig <= 0)) {
+            throw new \RuntimeException('Preço original (De) inválido. Deixe vazio se a loja não mostra preço anterior.');
+        }
+        if ($orig !== null && $orig < $promo) {
+            throw new \RuntimeException('O preço original (De) não pode ser menor que o promocional (Por).');
+        }
+        $pay = (string)($in['payment_condition'] ?? '');
+        $avail = (string)($in['availability'] ?? '');
+        if ($pay !== '' && !isset(self::PAYMENT[$pay])) {
+            throw new \RuntimeException('Condição de pagamento inválida.');
+        }
+        if (!isset(self::AVAILABILITY[$avail])) {
+            throw new \RuntimeException('Informe a disponibilidade encontrada na loja.');
+        }
+        $obs = mb_substr(trim((string)($in['observacao'] ?? '')), 0, 300);
+        return Db::immediate($pdo, static function () use ($pdo, $id, $in, $promo, $orig, $pay, $avail, $obs, $actor) {
+            $cur = self::get($pdo, $id) ?? throw new \RuntimeException('Produto não encontrado.');
+            $data = [
+                'price_promo_cents' => $promo, 'price_original_cents' => $orig, 'payment_condition' => $pay === '' ? null : $pay,
+                'payment_note' => mb_substr(trim((string)($in['payment_note'] ?? '')), 0, 200) ?: null, 'availability' => $avail,
+                'price_source' => 'conferencia_manual', 'price_seen_at' => substr(Time::nowSql(), 0, 10),
+            ];
+            $variation = mb_substr(trim((string)($in['variation_note'] ?? '')), 0, 300);
+            if ($variation !== '') {
+                $data['variation_note'] = $variation;
+            }
+            if (!empty($in['variation_ok'])) {
+                if ($variation === '' && trim((string)$cur['variation_note']) === '') {
+                    throw new \RuntimeException('Descreva a variação escolhida antes de marcar a variação como definida.');
+                }
+                $data['variation_pending'] = 0;
+            }
+            $store = mb_substr(trim((string)($in['store_name'] ?? '')), 0, 120);
+            if ($store !== '') {
+                $data['store_name'] = $store;
+            }
+            if ($obs !== '') {
+                $line = '[Conferência ' . Time::show(Time::nowSql()) . '] ' . $obs;
+                $data['notes'] = mb_substr(trim(($cur['notes'] ?? '') . "\n" . $line), -1000);
+            }
+            $res = self::update($pdo, $cur, $data, $actor, false);
+            if (array_intersect($res['changed'], self::PRICE_FIELDS)) {
+                // update() acabou de registrar o novo preço (fonte conferencia_manual): marca esse mesmo
+                // registro como conferido, em vez de gravar uma segunda linha igual no histórico.
+                Db::run($pdo, "UPDATE gmax3_price_history SET verified=1, observed_at=? WHERE id=(SELECT MAX(id) FROM gmax3_price_history WHERE catalog_id=? AND source='conferencia_manual')", [Time::nowSql(), $id]);
+                self::confirmPrice($pdo, $id, $actor, false);
+            } else {
+                self::confirmPrice($pdo, $id, $actor); // registro de conferência manual, nunca "api:"
+            }
+            Audit::log($pdo, $actor, 'conferencia_manual', 'catalog', $id, ['campos' => $res['changed'], 'observacao' => $obs !== '' ? $obs : null]);
+            return $res + ['status_before' => (string)$cur['validation_status']];
+        });
+    }
+
+    /** Origem da última conferência: 'api' (validação pela API), 'manual' ou null. */
+    public static function verificationSource(array $r): ?string
+    {
+        if (empty($r['price_verified_at'])) {
+            return null;
+        }
+        return str_starts_with((string)($r['price_verified_by'] ?? ''), 'api:') ? 'api' : 'manual';
     }
 
     /**
@@ -441,6 +526,13 @@ final class Catalog
         }
         if (!empty($f['nolink'])) {
             $where[] = "(affiliate_url IS NULL OR affiliate_url = '')";
+        }
+        if (!empty($f['avail']) && isset(self::AVAILABILITY[$f['avail']])) {
+            $where[] = 'availability = ?';
+            $args[] = $f['avail'];
+        }
+        if (!empty($f['variation'])) {
+            $where[] = 'variation_pending = 1';
         }
         $sqlWhere = implode(' AND ', $where);
         $total = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE $sqlWhere", $args);

@@ -27,7 +27,7 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'automacoes', 'execucoes', 'integracoes', 'ofertas', 'oferta', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'automacoes', 'execucoes', 'integracoes', 'ofertas', 'oferta', 'conferir', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
@@ -35,6 +35,10 @@ if (!in_array($page, $pages, true)) {
 /** Redireciona sempre para o próprio painel (nunca para URL externa). */
 function gmax_redirect(string $page, array $params = []): never
 {
+    if ($page === 'ofertas' && !$params && is_array($_SESSION['gmax3_ofertas_f'] ?? null)) {
+        // Volta para a mesma lista filtrada (filtros já validados pela página de ofertas).
+        $params = array_filter($_SESSION['gmax3_ofertas_f'], static fn($v) => is_string($v));
+    }
     header('Location: ' . View::url($page, $params), true, 303);
     exit;
 }
@@ -283,6 +287,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $issues = Catalog::setStatus($pdo, $id, gmax_post_str('status', 30), $actor, !empty($_POST['confirm_price']));
                 View::flash($issues ? 'erro' : 'ok', $issues ? 'Não aprovado: ' . implode('; ', $issues) : 'Estado atualizado.');
                 gmax_redirect($back === 'ofertas' ? 'ofertas' : 'oferta', $back === 'ofertas' ? [] : ['id' => $id]);
+            case 'offer_check':
+                $id = gmax_post_int('id');
+                try {
+                    $res = Catalog::manualCheck($pdo, $id, [
+                        'confirmo' => !empty($_POST['confirmo']), 'price_promo' => gmax_post_str('price_promo', 20), 'price_original' => gmax_post_str('price_original', 20),
+                        'payment_condition' => gmax_post_str('payment_condition', 20), 'payment_note' => gmax_post_str('payment_note', 200),
+                        'availability' => gmax_post_str('availability', 20), 'variation_note' => gmax_post_str('variation_note', 300),
+                        'variation_ok' => !empty($_POST['variation_ok']), 'store_name' => gmax_post_str('store_name', 120), 'observacao' => gmax_post_str('observacao', 300),
+                    ], $actor);
+                } catch (RuntimeException $e) {
+                    $_SESSION['gmax3_form'] = array_intersect_key($_POST, array_flip(['price_promo', 'price_original', 'payment_condition', 'payment_note', 'availability', 'variation_note', 'store_name', 'observacao']));
+                    throw $e;
+                }
+                View::flash('ok', 'Conferência manual salva' . ($res['changed'] ? ' (' . implode(', ', $res['changed']) . ')' : ' (sem mudanças nos dados)') . '. Registrada como conferência manual, não como validação pela API.'
+                    . ($res['status'] !== $res['status_before'] ? ' Preço alterado: aprovação retirada para nova validação.' : ''));
+                gmax_redirect('conferir', ['id' => $id]);
             case 'offer_confirm_price':
                 $id = gmax_post_int('id');
                 View::flash(Catalog::confirmPrice($pdo, $id, $actor) ? 'ok' : 'erro', Catalog::get($pdo, $id) && Catalog::get($pdo, $id)['price_verified_at'] ? 'Preço registrado como conferido agora.' : 'Informe o preço promocional antes de confirmar.');
@@ -542,7 +562,7 @@ if ($page === 'exportar') {
 $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
-$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'execucoes' => 'Detalhes das execuções', 'integracoes' => 'Integrações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
+$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'execucoes' => 'Detalhes das execuções', 'integracoes' => 'Integrações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'conferir' => 'Conferência rápida', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
     'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';

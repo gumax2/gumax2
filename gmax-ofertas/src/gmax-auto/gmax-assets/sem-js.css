@@ -1,0 +1,6 @@
+/* GMAX Ofertas — sem JavaScript: o menu fica sempre visível (no celular, abaixo do cabeçalho). */
+.sidenav{display:flex}
+.nav-toggle{display:none}
+.top-inner{grid-template-areas:"brand brand actions" "search search search"}
+@media (min-width:640px){.top-inner{grid-template-areas:"brand brand search actions"}}
+@media (min-width:1024px){.top-inner{grid-template-areas:"brand search actions"}}

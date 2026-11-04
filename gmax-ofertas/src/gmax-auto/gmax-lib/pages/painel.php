@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 defined('GMAX_VERSION') || exit;
-use Gmax\{Db, Queue, Settings, Time, Url, View};
+use Gmax\{Db, Queue, Ranking, Settings, Time, Url, View};
 /** @var PDO $pdo @var int $staleHours @var bool $paused */
 $byMp = $pdo->query("SELECT marketplace, validation_status, COUNT(*) n FROM gmax3_catalog GROUP BY marketplace, validation_status")->fetchAll();
 $m = [];
@@ -10,27 +10,49 @@ foreach ($byMp as $r) {
 }
 $total = static fn(string $mp) => array_sum($m[$mp] ?? []) - ($m[$mp]['arquivado'] ?? 0);
 $staleSince = Time::now()->modify("-$staleHours hours")->format('Y-m-d H:i:s');
-$stale = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE validation_status='aprovado' AND (price_verified_at IS NULL OR price_verified_at < ?)", [$staleSince]);
-$noLink = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE (affiliate_url IS NULL OR affiliate_url='') AND validation_status NOT IN ('rejeitado','arquivado')");
+$count = static fn(string $where, array $args = []) => (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE validation_status <> 'arquivado' AND $where", $args);
+$k = [
+    'total' => $count('1=1'), 'rascunho' => $count("validation_status='rascunho'"), 'aguardando' => $count("validation_status='aguardando_validacao'"),
+    'stale' => $count('(price_verified_at IS NULL OR price_verified_at < ?)', [$staleSince]), 'nolink' => $count("(affiliate_url IS NULL OR affiliate_url='')"),
+    'indisponivel' => $count("availability='indisponivel'"), 'variacao' => $count('variation_pending=1'),
+];
 $queue = $pdo->query('SELECT state, COUNT(*) FROM gmax3_pub_queue GROUP BY state')->fetchAll(PDO::FETCH_KEY_PAIR);
 $gates = Queue::gates($pdo);
 $pending = Queue::unreconciled($pdo);
 $recent = $pdo->query('SELECT * FROM gmax3_audit ORDER BY id DESC LIMIT 8')->fetchAll();
+$top = array_slice(array_values(array_filter(Ranking::list($pdo, [], 60), static fn($r) => in_array($r['item']['validation_status'], ['aprovado', 'aguardando_validacao'], true))), 0, 5);
+$tile = static function (string $label, int $n, array $filter, string $hint, string $tone = '') {
+    return '<a class="stat' . ($n && $tone ? ' ' . $tone : '') . '" href="' . View::e(View::url('ofertas', $filter)) . '"><span class="muted">' . View::e($label) . '</span><strong>' . $n . '</strong><span class="small">' . View::e($hint) . '</span></a>';
+};
 ?>
-<section class="grid stats">
+<p class="kpi-group">Catálogo</p>
+<section class="grid stats" aria-label="Catálogo">
+  <?= $tile('Total de produtos', $k['total'], [], 'exceto arquivados') ?>
   <?php foreach (Url::MARKETPLACES as $mp => $label): ?>
-  <a class="stat" href="<?= View::e(View::url('ofertas', ['marketplace' => $mp])) ?>">
-    <span class="muted"><?= View::e($label) ?></span>
-    <strong><?= $total($mp) ?></strong>
-    <span class="small"><?= (int)($m[$mp]['aprovado'] ?? 0) ?> aprovada(s) · <?= (int)($m[$mp]['aguardando_validacao'] ?? 0) ?> aguardando · <?= (int)($m[$mp]['rascunho'] ?? 0) ?> rascunho(s)</span>
-  </a>
+    <?= $tile($label, $total($mp), ['marketplace' => $mp], (int)($m[$mp]['aprovado'] ?? 0) . ' aprovada(s) · ' . (int)($m[$mp]['aguardando_validacao'] ?? 0) . ' aguardando') ?>
   <?php endforeach; ?>
-  <a class="stat<?= $stale ? ' stat-warn' : '' ?>" href="<?= View::e(View::url('ofertas', ['status' => 'aprovado', 'stale' => 1])) ?>">
-    <span class="muted">Aprovadas com preço desatualizado</span><strong><?= $stale ?></strong><span class="small">conferência há mais de <?= $staleHours ?> h</span>
-  </a>
-  <a class="stat<?= $noLink ? ' stat-warn' : '' ?>" href="<?= View::e(View::url('links')) ?>">
-    <span class="muted">Sem link afiliado</span><strong><?= $noLink ?></strong><span class="small">associar link oficial</span>
-  </a>
+  <?= $tile('Rascunhos', $k['rascunho'], ['status' => 'rascunho'], 'completar cadastro') ?>
+  <?= $tile('Aguardando validação', $k['aguardando'], ['status' => 'aguardando_validacao'], 'conferir e aprovar') ?>
+</section>
+<p class="kpi-group">Precisam de atenção</p>
+<section class="grid stats" aria-label="Precisam de atenção">
+  <?= $tile('Preços desatualizados', $k['stale'], ['stale' => 1], "sem conferência há mais de {$staleHours} h", 'stat-warn') ?>
+  <?= $tile('Sem link afiliado', $k['nolink'], ['nolink' => 1], 'associar link oficial', 'stat-warn') ?>
+  <?= $tile('Anúncios indisponíveis', $k['indisponivel'], ['avail' => 'indisponivel'], 'pausados ou sem estoque', 'stat-danger') ?>
+  <?= $tile('Variação pendente', $k['variacao'], ['variation' => 1], 'escolher cor/voltagem/tamanho', 'stat-warn') ?>
+</section>
+
+<section class="card">
+  <h2>Melhores oportunidades comerciais</h2>
+  <?php if (!$top): ?><p class="empty">Nenhuma oferta aprovada ou aguardando validação com pontuação.</p><?php else: ?>
+  <ol class="toplist">
+  <?php foreach ($top as $row): $r = $row['item']; ?>
+    <li><a href="<?= View::e(View::url('oferta', ['id' => $r['id']])) ?>"><?= View::e($r['title']) ?></a>
+      <div class="small"><?= View::mp($r['marketplace']) ?> <strong class="score"><?= $row['score'] === null ? '—' : (int)$row['score'] ?></strong> pts · confiança <?= (int)$row['confidence'] ?>% · <?= View::badge($r['validation_status']) ?>
+      · <a href="<?= View::e(View::url('conferir', ['id' => $r['id']])) ?>">conferir preço</a></div></li>
+  <?php endforeach; ?>
+  </ol><?php endif; ?>
+  <p><a href="<?= View::e(View::url('ranking')) ?>">Ranking completo →</a></p>
 </section>
 
 <section class="card">

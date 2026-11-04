@@ -7,8 +7,10 @@ use Gmax\View;
 <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#08111f"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="GMAX">
 <title>Entrar — GMAX Ofertas</title>
+<link rel="manifest" href="gmax-assets/manifest.json?v=<?= View::e(GMAX_VERSION) ?>"><link rel="icon" href="gmax-assets/icon-192.png" type="image/png"><link rel="apple-touch-icon" href="gmax-assets/apple-touch-icon.png">
 <link rel="stylesheet" href="gmax-assets/painel.css?v=<?= View::e(GMAX_VERSION) ?>">
 </head>
 <body class="login-page">
