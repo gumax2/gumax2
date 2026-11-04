@@ -183,6 +183,56 @@
     return parseInt(p[0], 10) * 100 + parseInt(((p[1] || '') + '00').slice(0, 2), 10);
   }
   function brl(c) { return 'R$ ' + (c / 100).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+  // Calculadora (3.1.6): mesma aritmética inteira do servidor (Gmax\Pricing) — centavos e meios pontos-base.
+  function pct(v) {
+    v = (v || '').replace(/[\s%]/g, '');
+    var m = /^(\d{1,2})(?:[.,](\d{1,2}))?$/.exec(v);
+    if (!m) return null;
+    var dec = m[2] ? m[2].length : 0;
+    var h = parseInt(m[1], 10) * 100 + (dec ? parseInt((m[2] + '0').slice(0, 2), 10) : 0);
+    if (h < 100 || h > 9500) return null;
+    return { half: h * 2, dec: dec, label: (h / 100).toFixed(dec).replace('.', ',') };
+  }
+  function origFor(promo, half) { var den = 20000 - half; return Math.floor((2 * promo * 20000 + den) / (2 * den)); }
+  function line(box, text, cls) { var p = document.createElement('p'); p.textContent = text; if (cls) p.className = cls; box.appendChild(p); return p; }
+  document.querySelectorAll('[data-calc]').forEach(function (box) {
+    var promoIn = box.querySelector('[data-price=promo]'), origIn = box.querySelector('[data-price=orig]'), pctIn = box.querySelector('[data-pct]');
+    var out = box.querySelector('[data-calc-output]');
+    var apiOrig = parseInt(box.getAttribute('data-api-original') || '0', 10);
+    function mode() { var c = box.querySelector('[data-calc-mode]:checked'); return c ? c.value : 'original'; }
+    function update() {
+      var m = mode();
+      box.querySelectorAll('[data-mode-field]').forEach(function (f) { f.hidden = f.getAttribute('data-mode-field') !== m; });
+      out.textContent = '';
+      var b = cents(promoIn.value);
+      if (Number.isNaN(b)) { line(out, 'Preço promocional inválido: use o formato 119,90.', 'err'); return; }
+      if (m === 'original') {
+        var a = cents(origIn.value);
+        if (Number.isNaN(a)) { line(out, 'Preço original inválido: use o formato 199,90.', 'err'); return; }
+        if (b === null) { if (a) line(out, 'Informe também o preço promocional.', 'muted'); return; }
+        if (a === null) { line(out, 'Sem preço original: a mensagem mostrará apenas o preço "Por".', 'muted'); return; }
+        if (a < b) { line(out, 'O preço original é menor que o promocional: confira os valores.', 'err'); return; }
+        if (a === b) { line(out, 'Sem desconto.', 'muted'); return; }
+        line(out, Math.floor((a - b) * 100 / a) + '% OFF · Economia de ' + brl(a - b), 'calc-main');
+        line(out, 'Valores informados manualmente: só são registrados como conferidos quando você confirmar que conferiu na loja.', 'small muted');
+        return;
+      }
+      if (b === null) { line(out, 'Informe o preço promocional para calcular o preço original.', 'muted'); return; }
+      if (!pctIn.value.trim()) { line(out, 'Informe o % de desconto exibido pela loja (ex.: 35).', 'muted'); return; }
+      var p = pct(pctIn.value);
+      if (!p) { line(out, 'Percentual inválido: use de 1 a 95 (ex.: 35 ou 35,5).', 'err'); return; }
+      var step = [100, 10, 1][p.dec];
+      var o = origFor(b, p.half), lo = origFor(b, Math.max(0, p.half - step)), hi = origFor(b, Math.min(19998, p.half + step));
+      line(out, 'Preço original estimado: ≈ ' + brl(o), 'calc-main');
+      line(out, 'Economia estimada: ≈ ' + brl(o - b), 'calc-main');
+      line(out, 'Como a loja arredonda o percentual (' + p.label + '%), o valor real fica entre ' + brl(lo) + ' e ' + brl(hi) + '.', 'small');
+      line(out, 'CALCULADO — não confirmado. Não será usado como preço “De” nas publicações.', 'calc-flag');
+      if (apiOrig) line(out, 'O preço original confirmado pela API (' + brl(apiOrig) + ') será mantido.', 'small ok');
+    }
+    box.querySelectorAll('[data-calc-mode]').forEach(function (r) { r.addEventListener('change', update); });
+    [promoIn, origIn, pctIn].forEach(function (i) { i.addEventListener('input', update); });
+    update();
+  });
   document.querySelectorAll('form[data-discount]').forEach(function (form) {
     var o = form.querySelector('[data-price=orig]'), p = form.querySelector('[data-price=promo]'), out = form.querySelector('[data-discount-output]');
     function update() {

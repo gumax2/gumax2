@@ -279,16 +279,16 @@ final class Catalog
     }
 
     /** O administrador declara que conferiu agora, na loja, o preço e a condição cadastrados. */
-    public static function confirmPrice(PDO $pdo, int $id, string $actor, bool $record = true): bool
+    public static function confirmPrice(PDO $pdo, int $id, string $actor, bool $record = true, string $source = 'conferencia_manual'): bool
     {
         $r = self::get($pdo, $id);
         if (!$r || empty($r['price_promo_cents'])) {
             return false;
         }
         $now = Time::nowSql();
-        Db::run($pdo, 'UPDATE gmax3_catalog SET price_verified_at=?, price_verified_by=?, price_source=?, updated_at=? WHERE id=?', [$now, $actor, 'conferencia_manual', $now, $id]);
+        Db::run($pdo, 'UPDATE gmax3_catalog SET price_verified_at=?, price_verified_by=?, price_source=?, updated_at=? WHERE id=?', [$now, $actor, $source, $now, $id]);
         if ($record) {
-            self::recordPrice($pdo, $id, $r, 'conferencia_manual', true, $now);
+            self::recordPrice($pdo, $id, $r, $source, true, $now);
         }
         Audit::log($pdo, $actor, 'preco_confirmado', 'catalog', $id, ['por' => $r['price_promo_cents'], 'de' => $r['price_original_cents']]);
         return true;
@@ -312,14 +312,7 @@ final class Catalog
         if ($promo === null || $promo <= 0) {
             throw new \RuntimeException('Informe o preço promocional (Por) encontrado na loja, ex.: 119,90.');
         }
-        $origRaw = trim((string)($in['price_original'] ?? ''));
-        $orig = $origRaw === '' ? null : Money::tryParse($origRaw);
-        if ($origRaw !== '' && ($orig === null || $orig <= 0)) {
-            throw new \RuntimeException('Preço original (De) inválido. Deixe vazio se a loja não mostra preço anterior.');
-        }
-        if ($orig !== null && $orig < $promo) {
-            throw new \RuntimeException('O preço original (De) não pode ser menor que o promocional (Por).');
-        }
+        $mode = (string)($in['modo'] ?? 'original');
         $pay = (string)($in['payment_condition'] ?? '');
         $avail = (string)($in['availability'] ?? '');
         if ($pay !== '' && !isset(self::PAYMENT[$pay])) {
@@ -329,13 +322,19 @@ final class Catalog
             throw new \RuntimeException('Informe a disponibilidade encontrada na loja.');
         }
         $obs = mb_substr(trim((string)($in['observacao'] ?? '')), 0, 300);
-        return Db::immediate($pdo, static function () use ($pdo, $id, $in, $promo, $orig, $pay, $avail, $obs, $actor) {
+        return Db::immediate($pdo, static function () use ($pdo, $id, $in, $promo, $mode, $pay, $avail, $obs, $actor) {
             $cur = self::get($pdo, $id) ?? throw new \RuntimeException('Produto não encontrado.');
+            $calc = Pricing::resolve($mode, $promo, (string)($in['price_original'] ?? ''), (string)($in['desconto_pct'] ?? ''), $cur);
+            if ($calc['erros']) {
+                throw new \RuntimeException(implode(' ', $calc['erros']));
+            }
+            $orig = $calc['original']; // estimativa nunca entra aqui
             $data = [
                 'price_promo_cents' => $promo, 'price_original_cents' => $orig, 'payment_condition' => $pay === '' ? null : $pay,
                 'payment_note' => mb_substr(trim((string)($in['payment_note'] ?? '')), 0, 200) ?: null, 'availability' => $avail,
-                'price_source' => 'conferencia_manual', 'price_seen_at' => substr(Time::nowSql(), 0, 10),
+                'price_source' => $calc['preservado_api'] ? 'conferencia_manual_de_api' : 'conferencia_manual', 'price_seen_at' => substr(Time::nowSql(), 0, 10),
             ];
+            $source = $data['price_source']; // "Por" conferido à mão; "De" preservado da API quando for o caso
             $variation = mb_substr(trim((string)($in['variation_note'] ?? '')), 0, 300);
             if ($variation !== '') {
                 $data['variation_note'] = $variation;
@@ -358,13 +357,16 @@ final class Catalog
             if (array_intersect($res['changed'], self::PRICE_FIELDS)) {
                 // update() acabou de registrar o novo preço (fonte conferencia_manual): marca esse mesmo
                 // registro como conferido, em vez de gravar uma segunda linha igual no histórico.
-                Db::run($pdo, "UPDATE gmax3_price_history SET verified=1, observed_at=? WHERE id=(SELECT MAX(id) FROM gmax3_price_history WHERE catalog_id=? AND source='conferencia_manual')", [Time::nowSql(), $id]);
-                self::confirmPrice($pdo, $id, $actor, false);
+                Db::run($pdo, "UPDATE gmax3_price_history SET verified=1, observed_at=? WHERE id=(SELECT MAX(id) FROM gmax3_price_history WHERE catalog_id=? AND source=?)", [Time::nowSql(), $id, $source]);
+                self::confirmPrice($pdo, $id, $actor, false, $source);
             } else {
-                self::confirmPrice($pdo, $id, $actor); // registro de conferência manual, nunca "api:"
+                self::confirmPrice($pdo, $id, $actor, true, $source); // registro de conferência manual, nunca "api:"
             }
-            Audit::log($pdo, $actor, 'conferencia_manual', 'catalog', $id, ['campos' => $res['changed'], 'observacao' => $obs !== '' ? $obs : null]);
-            return $res + ['status_before' => (string)$cur['validation_status']];
+            if ($calc['estimativa']) {
+                Pricing::recordEstimate($pdo, $id, $promo, $calc['estimativa'], $actor, 'conferencia');
+            }
+            Audit::log($pdo, $actor, 'conferencia_manual', 'catalog', $id, ['campos' => $res['changed'], 'observacao' => $obs !== '' ? $obs : null, 'modo' => $mode]);
+            return $res + ['status_before' => (string)$cur['validation_status'], 'estimativa' => $calc['estimativa'], 'preservado_api' => $calc['preservado_api']];
         });
     }
 

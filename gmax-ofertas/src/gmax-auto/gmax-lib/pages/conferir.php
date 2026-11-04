@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 defined('GMAX_VERSION') || exit;
-use Gmax\{Catalog, Money, Time, Url, View};
+use Gmax\{Catalog, Money, Pricing, Time, Url, View};
 /** @var PDO $pdo @var int $staleHours */
 $id = isset($_GET['id']) && is_string($_GET['id']) && ctype_digit($_GET['id']) ? (int)$_GET['id'] : 0;
 $r = $id ? Catalog::get($pdo, $id) : null;
@@ -26,7 +26,7 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
     <p class="offer-meta"><?= View::mp($r['marketplace']) ?> <?= View::badge($r['validation_status']) ?> <span class="muted small">#<?= (int)$id ?> · <?= View::e($r['external_id'] ?? 'sem ID do anúncio') ?></span></p>
     <dl class="check-current">
       <div><dt>Por (atual)</dt><dd><?= View::e(Money::format($r['price_promo_cents'] === null ? null : (int)$r['price_promo_cents'])) ?></dd></div>
-      <div><dt>De (atual)</dt><dd><?= View::e(Money::format($r['price_original_cents'] === null ? null : (int)$r['price_original_cents'])) ?></dd></div>
+      <div><dt>De (atual)</dt><dd><?= View::e(Money::format($r['price_original_cents'] === null ? null : (int)$r['price_original_cents'])) ?> <?= View::originBadge(Pricing::originalSource($r)) ?></dd></div>
       <div><dt>Condição</dt><dd><?= View::e(Catalog::PAYMENT[$r['payment_condition'] ?? ''] ?? 'não identificada') ?></dd></div>
       <div><dt>Disponibilidade</dt><dd><?= View::e(Catalog::AVAILABILITY[$r['availability'] ?? 'desconhecida'] ?? '—') ?></dd></div>
     </dl>
@@ -50,17 +50,13 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
     <ol class="check-steps"><li>Confira preço “Por” e “De”, cupom ou Pix.</li><li>Confira a variação (cor, voltagem, tamanho) e o vendedor.</li><li>Confira a disponibilidade.</li><li>Volte à GMAX e registre abaixo.</li></ol>
   </section>
 
-  <form method="post" action="painel.php" class="card stack" data-loading data-discount>
+  <form method="post" action="painel.php" class="card stack" data-loading>
     <?= View::csrfField() ?><input type="hidden" name="action" value="offer_check"><input type="hidden" name="back" value="conferir"><input type="hidden" name="id" value="<?= (int)$id ?>">
     <h2>2. Registre o que encontrou na loja</h2>
     <p class="muted small">Campos com * são obrigatórios.</p>
-    <div class="form-grid">
-      <label>Preço promocional (Por) *
-        <input name="price_promo" inputmode="decimal" required autocomplete="off" placeholder="119,90" data-price="promo" value="<?= View::e($fv('price_promo', Money::input($r['price_promo_cents'] === null ? null : (int)$r['price_promo_cents']))) ?>"></label>
-      <label>Preço original (De)
-        <input name="price_original" inputmode="decimal" autocomplete="off" placeholder="vazio se não houver" data-price="orig" value="<?= View::e($fv('price_original', Money::input($r['price_original_cents'] === null ? null : (int)$r['price_original_cents']))) ?>"></label>
-      <p class="span2 discount-live" data-discount-output aria-live="polite"></p>
-    </div>
+    <?= View::priceCalculator(['uid' => 'cf', 'row' => $r, 'estimate' => Pricing::latestEstimate($pdo, $r), 'mode' => $fv('price_mode', 'original'), 'pct' => $fv('desconto_pct', ''),
+        'promo' => $fv('price_promo', Money::input($r['price_promo_cents'] === null ? null : (int)$r['price_promo_cents'])),
+        'original' => $fv('price_original', Money::input($r['price_original_cents'] === null ? null : (int)$r['price_original_cents']))]) ?>
     <fieldset class="chips">
       <legend>Condição do preço</legend>
       <?php foreach (['normal' => 'Normal', 'pix' => 'Pix', 'cartao' => 'Cartão', 'cupom' => 'Cupom', 'outro' => 'Outra'] as $k => $l): ?>

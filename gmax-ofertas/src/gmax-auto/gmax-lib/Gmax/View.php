@@ -87,6 +87,59 @@ final class View
         return '<span class="fresh ' . $cls . '">' . $src . ' ' . self::e(Time::show($r['price_verified_at'])) . ($age > $maxHours ? ' — desatualizado' : '') . '</span>';
     }
 
+    /** Selo da origem do preço original: API, manual, importado ou calculado. */
+    public static function originBadge(?string $origin): string
+    {
+        return match ($origin) {
+            'api' => '<span class="src src-api">API</span>',
+            'manual' => '<span class="src src-manual">Manual</span>',
+            'importado' => '<span class="src src-imported" title="Veio de planilha/cadastro; ainda não conferido">Importado</span>',
+            'calculado' => '<span class="src src-calc" title="Estimado a partir do % de desconto; não confirmado">Calculado ≈</span>',
+            default => '',
+        };
+    }
+
+    /**
+     * Calculadora de preços (edição e conferência rápida): modo "preço original da loja" ou
+     * "calcular pelo desconto %". Os dois campos ficam no formulário: alternar o modo só mostra
+     * um ou outro (valores preservados). Sem JavaScript, os dois aparecem e vale o modo marcado.
+     * @param array{promo:string,original:string,pct:string,mode:string,row:?array,estimate:?array,uid:string} $o
+     */
+    public static function priceCalculator(array $o): string
+    {
+        $row = $o['row'];
+        $mode = isset(Pricing::MODES[$o['mode']]) ? $o['mode'] : 'original';
+        $u = self::e($o['uid']);
+        $apiOrig = $row && Pricing::originalSource($row) === 'api' ? (int)$row['price_original_cents'] : null;
+        $h = '<fieldset class="calc" data-calc' . ($apiOrig ? ' data-api-original="' . $apiOrig . '"' : '') . '>'
+            . '<legend>Preços</legend>'
+            . '<div class="chips seg" role="radiogroup" aria-label="Como informar o preço original">';
+        foreach (Pricing::MODES as $k => $label) {
+            $h .= '<label><input type="radio" name="price_mode" value="' . $k . '"' . ($mode === $k ? ' checked' : '') . ' data-calc-mode> ' . self::e($label) . '</label>';
+        }
+        $h .= '</div><div class="form-grid calc-grid">'
+            . '<label>Preço promocional (Por) *<input id="' . $u . '-promo" name="price_promo" inputmode="decimal" autocomplete="off" placeholder="119,90" data-price="promo" value="' . self::e($o['promo']) . '"></label>'
+            . '<label data-mode-field="original">Preço original (De), como aparece na loja'
+            . '<input id="' . $u . '-orig" name="price_original" inputmode="decimal" autocomplete="off" placeholder="vazio se não houver" data-price="orig" value="' . self::e($o['original']) . '">'
+            . ($row && !empty($row['price_original_cents']) ? '<span class="small">Atual: ' . self::e(Money::format((int)$row['price_original_cents'])) . ' ' . self::originBadge(Pricing::originalSource($row)) . '</span>' : '')
+            . '</label>'
+            . '<label data-mode-field="desconto">Desconto exibido na loja (%)'
+            . '<input id="' . $u . '-pct" name="desconto_pct" inputmode="decimal" autocomplete="off" placeholder="35" maxlength="6" data-pct value="' . self::e($o['pct']) . '"></label>'
+            . '</div>'
+            . '<div class="calc-result" data-calc-output aria-live="polite"></div>';
+        if ($apiOrig) {
+            $h .= '<p class="small" data-mode-field="desconto">O preço original <strong>confirmado pela API</strong> (' . self::e(Money::format($apiOrig)) . ') será mantido; a estimativa fica só como referência.</p>';
+        } else {
+            $h .= '<p class="small muted" data-mode-field="desconto">No modo desconto, o “De” fica <strong>sem valor confirmado</strong>: a estimativa é registrada à parte e nunca é usada como preço anterior nas publicações.</p>';
+        }
+        if ($o['estimate']) {
+            $e = $o['estimate'];
+            $h .= '<p class="small">Última estimativa: ≈ ' . self::e(Money::format((int)$e['de_estimado'])) . ' ' . self::originBadge('calculado') . ' a partir de ' . self::e((string)$e['percentual']) . '% · '
+                . self::e(Time::show((string)$e['em'])) . '</p>';
+        }
+        return $h . '</fieldset>';
+    }
+
     /** URL oficial do anúncio (para conferir na loja), só se for https do domínio da loja. */
     public static function storeUrl(array $r): ?string
     {

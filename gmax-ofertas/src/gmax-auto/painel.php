@@ -265,6 +265,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['gmax3_form'] = $_POST;
                     throw new RuntimeException(implode(' ', $errors));
                 }
+                $estimate = $data['_estimativa'] ?? null;
+                unset($data['_estimativa']);
                 if ($id) {
                     $cur = Catalog::get($pdo, $id) ?? throw new RuntimeException('Produto não encontrado');
                     $res = Db::immediate($pdo, fn() => Catalog::update($pdo, $cur, $data, $actor, false));
@@ -276,6 +278,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $id = Db::immediate($pdo, fn() => Catalog::insert($pdo, $data, empty($data['affiliate_url']) ? 'rascunho' : 'aguardando_validacao', $actor));
                     View::flash('ok', 'Produto cadastrado (#' . $id . ') e aguardando validação.');
+                }
+                if ($estimate) {
+                    Gmax\Pricing::recordEstimate($pdo, $id, (int)$data['price_promo_cents'], $estimate, $actor, 'edicao');
+                    View::flash('aviso', 'Preço original ESTIMADO pelo desconto de ' . $estimate['percentual'] . '%: ≈ ' . Money::format($estimate['original'])
+                        . ' (calculado, não confirmado; não é usado como "De" nas publicações).');
                 }
                 if (!empty($_POST['confirm_price'])) {
                     Catalog::confirmPrice($pdo, $id, $actor);
@@ -292,16 +299,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $res = Catalog::manualCheck($pdo, $id, [
                         'confirmo' => !empty($_POST['confirmo']), 'price_promo' => gmax_post_str('price_promo', 20), 'price_original' => gmax_post_str('price_original', 20),
-                        'payment_condition' => gmax_post_str('payment_condition', 20), 'payment_note' => gmax_post_str('payment_note', 200),
+                        'modo' => gmax_post_str('price_mode', 20) ?: 'original', 'desconto_pct' => gmax_post_str('desconto_pct', 10),
+                    'payment_condition' => gmax_post_str('payment_condition', 20), 'payment_note' => gmax_post_str('payment_note', 200),
                         'availability' => gmax_post_str('availability', 20), 'variation_note' => gmax_post_str('variation_note', 300),
                         'variation_ok' => !empty($_POST['variation_ok']), 'store_name' => gmax_post_str('store_name', 120), 'observacao' => gmax_post_str('observacao', 300),
                     ], $actor);
                 } catch (RuntimeException $e) {
-                    $_SESSION['gmax3_form'] = array_intersect_key($_POST, array_flip(['price_promo', 'price_original', 'payment_condition', 'payment_note', 'availability', 'variation_note', 'store_name', 'observacao']));
+                    $_SESSION['gmax3_form'] = array_intersect_key($_POST, array_flip(['price_promo', 'price_original', 'price_mode', 'desconto_pct', 'payment_condition', 'payment_note', 'availability', 'variation_note', 'store_name', 'observacao']));
                     throw $e;
                 }
                 View::flash('ok', 'Conferência manual salva' . ($res['changed'] ? ' (' . implode(', ', $res['changed']) . ')' : ' (sem mudanças nos dados)') . '. Registrada como conferência manual, não como validação pela API.'
-                    . ($res['status'] !== $res['status_before'] ? ' Preço alterado: aprovação retirada para nova validação.' : ''));
+                    . ($res['status'] !== $res['status_before'] ? ' Preço alterado: aprovação retirada para nova validação.' : '')
+                    . ($res['estimativa'] ? ' Preço original ESTIMADO pelo desconto de ' . $res['estimativa']['percentual'] . '%: ≈ ' . Money::format($res['estimativa']['original']) . ' (calculado, não confirmado; não é usado como "De" nas publicações).' : '')
+                    . ($res['preservado_api'] ? ' O preço original confirmado pela API foi mantido.' : ''));
                 gmax_redirect('conferir', ['id' => $id]);
             case 'offer_confirm_price':
                 $id = gmax_post_int('id');
@@ -458,12 +468,21 @@ function gmax_offer_form(PDO $pdo): array
     if ($d['codigo'] !== '' && !preg_match('/^[A-Za-z0-9_-]{2,40}$/D', $d['codigo'])) {
         $e[] = 'Código inválido.';
     }
+    $mode = gmax_post_str('price_mode', 20) ?: 'original';
     foreach (['price_original_cents' => 'preço original', 'price_promo_cents' => 'preço promocional'] as $f => $label) {
         $err = null;
         $d[$f] = Money::tryParse(gmax_post_str(str_replace('_cents', '', $f), 20), $err);
-        if ($err) {
+        if ($err && !($mode === 'desconto' && $f === 'price_original_cents')) {
             $e[] = "Valor de $label inválido.";
         }
+    }
+    if ($mode !== 'original') {
+        // Calculadora: o "De" estimado pelo % NUNCA é gravado como preço original (só registrado à parte).
+        $cid = gmax_post_int('id');
+        $calc = Gmax\Pricing::resolve($mode, $d['price_promo_cents'], '', gmax_post_str('desconto_pct', 10), $cid ? Catalog::get($pdo, $cid) : null);
+        $e = array_merge($e, $calc['erros']);
+        $d['price_original_cents'] = $calc['original'];
+        $d['_estimativa'] = $calc['estimativa'];
     }
     if ($d['price_original_cents'] !== null && ($d['price_promo_cents'] === null || $d['price_original_cents'] < $d['price_promo_cents'])) {
         $e[] = 'Preço original deve ser maior ou igual ao promocional.';

@@ -421,6 +421,27 @@ test('Conferência: exige CSRF, login e confirmação explícita; salva como man
     ok(str_contains(header_value($r, 'Content-Security-Policy'), "form-action 'self';"), 'CSP preservada');
 });
 
+echo "\n== Calculadora de preços (3.1.6)\n";
+test('Edição de produto no modo desconto: Por salvo, "De" estimado nunca gravado; modo original mantém o cálculo existente', function () {
+    $pdo = Db::get();
+    $id = (int)Db::value($pdo, "SELECT id FROM gmax3_catalog WHERE external_id='22812345604'");
+    $p = Gmax\Catalog::get($pdo, $id);
+    $r = http('GET', 'painel.php?p=oferta&id=' . $id);
+    no_php_errors($r, 'oferta com calculadora');
+    ok(str_contains($r['body'], 'name="price_mode" value="desconto"') && str_contains($r['body'], 'name="desconto_pct"'), 'calculadora na edição');
+    $t = csrf($r['body']);
+    $form = ['action' => 'offer_save', 'id' => $id, 'back' => 'oferta', 'csrf' => $t, 'marketplace' => 'shopee', 'title' => $p['title'], 'original_url' => $p['original_url'],
+        'affiliate_url' => $p['affiliate_url'], 'availability' => 'disponivel', 'price_mode' => 'desconto', 'price_promo' => '59,90', 'price_original' => '99,90', 'desconto_pct' => '40'];
+    $r = follow(http('POST', 'painel.php', $form));
+    ok(str_contains($r['body'], 'ESTIMADO') && str_contains($r['body'], 'R$ 99,83'), substr(strip_tags($r['body']), 0, 400));
+    $p = Gmax\Catalog::get($pdo, $id);
+    eq([5990, null], [(int)$p['price_promo_cents'], $p['price_original_cents']], 'estimativa (99,83) não virou "De"; o campo De digitado é ignorado no modo desconto');
+    $r = follow(http('POST', 'painel.php', ['desconto_pct' => '0'] + $form));
+    ok(str_contains($r['body'], 'Percentual de desconto inválido'), '% inválido recusado');
+    $r = follow(http('POST', 'painel.php', ['price_mode' => 'original', 'price_original' => '89,90'] + $form));
+    eq(8990, (int)Gmax\Catalog::get($pdo, $id)['price_original_cents'], 'modo original grava o De digitado');
+});
+
 echo "\n== Shopee pelo navegador\n";
 test('Integrações: Testar conexão e Consultar produto da Shopee sem alterar o catálogo nem mostrar segredos', function () {
     $pdo = Db::get();

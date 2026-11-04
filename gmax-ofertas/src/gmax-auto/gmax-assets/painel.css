@@ -271,3 +271,13 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0;min-height:32px}
 .btn-block-mobile{width:100%}
 @media (min-width:768px){.btn-block-mobile{width:auto}}
 .row-target td{background:#123a33}
+/* 3.1.6 — calculadora de preços */
+.calc{border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin:0;display:grid;gap:12px;min-width:0}
+.calc legend{padding:0 6px;color:var(--muted);font-size:14px}
+.calc .form-grid{margin:0}
+.chips.seg label{flex:1 1 180px;justify-content:center;font-weight:600}
+.calc-result{min-height:24px}
+.calc-result p{margin:2px 0}
+.calc-main{font-weight:800;color:var(--accent);font-size:17px}
+.calc-flag{display:inline-block;font-weight:800;font-size:13px;color:#ffd2a8;background:#4a2a12;border:1px solid #a3622a;border-radius:8px;padding:4px 8px}
+.src-imported{background:#2b3645;color:#c9d4e2}.src-calc{background:#4a2a12;color:#ffd2a8}

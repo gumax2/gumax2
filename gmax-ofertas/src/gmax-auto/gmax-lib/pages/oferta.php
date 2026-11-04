@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 defined('GMAX_VERSION') || exit;
-use Gmax\{Catalog, Db, Message, Money, Queue, Ranking, Rules, Time, Url, View};
+use Gmax\{Catalog, Db, Message, Money, Pricing, Queue, Ranking, Rules, Time, Url, View};
 /** @var PDO $pdo @var int $staleHours */
 $id = isset($_GET['id']) && is_string($_GET['id']) && ctype_digit($_GET['id']) ? (int)$_GET['id'] : 0;
 $r = $id ? Catalog::get($pdo, $id) : null;
@@ -29,7 +29,7 @@ $backF = is_array($_SESSION['gmax3_ofertas_f'] ?? null) ? $_SESSION['gmax3_ofert
 </section>
 <?php endif; ?>
 <div class="grid two-wide">
-<form method="post" action="painel.php" class="card" data-loading data-discount>
+<form method="post" action="painel.php" class="card" data-loading>
   <?= View::csrfField() ?>
   <input type="hidden" name="action" value="offer_save"><input type="hidden" name="back" value="oferta">
   <input type="hidden" name="id" value="<?= (int)$id ?>">
@@ -45,9 +45,9 @@ $backF = is_array($_SESSION['gmax3_ofertas_f'] ?? null) ? $_SESSION['gmax3_ofert
     <label>Loja/vendedor <input name="store_name" maxlength="120" value="<?= View::e($v('store_name')) ?>"></label>
     <label class="span2">URL do anúncio individual <input name="original_url" type="url" maxlength="2048" value="<?= View::e($v('original_url')) ?>" placeholder="https://produto.mercadolivre.com.br/MLB-…"></label>
     <label class="span2">Link afiliado oficial <input name="affiliate_url" type="url" maxlength="300" value="<?= View::e($v('affiliate_url')) ?>" placeholder="https://meli.la/… ou https://s.shopee.com.br/…"></label>
-    <label>Preço original (De) <input name="price_original" inputmode="decimal" value="<?= View::e($form['price_original'] ?? Money::input(isset($r['price_original_cents']) ? (int)$r['price_original_cents'] : null)) ?>" placeholder="199,90" data-price="orig"></label>
-    <label>Preço promocional (Por) <input name="price_promo" inputmode="decimal" value="<?= View::e($form['price_promo'] ?? Money::input(isset($r['price_promo_cents']) ? (int)$r['price_promo_cents'] : null)) ?>" placeholder="119,90" data-price="promo"></label>
-    <p class="span2 discount-live" data-discount-output aria-live="polite"></p>
+    <div class="span2"><?= View::priceCalculator(['uid' => 'ed', 'row' => $r, 'estimate' => $r ? Pricing::latestEstimate($pdo, $r) : null, 'mode' => (string)($form['price_mode'] ?? 'original'),
+        'pct' => (string)($form['desconto_pct'] ?? ''), 'promo' => (string)($form['price_promo'] ?? Money::input(isset($r['price_promo_cents']) ? (int)$r['price_promo_cents'] : null)),
+        'original' => (string)($form['price_original'] ?? Money::input(isset($r['price_original_cents']) ? (int)$r['price_original_cents'] : null))]) ?></div>
     <label>Condição de pagamento
       <select name="payment_condition"><option value="">Não identificada</option><?php foreach (Catalog::PAYMENT as $k => $l): ?><option value="<?= $k ?>"<?= $v('payment_condition') === $k ? ' selected' : '' ?>><?= View::e($l) ?></option><?php endforeach; ?></select>
     </label>

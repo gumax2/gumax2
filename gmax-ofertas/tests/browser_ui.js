@@ -220,7 +220,7 @@ async function overflow(page) {
     await page.check('input[name=payment_condition][value=pix]');
     await page.check('input[name=availability][value=disponivel]');
     await page.fill('textarea[name=observacao]', 'Frete grátis');
-    const live = await page.textContent('[data-discount-output]');
+    const live = await page.textContent('[data-calc-output]');
     await page.click('button:has-text("Salvar conferência")');
     await page.waitForTimeout(300);
     const notSent = page.url().includes(`p=conferir&id=${C.ids.ml}`) && !(await page.textContent('main')).includes('Conferência manual salva');
@@ -242,6 +242,37 @@ async function overflow(page) {
     const rowInView = await dp.evaluate((id) => { const r = document.getElementById('t' + id); const b = r.getBoundingClientRect(); return r.classList.contains('row-target') && b.top >= 0 && b.bottom <= innerHeight; }, C.ids.shopee[0]);
     out(G, 'Desktop: "Voltar aos resultados" rola até a linha do produto na tabela', rowInView, '');
     await desk.close();
+    // Calculadora: dois modos, valores preservados ao alternar, mesmos números do servidor.
+    const G2 = 'Calculadora de preços (iPhone 13 · emulado)';
+    await page.goto(`${C.base}/painel.php?p=conferir&id=${C.ids.calc}`);
+    await page.fill('input[name=price_promo]', '99,90');
+    await page.fill('input[name=price_original]', '149,90');
+    const m1 = await page.textContent('[data-calc-output]');
+    out(G2, 'Modo preço original: desconto e economia em tempo real', m1.includes('33% OFF · Economia de R$ 50,00'), m1);
+    await page.check('input[name=price_mode][value=desconto]');
+    const origHidden = !(await page.isVisible('input[name=price_original]')) && (await page.isVisible('input[name=desconto_pct]'));
+    let parity = [];
+    for (const [pctv, exp] of Object.entries(C.estimates)) {
+      await page.fill('input[name=desconto_pct]', pctv);
+      const t = await page.textContent('[data-calc-output]');
+      if (!(t.includes('≈ ' + exp.original) && t.includes('entre ' + exp.min + ' e ' + exp.max) && t.includes('CALCULADO — não confirmado'))) parity.push(pctv + ': ' + t);
+    }
+    out(G2, 'Modo desconto: estimativa, faixa e economia iguais ao cálculo do servidor (35, 35,5 e 7%), marcada como CALCULADO', origHidden && parity.length === 0, `origHidden=${origHidden} ` + parity.join(' | '));
+    await page.fill('input[name=desconto_pct]', '120');
+    const bad = await page.textContent('[data-calc-output]');
+    out(G2, 'Percentual inválido é sinalizado na hora', /Percentual inválido/.test(bad), bad);
+    await page.check('input[name=price_mode][value=original]');
+    const kept = (await page.inputValue('input[name=price_original]')) === '149,90' && (await page.inputValue('input[name=desconto_pct]')) === '120'
+      && (await page.textContent('[data-calc-output]')).includes('33% OFF');
+    out(G2, 'Alternar entre os modos não perde os valores digitados', kept, '');
+    if (PROFILES[2].shots) { await page.check('input[name=price_mode][value=desconto]'); await page.fill('input[name=desconto_pct]', '35'); await page.locator('[data-calc]').screenshot({ path: `${C.shots}/iphone-390-calculadora.png` }); }
+    await page.check('input[name=price_mode][value=desconto]');
+    await page.fill('input[name=desconto_pct]', '35');
+    await page.check('input[name=availability][value=disponivel]');
+    await page.check('input[name=confirmo]');
+    await Promise.all([page.waitForNavigation(), page.click('button:has-text("Salvar conferência")')]);
+    const saved = await page.textContent('main');
+    out(G2, 'Salvar no modo desconto: Por conferido, "De" estimado registrado como CALCULADO (não confirmado)', saved.includes('ESTIMADO') && saved.includes(C.estimates['35'].original) && saved.includes('Calculado ≈'), saved.slice(0, 400));
     await page.goto(`${C.base}/painel.php?p=conferir&id=${C.ids.api}`);
     out(G, 'Preço validado pela API identificado como "API Shopee"', (await page.locator('.check-flow .src-api').count()) >= 1 && (await page.textContent('.check-flow')).includes('API oficial'), '');
     // Importação pelo celular: seleção de arquivo, retorno e prévia.

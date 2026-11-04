@@ -46,7 +46,8 @@ for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) {
 $shots = __DIR__ . '/../docs/capturas/3.1.5';
 @mkdir($shots, 0755, true);
 $ctx = json_encode(['base' => $base, 'password' => T_PASSWORD, 'shots' => realpath($shots), 'fixture' => realpath(__DIR__ . '/fixtures/shopee-5-ofertas.csv'),
-    'ids' => ['shopee' => $ids, 'ml' => $ml, 'semLink' => $noLink, 'api' => $ids[3], 'variacao' => $ids[1], 'indisponivel' => $ids[2]],
+    'estimates' => array_map(static fn($pct) => array_map(static fn($c) => Gmax\Money::format($c), array_intersect_key(Gmax\Pricing::estimate(9990, $pct), ['original' => 1, 'min' => 1, 'max' => 1])), ['35' => '35', '35,5' => '35,5', '7' => '7']),
+    'ids' => ['calc' => $ids[4], 'shopee' => $ids, 'ml' => $ml, 'semLink' => $noLink, 'api' => $ids[3], 'variacao' => $ids[1], 'indisponivel' => $ids[2]],
     'urls' => ['shopee0' => Catalog::get($pdo, $ids[0])['original_url'], 'aff0' => Catalog::get($pdo, $ids[0])['affiliate_url']]]);
 $cmd = 'env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy NODE_PATH=$(npm root -g) node ' . escapeshellarg(__DIR__ . '/browser_ui.js') . ' ' . escapeshellarg($ctx) . ' 2>&1';
 $out = (string)shell_exec($cmd);
@@ -81,6 +82,13 @@ test('Abrir o anúncio não confirmou preço; só a conferência salva gerou reg
     ok($p['price_verified_at'] !== null && $p['price_verified_by'] === 'admin' && $p['price_source'] === 'conferencia_manual', json_encode([$p['price_verified_by'], $p['price_source']]));
     eq(0, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_price_history WHERE catalog_id=? AND source LIKE 'api_%'", [$ml]), 'nunca registrado como API');
     eq(1, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_audit WHERE action='conferencia_manual' AND entity_id=?", [(string)$ml]));
+});
+test('Modo desconto pela tela: "De" estimado não gravado; estimativa registrada à parte', function () use ($ids) {
+    $p = Catalog::get(Db::get(), $ids[4]);
+    eq([9990, null], [(int)$p['price_promo_cents'], $p['price_original_cents']]);
+    $e = Gmax\Pricing::latestEstimate(Db::get(), $p);
+    eq([15369, false], [$e['de_estimado'] ?? null, $e['confirmado'] ?? null]);
+    ok(!str_contains(Gmax\Message::render($p, Db::get()), '153,69'), 'fora da mensagem de publicação');
 });
 test('Nenhum service worker nem cache: o servidor não serve sw.js', function () use ($app) {
     ok(!is_file("$app/sw.js") && !is_file("$app/gmax-assets/sw.js"), 'sem service worker');
