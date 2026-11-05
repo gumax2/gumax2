@@ -70,11 +70,22 @@ final class EndpointGuard
         return Settings::get($pdo, 'ml_suspensao_403', '1') === '1';
     }
 
+    /** Leitura e gravação do estado na mesma transação (evita que uma automação desfaça uma reativação). */
+    private static function atomic(PDO $pdo, callable $fn): mixed
+    {
+        return $pdo->inTransaction() ? $fn() : \Gmax\Db::immediate($pdo, static fn() => $fn());
+    }
+
     public static function record(PDO $pdo, string $group, int $status, ?string $apiMessage): void
     {
         if (!self::enabled($pdo)) {
             return;
         }
+        self::atomic($pdo, static fn() => self::recordLocked($pdo, $group, $status, $apiMessage));
+    }
+
+    private static function recordLocked(PDO $pdo, string $group, int $status, ?string $apiMessage): void
+    {
         $state = self::state($pdo);
         $g = $state[$group] ?? ['count' => 0, 'last_at' => null, 'last_msg' => null, 'suspended_at' => null];
         if ($status === 403) {
@@ -97,6 +108,11 @@ final class EndpointGuard
 
     /** Reativação supervisionada (administrador). */
     public static function reactivate(PDO $pdo, string $group, string $actor): bool
+    {
+        return self::atomic($pdo, static fn() => self::reactivateLocked($pdo, $group, $actor));
+    }
+
+    private static function reactivateLocked(PDO $pdo, string $group, string $actor): bool
     {
         $state = self::state($pdo);
         if (!isset(self::GROUPS[$group]) || empty($state[$group]['suspended_at'])) {

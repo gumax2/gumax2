@@ -222,6 +222,22 @@ test('Três 403 seguidos suspendem /items: sem novas requisições, um único al
     eq(1, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_audit WHERE action='ml_endpoint_reativado'"));
     ok(!str_contains(json_encode(Db::all($pdo, 'SELECT * FROM gmax3_audit')) . json_encode(Db::all($pdo, 'SELECT * FROM gmax3_alerts')) . json_encode(Db::all($pdo, 'SELECT * FROM gmax3_settings')), T_ML_TOKEN), 'token fora do banco');
 });
+test('Testes manuais (consulta individual e permissões) não contam nem respeitam a suspensão', function () use ($ready, $pa) {
+    $pdo = $ready();
+    $h = new MapHttp([['~^/items/~', true, 403, $pa], ['~^/users/me$~', true, 200, ['id' => 1]], ['~^/sites/MLB/search~', true, 403, $pa]]);
+    $c = new MercadoLivre($h, T_ML_TOKEN, null, $pdo);
+    for ($i = 0; $i < 5; $i++) {
+        eq(403, $c->probeItem('MLB7519481690')['http']);
+        $c->probePermissions();
+    }
+    eq([], EndpointGuard::state($pdo), 'nenhuma contagem por teste manual');
+    for ($i = 0; $i < 3; $i++) {
+        EndpointGuard::record($pdo, 'items', 403, null);
+    }
+    $n = count($h->calls);
+    eq(403, $c->probeItem('MLB7519481690')['http'], 'suspenso: o teste manual ainda consulta a API');
+    eq($n + 1, count($h->calls));
+});
 test('200 zera a contagem; 404 e 429 não contam; desativar a suspensão impede suspender', function () use ($ready, $pa) {
     $pdo = $ready();
     $seq = [403, 403, 200, 403, 404, 429, 403];

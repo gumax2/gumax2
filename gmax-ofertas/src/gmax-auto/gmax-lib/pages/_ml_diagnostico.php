@@ -54,7 +54,7 @@ if ($diag && $failed) {
     <label>Suspender após (respostas 403 seguidas) <input name="ml_403_limite" inputmode="numeric" maxlength="2" value="<?= EndpointGuard::threshold($pdo) ?>"></label>
     <button type="submit" class="btn btn-sm">Salvar</button>
   </form>
-  <p class="muted small">A suspensão não desconecta a conta OAuth: só evita que a descoberta e a revisão repitam consultas já negadas. A conferência manual continua disponível para todos os produtos.</p>
+  <p class="muted small">Desativar a suspensão automática não reativa grupos já suspensos: use “Reativar” em cada um. A suspensão não desconecta a conta OAuth: só evita que a descoberta e a revisão repitam consultas já negadas. A conferência manual continua disponível para todos os produtos.</p>
 
   <h3>Diagnóstico completo</h3>
   <?php if (!$s['connected']): ?>

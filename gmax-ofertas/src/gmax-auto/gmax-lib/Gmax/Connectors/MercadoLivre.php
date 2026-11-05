@@ -65,7 +65,8 @@ final class MercadoLivre implements Connector, Discovery
         }
         $token = $this->token();
         $res = $this->http->request('GET', self::API . $path, ['Authorization: Bearer ' . $token, 'Accept: application/json']);
-        if ($res['status'] === 401 && $this->oauth !== null && ($new = $this->token(true)) !== null) {
+        // Renovação forçada só nas automações: testes supervisionados não rotacionam tokens.
+        if ($res['status'] === 401 && !$supervised && $this->oauth !== null && ($new = $this->token(true)) !== null) {
             $res = $this->http->request('GET', self::API . $path, ['Authorization: Bearer ' . $new, 'Accept: application/json']);
         }
         if ($this->pdo && $group && !$supervised && $res['error'] === null) {
@@ -153,7 +154,7 @@ final class MercadoLivre implements Connector, Discovery
         };
     }
 
-    public function fetch(array $row): array
+    public function fetch(array $row, bool $supervised = false): array
     {
         if (!$this->configured() || $this->token() === null) {
             return ['ok' => false, 'error' => 'Conector Mercado Livre não conectado (OAuth) ou token não renovável', 'data' => []];
@@ -163,7 +164,7 @@ final class MercadoLivre implements Connector, Discovery
             return ['ok' => false, 'error' => 'Consulta disponível apenas para anúncios individuais (MLB-…); produtos de catálogo exigem escolher o anúncio', 'data' => []];
         }
         $endpoint = '/items/' . $m[1];
-        $res = $this->get($endpoint);
+        $res = $this->get($endpoint, $supervised);
         $meta = ['endpoint' => 'GET ' . $endpoint, 'http' => $res['status'] ?: null];
         if (!empty($res['suspended'])) {
             return ['ok' => false, 'error' => $res['error'], 'data' => [], 'suspended' => true] + $meta;
@@ -205,7 +206,7 @@ final class MercadoLivre implements Connector, Discovery
         if (!preg_match('/^MLB\d{5,15}$/D', $mlb)) {
             return ['endpoint' => 'GET /items/{id}', 'http' => null, 'ok' => false, 'detalhe' => 'Informe um código de anúncio no formato MLB123456789', 'preco' => null, 'preco_original' => null, 'situacao' => null];
         }
-        $r = $this->fetch(['external_id' => 'item:' . $mlb]);
+        $r = $this->fetch(['external_id' => 'item:' . $mlb], true); // teste manual: não conta nem respeita a suspensão
         return [
             'endpoint' => $r['endpoint'] ?? 'GET /items/' . $mlb, 'http' => $r['http'] ?? null, 'ok' => $r['ok'],
             'detalhe' => $r['ok'] ? 'Disponível: a revisão de preços consegue consultar este anúncio' : (string)$r['error'],
@@ -300,7 +301,9 @@ final class MercadoLivre implements Connector, Discovery
             if (is_array($j) && isset($j[0]['code'])) {
                 $t['item_lote']['codigo_api'] = 'código do item no lote: ' . (int)$j[0]['code'];
                 $t['item_lote']['ok'] = (int)$j[0]['code'] === 200;
-                $t['item_lote'] = array_merge($t['item_lote'], self::classify(['status' => (int)$j[0]['code'], 'error' => null], true, (string)($j[0]['body']['code'] ?? $j[0]['body']['error'] ?? '')));
+                $raw = $j[0]['body']['code'] ?? $j[0]['body']['error'] ?? null;
+                $code = is_scalar($raw) ? mb_substr((string)\Gmax\Automation\RunLog::sanitize((string)$raw), 0, 80) : null;
+                $t['item_lote'] = array_merge($t['item_lote'], self::classify(['status' => (int)$j[0]['code'], 'error' => null], true, $code));
             }
             $run('preco_venda', 'Preço de venda do anúncio (sale_price)', "/items/$mlb/sale_price", true);
         }
@@ -391,8 +394,8 @@ final class MercadoLivre implements Connector, Discovery
         if ($this->token() === null) {
             return ['conta' => ['ok' => false, 'detalhe' => 'Sem token'], 'busca' => ['ok' => false, 'detalhe' => 'Sem token']];
         }
-        $me = $this->get('/users/me');
-        $search = $this->get('/sites/MLB/search?' . http_build_query(['q' => 'fone', 'limit' => 1]));
+        $me = $this->get('/users/me', true);
+        $search = $this->get('/sites/MLB/search?' . http_build_query(['q' => 'fone', 'limit' => 1]), true);
         $why = static fn(array $r) => $r['error'] ?? match (true) {
             $r['status'] === 200 => 'Disponível',
             in_array($r['status'], [401, 403], true) => 'Não autorizado para este aplicativo (HTTP ' . $r['status'] . ')',
