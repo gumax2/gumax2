@@ -135,6 +135,7 @@ test('Descartar e filtros da lista', function () use ($ready, $map) {
 test('Sem a migração 004 a tarefa apenas avisa; a 004 é reversível sem tocar no restante', function () use ($ready) {
     $pdo = $ready();
     $catalog = json_encode(Db::all($pdo, 'SELECT * FROM gmax3_catalog'));
+    eq('005', Migrator::down($pdo, 'teste')['version'], 'desfaz a 005 (3.2.1)');
     eq('004', Migrator::down($pdo, 'teste')['version']);
     $r = Runner::runManual($pdo, 'candidatos_ml', 'admin');
     ok(str_contains((string)Db::value($pdo, 'SELECT detail FROM gmax3_job_runs WHERE id=?', [$r['execucao']]), 'migração 004'), 'aviso');

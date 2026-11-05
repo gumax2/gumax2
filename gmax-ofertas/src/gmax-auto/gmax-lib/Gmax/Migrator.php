@@ -91,7 +91,13 @@ final class Migrator
                 if (in_array($table, self::LEGACY_TABLES, true) || !str_starts_with($table, 'gmax3_')) {
                     throw new RuntimeException("Recusa de segurança: tabela $table não pertence à migração");
                 }
-                $pdo->exec('DROP TABLE IF EXISTS ' . $table);
+            }
+            if (isset($m['down'])) {
+                ($m['down'])($pdo); // reversão própria (ex.: 005 remove índices e devolve gatilhos originais)
+            } else {
+                foreach (array_reverse($m['tables']) as $table) {
+                    $pdo->exec('DROP TABLE IF EXISTS ' . $table);
+                }
             }
             Db::run($pdo, 'DELETE FROM gmax3_schema_migrations WHERE version=?', [$version]);
             if ((int)$pdo->query('SELECT COUNT(*) FROM gmax3_schema_migrations')->fetchColumn() === 0) {
