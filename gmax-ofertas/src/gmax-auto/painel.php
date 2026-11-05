@@ -201,12 +201,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 View::flash('ok', 'Token do Mercado Livre removido do servidor. Para revogar também no Mercado Livre, remova o aplicativo em "Segurança > Aplicativos conectados" na sua conta.');
                 gmax_redirect('integracoes');
             case 'ml_oauth_test':
-                $p = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre')))->probePermissions();
+                $p = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, null, $pdo))->probePermissions();
                 $_SESSION['gmax3_ml_probe'] = $p + ['em' => Time::nowSql()];
                 Audit::log($pdo, $actor, 'ml_oauth_testado', 'integracao', 'mercadolivre', ['conta' => $p['conta']['detalhe'], 'busca' => $p['busca']['detalhe']]);
                 gmax_redirect('integracoes');
             case 'ml_item_test':
-                $conn = new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'));
+                $conn = new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, null, $pdo);
                 $p = $conn->probeItem(gmax_post_str('mlb', 30));
                 $_SESSION['gmax3_ml_item_probe'] = $p + ['em' => Time::nowSql()];
                 Audit::log($pdo, $actor, 'ml_item_testado', 'integracao', 'mercadolivre', ['endpoint' => $p['endpoint'], 'http' => $p['http'], 'ok' => $p['ok']]);
@@ -218,6 +218,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $p = $action === 'shopee_test' ? $conn->probe() : $conn->probeItem(gmax_post_str('item', 30), gmax_post_str('shop', 30) ?: null);
                 $_SESSION['gmax3_shopee_probe'] = $p + ['tipo' => $action, 'em' => Time::nowSql()];
                 Audit::log($pdo, $actor, $action === 'shopee_test' ? 'shopee_conexao_testada' : 'shopee_item_testado', 'integracao', 'shopee', ['http' => $p['http'], 'graphql' => $p['gql_code'], 'ok' => $p['ok']]);
+                gmax_redirect('integracoes');
+            case 'ml_diagnose':
+                // Diagnóstico supervisionado, somente leitura: não altera catálogo, tokens nem a suspensão automática.
+                $d = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, null, $pdo))->diagnose(gmax_post_str('mlb', 30) ?: null);
+                Settings::store($pdo, 'ml_diagnostico_ultimo', json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $actor);
+                Audit::log($pdo, $actor, 'ml_diagnostico', 'integracao', 'mercadolivre', ['resultados' => array_map(static fn($t) => $t['id'] . '=' . ($t['http'] ?? 'rede'), $d['testes'])]);
+                View::flash('ok', 'Diagnóstico do Mercado Livre concluído (' . count($d['testes']) . ' testes, somente leitura).');
+                gmax_redirect('integracoes');
+            case 'ml_endpoint_reactivate':
+                if (gmax_post_str('confirm', 20) !== 'REATIVAR') {
+                    throw new RuntimeException('Digite REATIVAR para confirmar.');
+                }
+                $grp = gmax_post_str('grupo', 20);
+                View::flash(Gmax\Connectors\EndpointGuard::reactivate($pdo, $grp, $actor) ? 'ok' : 'erro', Gmax\Connectors\EndpointGuard::GROUPS[$grp] ?? 'Grupo inválido');
                 gmax_redirect('integracoes');
             case 'auto_pause':
                 Settings::set($pdo, 'automacoes_pausadas', '1', $actor);
@@ -293,7 +307,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id = gmax_post_int('id');
                 $issues = Catalog::setStatus($pdo, $id, gmax_post_str('status', 30), $actor, !empty($_POST['confirm_price']));
                 View::flash($issues ? 'erro' : 'ok', $issues ? 'Não aprovado: ' . implode('; ', $issues) : 'Estado atualizado.');
-                gmax_redirect($back === 'ofertas' ? 'ofertas' : 'oferta', $back === 'ofertas' ? [] : ['id' => $id]);
+                gmax_redirect(in_array($back, ['ofertas', 'ranking'], true) ? $back : 'oferta', in_array($back, ['ofertas', 'ranking'], true) ? [] : ['id' => $id]);
             case 'offer_check':
                 $id = gmax_post_int('id');
                 try {
@@ -424,7 +438,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 View::flash('ok', 'Configurações salvas.');
-                gmax_redirect($back === 'automacoes' ? 'automacoes' : 'sistema');
+                gmax_redirect(in_array($back, ['automacoes', 'integracoes'], true) ? $back : 'sistema');
             default:
                 throw new RuntimeException('Ação desconhecida.');
         }

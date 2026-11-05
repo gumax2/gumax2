@@ -71,6 +71,7 @@ $suggested = 'https://' . preg_replace('/[^a-z0-9.\-]/i', '', $host) . $path . '
   </details>
   <?php endif; ?>
 </section>
+<?php require __DIR__ . '/_ml_diagnostico.php'; ?>
 <section class="card" id="shopee">
   <h2>Shopee — Affiliate Open API (somente leitura)</h2>
   <p class="muted small">Consulta preço, comissão e link oficial de produtos. Os testes abaixo não alteram o catálogo e não mostram o AppId completo nem o Secret.</p>

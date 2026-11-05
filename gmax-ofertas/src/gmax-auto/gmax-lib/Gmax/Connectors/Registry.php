@@ -41,7 +41,7 @@ final class Registry
             return self::$overrides[$marketplace];
         }
         return match ($marketplace) {
-            'mercadolivre' => new MercadoLivre(new RateLimiter(new Http(), $pdo, 'mercadolivre')),
+            'mercadolivre' => new MercadoLivre(new RateLimiter(new Http(), $pdo, 'mercadolivre'), null, null, $pdo),
             'shopee' => new ShopeeAffiliate(new RateLimiter(new Http(), $pdo, 'shopee')),
             'amazon' => new NotAvailable('amazon', 'Amazon PA-API 5', 'Integração preparada; requer conta Associates aprovada e credenciais da PA-API'),
             'aliexpress' => new NotAvailable('aliexpress', 'AliExpress Affiliate API', 'Integração preparada; requer app aprovado no AliExpress Open Platform'),

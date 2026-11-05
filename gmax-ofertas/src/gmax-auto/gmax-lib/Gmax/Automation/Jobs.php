@@ -80,6 +80,11 @@ final class Jobs
                 } catch (Throwable $e) {
                     $res = ['ok' => false, 'error' => $e->getMessage(), 'items' => []];
                 }
+                if (!empty($res['suspended'])) {
+                    // Restrição já conhecida (HTTP 403 repetido): uma linha, sem erro nem alerta por termo.
+                    $c['detail'][] = "$mp: " . $res['error'];
+                    continue 2;
+                }
                 if (!$res['ok']) {
                     $c['errors']++;
                     $c['detail'][] = "$mp \"$term\": " . $res['error'];
@@ -208,6 +213,12 @@ final class Jobs
                 $res = ['ok' => false, 'error' => $e->getMessage(), 'data' => []];
             }
             $api = ['endpoint' => $res['endpoint'] ?? null, 'http' => $res['http'] ?? null, 'checked_at' => $checkedAt];
+            if (!empty($res['suspended'])) {
+                // Consulta suspensa por 403 repetido: bloqueado (preço não validado), sem contar erro nem abrir alerta por produto.
+                $c['blocked']++;
+                RunLog::add($pdo, $runId, $r, 'bloqueado', $res['error'] . ' Use a conferência manual.', $api);
+                continue;
+            }
             if (!$res['ok']) {
                 $c['errors']++;
                 $c['blocked']++;

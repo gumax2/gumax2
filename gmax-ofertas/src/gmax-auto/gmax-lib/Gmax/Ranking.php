@@ -40,7 +40,7 @@ final class Ranking
         $c['desconto'] = $d === null
             ? [null, empty($r['price_original_cents']) ? 'Sem preço original informado' : 'Sem desconto real']
             : [min($d['percent'] / 60, 1.0), "{$d['percent']}% de desconto real (De " . Money::format((int)$r['price_original_cents']) . ')'
-                . (empty($r['price_verified_at']) ? ' — preço de fonte não conferida' : '')];
+                . (empty($r['price_verified_at']) ? ' — preço de fonte não conferida' : (Pricing::originalSource($r) === 'importado' ? ' — De não confirmado' : ''))];
 
         $sales = isset($r['sales_min']) ? (int)$r['sales_min'] : null;
         $c['popularidade'] = $sales === null || $sales <= 0
@@ -137,6 +137,144 @@ final class Ranking
             'components' => $components,
             'price_note' => $priceNote,
         ];
+    }
+
+    public const MODES = ['potencial' => 'Potencial comercial', 'prontas' => 'Prontas para divulgar'];
+    public const SORTS = ['score' => 'Pontuação', 'conf' => 'Confiança', 'preco' => 'Preço', 'data' => 'Última conferência'];
+    public const PER_PAGE = 25;
+
+    /**
+     * Pendências para divulgar: as MESMAS regras que bloqueiam a fila (Rules::blockers e
+     * Rules::duplicate) + "De" verificável quando usado na comunicação. Pontuação alta não é autorização.
+     * @return list<string>
+     */
+    public static function readiness(PDO $pdo, array $r, string $channel = 'telegram_privado'): array
+    {
+        $b = Rules::blockers($pdo, $r, $channel);
+        if (!empty($r['price_original_cents']) && Pricing::originalSource($r) === 'importado') {
+            $b[] = 'Preço original (De) não confirmado: confira na loja ou retire o De antes de divulgar';
+        }
+        if ($dup = Rules::duplicate($pdo, $r)) {
+            $b[] = $dup;
+        }
+        return array_values(array_unique($b));
+    }
+
+    /** Destaques comerciais curtos (somente dados existentes), do mais relevante ao menos. @return list<string> */
+    public static function highlights(array $r): array
+    {
+        $h = [];
+        $d = Money::discount(isset($r['price_original_cents']) ? (int)$r['price_original_cents'] : null, isset($r['price_promo_cents']) ? (int)$r['price_promo_cents'] : null);
+        if ($d) {
+            $h[] = $d['percent'] . '% OFF' . (Pricing::originalSource($r) === 'importado' ? ' (De não conferido)' : '');
+        }
+        if (!empty($r['sales_min']) && (int)$r['sales_min'] > 0) {
+            $h[] = (($r['sales_public'] ?? '') ?: (int)$r['sales_min']) . ' vendas';
+        }
+        if (isset($r['rating']) && $r['rating'] !== null && $r['rating'] !== '') {
+            $h[] = number_format((float)$r['rating'], 1, ',', '') . '★' . (!empty($r['rating_count']) ? ' (' . (int)$r['rating_count'] . ')' : '');
+        }
+        if (!empty($r['seller_reputation'])) {
+            $h[] = mb_substr((string)$r['seller_reputation'], 0, 30);
+        }
+        if (($r['payment_condition'] ?? '') === 'pix') {
+            $h[] = 'Pix';
+        } elseif (($r['payment_condition'] ?? '') === 'cupom') {
+            $h[] = 'com cupom';
+        }
+        return $h;
+    }
+
+    /**
+     * Ranking com dois modos, filtros combináveis, ordenação e paginação.
+     * Filtros: modo, marketplace, category, status, preco_min, preco_max (R$), score_min, conf_min,
+     * conferido (api|manual|nunca), dias (conferido nos últimos N dias), stale, link (com|sem),
+     * variation, avail, pronto (sim|nao), ordem, page.
+     * @return array{rows:list<array>,total:int,prontas:int,page:int,pages:int}
+     */
+    public static function board(PDO $pdo, array $f): array
+    {
+        $mode = isset(self::MODES[$f['modo'] ?? '']) ? $f['modo'] : 'potencial';
+        $where = ["validation_status NOT IN ('rejeitado','arquivado')"];
+        $args = [];
+        foreach (['marketplace' => Url::MARKETPLACES, 'status' => Catalog::STATUSES, 'avail' => Catalog::AVAILABILITY] as $k => $allowed) {
+            if (!empty($f[$k]) && isset($allowed[$f[$k]])) {
+                $where[] = ($k === 'status' ? 'validation_status' : ($k === 'avail' ? 'availability' : $k)) . ' = ?';
+                $args[] = $f[$k];
+            }
+        }
+        if (!empty($f['category'])) {
+            $where[] = 'category = ?';
+            $args[] = (string)$f['category'];
+        }
+        foreach (['preco_min' => '>=', 'preco_max' => '<='] as $k => $op) {
+            if (isset($f[$k]) && $f[$k] !== '' && ($c = Money::tryParse((string)$f[$k])) !== null) {
+                $where[] = "price_promo_cents $op ?";
+                $args[] = $c;
+            }
+        }
+        $conf = (string)($f['conferido'] ?? '');
+        if ($conf === 'api') {
+            $where[] = "price_verified_by LIKE 'api:%'";
+        } elseif ($conf === 'manual') {
+            $where[] = "price_verified_at IS NOT NULL AND price_verified_by NOT LIKE 'api:%'";
+        } elseif ($conf === 'nunca') {
+            $where[] = 'price_verified_at IS NULL';
+        }
+        $fresh = Settings::int($pdo, 'validade_preco_horas', 24);
+        if (!empty($f['dias']) && ctype_digit((string)$f['dias'])) {
+            $where[] = 'price_verified_at >= ?';
+            $args[] = Time::now()->modify('-' . min(365, (int)$f['dias']) . ' days')->format('Y-m-d H:i:s');
+        }
+        if (!empty($f['stale'])) {
+            $where[] = '(price_verified_at IS NULL OR price_verified_at < ?)';
+            $args[] = Time::now()->modify("-$fresh hours")->format('Y-m-d H:i:s');
+        }
+        if (($f['link'] ?? '') === 'sem') {
+            $where[] = "(affiliate_url IS NULL OR affiliate_url = '')";
+        } elseif (($f['link'] ?? '') === 'com') {
+            $where[] = "affiliate_url IS NOT NULL AND affiliate_url <> ''";
+        }
+        if (!empty($f['variation'])) {
+            $where[] = 'variation_pending = 1';
+        }
+        $potentials = $pdo->query('SELECT name, potential FROM gmax3_categories WHERE potential IS NOT NULL')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $band = self::DEFAULT_PRICE_BAND;
+        if (preg_match('/^(\d{1,5})-(\d{1,6})$/D', Settings::get($pdo, 'faixa_preco_conversao', ''), $m) && (int)$m[1] < (int)$m[2]) {
+            $band = [(int)$m[1], (int)$m[2]];
+        }
+        $history = [];
+        foreach ($pdo->query('SELECT catalog_id, price_promo_cents FROM gmax3_price_history WHERE verified = 1')->fetchAll() as $h) {
+            $history[$h['catalog_id']][] = $h['price_promo_cents'];
+        }
+        $rows = [];
+        $ready = 0;
+        foreach (Db::all($pdo, 'SELECT * FROM gmax3_catalog WHERE ' . implode(' AND ', $where), $args) as $r) {
+            $pot = isset($potentials[$r['category'] ?? '']) ? (int)$potentials[$r['category']] : null;
+            $e = self::evaluate($r, $pot, $history[$r['id']] ?? [], $band, $fresh);
+            $pend = self::readiness($pdo, $r);
+            $ok = $pend === [];
+            $ready += $ok ? 1 : 0;
+            if (($mode === 'prontas' && !$ok) || (($f['pronto'] ?? '') === 'sim' && !$ok) || (($f['pronto'] ?? '') === 'nao' && $ok)) {
+                continue;
+            }
+            if ((isset($f['score_min']) && ctype_digit((string)$f['score_min']) && ($e['score'] ?? 0) < (int)$f['score_min'])
+                || (isset($f['conf_min']) && ctype_digit((string)$f['conf_min']) && $e['confidence'] < (int)$f['conf_min'])) {
+                continue;
+            }
+            $rows[] = ['item' => $r, 'pendencias' => $pend, 'pronto' => $ok, 'destaques' => self::highlights($r)] + $e;
+        }
+        $key = static fn(array $x) => match ($f['ordem'] ?? 'score') {
+            'conf' => [$x['confidence'], $x['score'] ?? -1],
+            'preco' => [-(int)($x['item']['price_promo_cents'] ?? PHP_INT_MAX), $x['score'] ?? -1],
+            'data' => [(string)($x['item']['price_verified_at'] ?? ''), $x['score'] ?? -1],
+            default => [$x['score'] ?? -1, $x['confidence']],
+        };
+        usort($rows, static fn($a, $b) => $key($b) <=> $key($a) ?: (int)$a['item']['id'] <=> (int)$b['item']['id']);
+        $total = count($rows);
+        $pages = max(1, (int)ceil($total / self::PER_PAGE));
+        $page = min($pages, max(1, (int)($f['page'] ?? 1)));
+        return ['rows' => array_slice($rows, ($page - 1) * self::PER_PAGE, self::PER_PAGE), 'total' => $total, 'prontas' => $ready, 'page' => $page, 'pages' => $pages, 'offset' => ($page - 1) * self::PER_PAGE];
     }
 
     /** @return list<array> produtos ordenados por pontuação (exclui rejeitados, arquivados e indisponíveis) */

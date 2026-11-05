@@ -10,7 +10,7 @@ final class Settings
 {
     /** Chaves que o painel web pode alterar. As demais só mudam pela CLI, com frase de autorização. */
     public const WEB_EDITABLE = ['janela_duplicidade_dias', 'validade_preco_horas', 'horarios', 'limite_diario_telegram_privado',
-        'termos_descoberta_mercadolivre', 'termos_descoberta_shopee', 'faixa_preco_conversao'];
+        'termos_descoberta_mercadolivre', 'termos_descoberta_shopee', 'faixa_preco_conversao', 'ml_suspensao_403', 'ml_403_limite'];
     /** Chaves que liberam envio: só pela CLI com --autorizo. */
     public const CLI_ONLY = ['automacao_comercial', 'ml_grupo_privado_permitido', 'publicador_v21_aposentado', 'aprovacao_automatica'];
 
@@ -40,6 +40,14 @@ final class Settings
         Audit::log($pdo, $actor, 'configuracao_alterada', 'setting', $key, ['de' => $old, 'para' => $value]);
     }
 
+    /** Estado técnico interno (sem auditoria a cada gravação): suspensões e último diagnóstico. */
+    public static function store(PDO $pdo, string $key, string $value, string $actor): void
+    {
+        Db::run($pdo, 'INSERT INTO gmax3_settings(key,value,updated_at,updated_by) VALUES(?,?,?,?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by',
+            [$key, $value, Time::nowSql(), $actor]);
+    }
+
     public static function setFromWeb(PDO $pdo, string $key, string $value, string $actor): void
     {
         if (!in_array($key, self::WEB_EDITABLE, true)) {
@@ -52,6 +60,8 @@ final class Settings
             'horarios' => (bool)preg_match('/^([01]\d|2[0-3]):[0-5]\d(,([01]\d|2[0-3]):[0-5]\d){0,23}$/D', $value),
             'limite_diario_telegram_privado' => preg_match('/^\d{1,2}$/D', $value) && (int)$value >= 1 && (int)$value <= 30,
             'termos_descoberta_mercadolivre', 'termos_descoberta_shopee' => mb_strlen($value) <= 2000 && !preg_match('/[<>\x00-\x08]/', $value),
+            'ml_suspensao_403' => in_array($value, ['0', '1'], true),
+            'ml_403_limite' => preg_match('/^\d{1,2}$/D', $value) && (int)$value >= 2 && (int)$value <= 20,
             'faixa_preco_conversao' => $value === '' || (preg_match('/^(\d{1,5})-(\d{1,6})$/D', $value, $m) && (int)$m[1] < (int)$m[2]),
         };
         if (!$ok) {

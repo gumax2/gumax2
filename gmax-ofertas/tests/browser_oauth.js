@@ -77,10 +77,10 @@ async function connect(page) {
 
       scenario = 'logado';
       await connect(page);
-      const body = await page.textContent('body');
+      const body = (await page.locator('.alert').allTextContents()).join(' ') + ' ' + ((await page.textContent('body')).includes('Senha de administrador') ? 'Senha de administrador' : '');
       check(`${tag}: retorno ao callback mantém a sessão (state aceito; troca de token sem rede no teste)`,
         page.url().includes('painel.php?p=integracoes') && body.includes('não concluída') && !body.includes('State inválido') && !body.includes('Senha de administrador'),
-        page.url() + ' ' + body.slice(0, 300));
+        page.url() + ' ' + body.replace(/\s+/g, ' ').slice(0, 3000));
       check(`${tag}: nenhuma violação de CSP no retorno`, csp.length === 0, csp.join(' | '));
 
       // state de uso único: repetir o mesmo retorno é recusado.

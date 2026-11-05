@@ -12,6 +12,7 @@ declare(strict_types=1);
  *   aprovacao-automatica --autorizar AUTORIZO_APROVACAO_AUTOMATICA | --desativar
  *   ml-oauth status | renovar | testar   Situação/renovação do token OAuth do Mercado Livre (sem exibir tokens)
  *   shopee testar | shopee item ITEM_ID [SHOP_ID]   Testa a Shopee Affiliate API (somente leitura, sem segredos)
+ *   ml-oauth diagnostico [MLB123]       Diagnóstico completo do Mercado Livre (somente leitura, sem tokens)
  *   ml-oauth item MLB123456789          Testa só a consulta /items/{id} (somente leitura; mostra HTTP, preço e situação)
  */
 // Aceita o binário CGI usado por alguns Crons de cPanel, mas nunca uma requisição web.
@@ -68,6 +69,11 @@ try {
             } elseif ($sub === 'item') {
                 // Teste isolado de /items/{id}: somente leitura, nada é gravado no catálogo.
                 $print((new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o))->probeItem((string)($args[2] ?? '')));
+            } elseif ($sub === 'diagnostico') {
+                // Diagnóstico completo, somente leitura (mesmo do painel). Uso: ml-oauth diagnostico [MLB123]
+                $d = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o, $pdo))->diagnose(isset($args[2]) ? (string)$args[2] : null);
+                Settings::store($pdo, 'ml_diagnostico_ultimo', json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'cli');
+                $print($d);
             } elseif ($sub === 'testar') {
                 $print((new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o))->probePermissions());
             } else {

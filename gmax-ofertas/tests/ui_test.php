@@ -29,6 +29,20 @@ Catalog::markVerifiedByApi($pdo, $ids[3], 'shopee', 'teste');
 $noLink = Catalog::insert($pdo, ['marketplace' => 'shopee', 'external_id' => '22899999901', 'title' => 'Mochila Teste Sem Link <b>negrito</b>',
     'original_url' => 'https://shopee.com.br/product/222222/22899999901', 'price_promo_cents' => 8990], 'rascunho', 'teste');
 Gmax\Automation\Runner::runManual($pdo, 'revisao_precos', 'teste'); // gera histórico de execução e alertas
+// Diagnóstico ML gravado (respostas simuladas no formato real do PolicyAgent), para exibir a Central de Integrações.
+$diagHttp = new class extends Gmax\Http {
+    public function request(string $method, string $url, array $headers = [], ?string $body = null, int $timeout = 15): array
+    {
+        $path = substr($url, strlen(Gmax\Connectors\MercadoLivre::API));
+        $pa = '{"code":"PA_UNAUTHORIZED_RESULT_FROM_POLICIES","blocked_by":"PolicyAgent","status":403,"message":"At least one policy returned UNAUTHORIZED."}';
+        return match (true) {
+            $path === '/sites/MLB' => ['status' => 200, 'body' => '{}', 'error' => null],
+            $path === '/users/me' => ['status' => 200, 'body' => '{"id":123456789}', 'error' => null],
+            default => ['status' => 403, 'body' => $pa, 'error' => null],
+        };
+    }
+};
+Settings::store($pdo, 'ml_diagnostico_ultimo', json_encode((new Gmax\Connectors\MercadoLivre($diagHttp, 'APP_USR-1234567890123456-000000-abcdefabcdefabcdefabcdefabcdefab-1'))->diagnose('MLB7519481690'), JSON_UNESCAPED_UNICODE), 'teste');
 $before = [
     'pausa' => Settings::paused($pdo), 'auto' => Settings::get($pdo, 'automacoes_pausadas'), 'aprov' => Settings::get($pdo, 'aprovacao_automatica'),
     'links' => Db::all($pdo, 'SELECT id, affiliate_url FROM gmax3_catalog ORDER BY id'),

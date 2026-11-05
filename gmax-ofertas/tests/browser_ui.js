@@ -28,7 +28,8 @@ const PROFILES = [
   { nome: 'Monitor grande · Chrome · 1920 px', w: 1920, mobile: false, opts: { viewport: { width: 1920, height: 1080 }, userAgent: UA.chrome } },
 ];
 const PAGES = ['painel', 'ofertas', `oferta&id=${C.ids.shopee[0]}`, `conferir&id=${C.ids.variacao}`, 'importar', 'links', 'ranking', 'publicacoes',
-  'automacoes', 'execucoes', 'integracoes', 'relatorios', 'categorias', 'sistema', 'ofertas&marketplace=shopee&variation=1'];
+  'automacoes', 'execucoes', 'integracoes', 'relatorios', 'categorias', 'sistema', 'ofertas&marketplace=shopee&variation=1',
+  'ranking&modo=prontas', 'ranking&marketplace=shopee&conferido=nunca&ordem=preco&link=com'];
 const STORE_HOSTS = /^https:\/\/(s\.shopee\.com\.br|shopee\.com\.br|meli\.la|[a-z]+\.mercadolivre\.com\.br|mercadolivre\.com\.br)\//;
 
 async function newContext(browser, p) {
@@ -146,6 +147,26 @@ async function overflow(page) {
         out(G, 'Filtros sempre abertos no computador', filtersOpen && (await page.isVisible('select[name=marketplace]')), `open=${filtersOpen}`);
       }
       if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-ofertas.png`, fullPage: true });
+
+      // 4b. Ranking: abas de modo; cartões no celular, tabela compacta no computador; detalhes expansíveis.
+      await page.goto(`${C.base}/painel.php?p=ranking`);
+      const rk = await page.evaluate(() => ({
+        cards: document.querySelectorAll('.rank-card').length, cardsVis: !!document.querySelector('.rank-cards') && document.querySelector('.rank-cards').offsetParent !== null,
+        tableVis: !!document.querySelector('.rank-table') && document.querySelector('.rank-table').offsetParent !== null,
+        tabs: document.querySelectorAll('.seg-tabs a').length, active: (document.querySelector('.seg-tabs a.active') || {}).textContent || '',
+        pend: document.querySelectorAll('.rank-card .tag-warn, .rank-table .tag-warn').length,
+        priceWrap: [...document.querySelectorAll('.rank-table .col-price strong')].some((e) => e.getClientRects().length > 1),
+      }));
+      out(G, p.w < 768 ? 'Ranking: cartões compactos com posição, pontuação, confiança e pendência' : 'Ranking: tabela compacta, preço sem quebra de linha',
+        rk.tabs === 2 && /Potencial/.test(rk.active) && rk.pend > 0 && (p.w < 768 ? rk.cardsVis && !rk.tableVis && rk.cards >= 6 : rk.tableVis && !rk.cardsVis && !rk.priceWrap), JSON.stringify(rk));
+      if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-ranking.png`, fullPage: true });
+      await page.goto(`${C.base}/painel.php?p=ranking&modo=prontas`);
+      const pr = await page.evaluate(() => ({ n: document.querySelectorAll('.rank-card, .rank-table tbody tr').length, empty: !!document.querySelector('.empty') }));
+      out(G, 'Ranking "Prontas para divulgar": só produtos sem pendências (aqui nenhum, com explicação)', pr.empty, JSON.stringify(pr));
+      await page.goto(`${C.base}/painel.php?p=integracoes`);
+      const ig = await page.evaluate(() => ({ diag: !!document.querySelector('#ml-diagnostico table'), sup: !!document.querySelector('#ml-suporte'), txt: document.querySelector('#ml-diagnostico').textContent }));
+      out(G, 'Integrações: diagnóstico do Mercado Livre com conclusões, situação dos recursos e solicitação ao suporte', ig.diag && ig.sup && /Restrição da plataforma/.test(ig.txt) && /PolicyAgent/.test(ig.txt) && !/APP_USR-/.test(ig.txt), ig.txt.slice(0, 200));
+      if (p.shots) await page.locator('#ml-diagnostico').screenshot({ path: `${C.shots}/${p.shots}-diagnostico-ml.png` });
 
       // 5. Busca global.
       if (p.w >= 640 || p.mobile) {
