@@ -6,7 +6,7 @@ use Gmax\View;
 $nav = [
     'painel' => ['Visão geral', '◧'], 'ofertas' => ['Ofertas', '▤'], 'importar' => ['Importar', '⇪'], 'links' => ['Links afiliados', '⛓'],
     'ranking' => ['Ranking', '★'], 'candidatos' => ['Candidatos ML', '◎'], 'publicacoes' => ['Publicações', '✉'], 'automacoes' => ['Automações', '⟳'], 'autolab' => ['AutoLab', '⚗'], 'relatorios' => ['Relatórios', '▥'],
-    'categorias' => ['Categorias', '◈'], 'sistema' => ['Sistema', '⚙'],
+    'categorias' => ['Categorias', '◈'], 'diagnostico' => ['Diagnóstico', '♥'], 'sistema' => ['Sistema', '⚙'],
 ];
 $active = ['oferta' => 'ofertas', 'conferir' => 'ofertas', 'lote' => 'importar', 'lote_links' => 'links', 'integracoes' => 'automacoes', 'execucoes' => 'automacoes'][$page] ?? $page;
 $v = View::e(GMAX_VERSION);

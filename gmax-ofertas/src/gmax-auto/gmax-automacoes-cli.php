@@ -9,6 +9,8 @@ declare(strict_types=1);
  *                                 um ciclo do GMAX AutoLab (só age se o AutoLab estiver ativo; pausa própria)
  *   executar <tarefa>             Execução manual de uma tarefa
  *   listar                        Tarefas, próximas execuções e últimos resultados
+ *   validar-retomada [etapa1|etapa2]  Valida na hospedagem a retomada de uma execução interrompida, numa CÓPIA
+ *                                 temporária do banco e sem chamar API (os dados reais não são alterados)
  *   pausar | retomar              Pausa geral das automações
  *   aprovacao-automatica --autorizar AUTORIZO_APROVACAO_AUTOMATICA | --desativar
  *   ml-oauth status | renovar | testar   Situação/renovação do token OAuth do Mercado Livre (sem exibir tokens)
@@ -46,6 +48,41 @@ try {
             if (\Gmax\AutoLab\AutoLab::installed($pdo)) {
                 $print(['autolab' => \Gmax\AutoLab\AutoLab::tick($pdo, 'cron')]);
             }
+            break;
+        case 'validar-retomada':
+            // Validação operacional da retomada numa CÓPIA temporária do banco, sem API (ver ResumeValidation).
+            $RV = Gmax\Automation\ResumeValidation::class;
+            $step = $args[1] ?? 'auto';
+            if ($step === 'etapa2') {
+                $dir = trim((string)@file_get_contents($RV::pointer()));
+                if ($dir === '') {
+                    throw new RuntimeException('Rode antes: validar-retomada etapa1');
+                }
+                $RV::child($dir, 0);
+                $print($RV::verify($dir));
+                break;
+            }
+            $dir = $RV::prepare(Db::get());
+            if ($step === 'etapa1') {
+                $print('Cópia preparada em ' . basename($dir) . '. Este processo vai ser encerrado à força no meio da revisão (esperado). Depois rode: validar-retomada etapa2');
+                $RV::child($dir, $RV::KILL_AFTER);
+                break;
+            }
+            if (!function_exists('proc_open') || in_array('proc_open', array_map('trim', explode(',', (string)ini_get('disable_functions'))), true)) {
+                $print('proc_open indisponível nesta hospedagem: rode em duas chamadas, "validar-retomada etapa1" e depois "validar-retomada etapa2". Cópia preparada: ' . basename($dir));
+                break;
+            }
+            foreach ([$RV::KILL_AFTER, 0] as $kill) {
+                $p = proc_open([PHP_BINARY, __FILE__, 'validar-retomada-filho', $dir, (string)$kill], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+                stream_get_contents($pipes[1]);
+                stream_get_contents($pipes[2]);
+                $code = proc_close($p);
+                $print($kill ? "Etapa 1: processo encerrado à força (código $code)" : "Etapa 2: ciclo do Cron na cópia (código $code)");
+            }
+            $print($RV::verify($dir));
+            break;
+        case 'validar-retomada-filho':
+            $print(Gmax\Automation\ResumeValidation::child((string)($args[1] ?? ''), (int)($args[2] ?? 0)));
             break;
         case 'executar':
             $print(Runner::runManual($pdo, (string)($args[1] ?? ''), 'cli'));

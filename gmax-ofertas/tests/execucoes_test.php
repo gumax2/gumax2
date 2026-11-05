@@ -169,6 +169,7 @@ test('Mensagens de erro passam por limpeza de credenciais', function () {
 });
 test('Sem a migração 003 a revisão funciona como na 3.1.1 (sem detalhamento)', function () use ($ready) {
     $pdo = $ready();
+    eq('006', Migrator::down($pdo, 'teste')['version'], 'desfaz a 006 (AutoLab)');
     eq('005', Migrator::down($pdo, 'teste')['version'], 'desfaz a 005 (3.2.1)');
     eq('004', Migrator::down($pdo, 'teste')['version']);
     eq('003', Migrator::down($pdo, 'teste')['version']);
@@ -180,6 +181,7 @@ test('Execuções e dados anteriores preservados pela migração 003', function 
     Registry::resetOverrides();
     $pdo = t_seed('hostgator');
     Migrator::up($pdo, 'teste');
+    Migrator::down($pdo, 'teste'); // desfaz 006
     Migrator::down($pdo, 'teste'); // desfaz 005
     Migrator::down($pdo, 'teste'); // desfaz 004
     Migrator::down($pdo, 'teste'); // volta para 002

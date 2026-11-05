@@ -627,6 +627,22 @@ test('AutoLab: página abre; pausa de emergência imediata com CSRF; retomar só
     Settings::set($pdo, 'autolab_estado', 'desativado', 'teste');
 });
 
+test('Diagnóstico: saúde e tarefas; registra o usuário do PHP web; simulação de retenção não apaga; execução não existe no navegador', function () {
+    $pdo = Db::get();
+    $r = http('GET', 'painel.php?p=diagnostico');
+    eq(200, $r['status']);
+    ok(str_contains($r['body'], 'Saúde do sistema') && str_contains($r['body'], 'Diagnóstico das tarefas') && str_contains($r['body'], 'modo de diário'), 'seções');
+    ok(Settings::get($pdo, 'php_web_uid', '') !== '', 'uid do PHP web registrado');
+    $items = (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_job_run_items');
+    $r = follow(http('POST', 'painel.php', ['action' => 'retention_simulate', 'csrf' => csrf($r['body'])]));
+    ok(str_contains($r['body'], 'Nada foi apagado'), 'simulação pelo navegador');
+    eq($items, (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_job_run_items'), 'nada apagado');
+    $r = follow(http('POST', 'painel.php', ['action' => 'retention_execute', 'csrf' => csrf(http('GET', 'painel.php?p=diagnostico')['body'])]));
+    ok(str_contains($r['body'], 'Ação desconhecida'), 'sem ação de exclusão no painel');
+    $r = follow(http('POST', 'painel.php', ['action' => 'health_check', 'csrf' => csrf(http('GET', 'painel.php?p=diagnostico')['body'])]));
+    ok(str_contains($r['body'], 'Integridade do banco: ok'), 'integridade');
+});
+
 echo "\n== Agendadores existentes e CLI (sem rede)\n";
 $cli = static function (array $cmd) use ($env, $app): array {
     $p = proc_open(array_merge([PHP_BINARY, '-d', 'allow_url_fopen=0'], $cmd), [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $app, $env);

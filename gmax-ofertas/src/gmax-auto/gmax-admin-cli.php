@@ -18,6 +18,11 @@ declare(strict_types=1);
  *   criar-senha               Cria a senha inicial a partir de gmax-secrets/senha-inicial.txt (só se não existir
  *                             usuário; o arquivo é apagado depois). Nunca sobrescreve uma senha existente.
  *   desbloquear-login         Libera o login bloqueado pelo limite de tentativas (registrado na auditoria)
+ *   diagnostico               Saúde do sistema e das tarefas (somente leitura)
+ *   integridade               PRAGMA quick_check + optimize
+ *   permissoes [--aplicar]    Plano para 0600 (banco) e 0700 (gmax-secrets); só aplica se site, Cron e dono forem o mesmo usuário
+ *   retencao simular | retencao executar --simulacao N --confirmo EXCLUIR_REGISTROS_OPERACIONAIS_SIMULADOS
+ *                             Retenção de logs operacionais (> 90 dias): simulação exata; execução com backup e exportação verificados
  *   autolab status|validar-destino|previa|ativar AUTORIZO_AUTOLAB_HOMOLOGACAO [--dias 7]|pausar|retomar|desativar
  *                             GMAX AutoLab: homologação automática no Telegram privado (separada da publicação comercial)
  */
@@ -71,6 +76,49 @@ try {
                 }
             }
             out('Senha inicial criada. Entre pelo painel.php.' . ($loose ? ' Aviso: o arquivo da senha estava legível por outros usuários (permissão diferente de 600); se o servidor for compartilhado, troque a senha.' : ''));
+            break;
+        case 'diagnostico':
+            foreach (Gmax\Health::collect($pdo) as $name => [$lvl, $txt]) {
+                out(sprintf('[%s] %s: %s', strtoupper($lvl), $name, $txt));
+            }
+            foreach (Gmax\Health::jobs($pdo) as $j) {
+                out(sprintf('tarefa %-17s %-7s última %-10s %s · duração %s · próxima %s', $j['tarefa'], $j['ativa'] ? 'ATIVA' : 'inativa', $j['ultima'] ?? '—', $j['ultima_em'] ?? '', $j['duracao_s'] !== null ? $j['duracao_s'] . ' s' : '—', $j['proxima'] ?? '—'));
+            }
+            out('Somente leitura: nada foi alterado.');
+            break;
+        case 'integridade':
+            $r = Gmax\Health::integrity($pdo, 'cli');
+            out('quick_check: ' . $r);
+            exit($r === 'ok' ? 0 : 1);
+        case 'permissoes':
+            $plan = Gmax\Health::permissionPlan($pdo);
+            $me = Gmax\Health::processUser();
+            out(['usuario_desta_cli' => $me, 'usuario_php_do_site' => ['uid' => Settings::get($pdo, 'php_web_uid', '(não registrado)'), 'nome' => Settings::get($pdo, 'php_web_usuario', '')],
+                'seguro_aplicar' => $plan['seguro'], 'motivo' => $plan['motivo'], 'acoes' => array_map(static fn($a) => "{$a[0]}: {$a[1]} → {$a[2]}", $plan['acoes'])]);
+            if ($has('--aplicar')) {
+                $done = Gmax\Health::applyPermissions($pdo, 'cli');
+                out('Aplicado: ' . count($done) . ' ajuste(s); banco conferido (continua gravável).');
+            } elseif ($plan['acoes']) {
+                out('Nada foi alterado. Para aplicar: gmax-admin-cli.php permissoes --aplicar');
+            }
+            break;
+        case 'retencao':
+            $sub = $args[1] ?? 'simular';
+            if ($sub === 'simular') {
+                $r = Gmax\Retention::simulate($pdo, 'cli');
+                foreach ($r['eliminaveis'] as $t => $x) {
+                    out(sprintf('ELIMINÁVEL %-22s %7d de %7d linha(s) anteriores a %s UTC (%s a %s)', $t, $x['quantidade'], $x['total_na_tabela'], $x['corte'], $x['primeira'] ?? '—', $x['ultima'] ?? '—'));
+                }
+                foreach ($r['protegidos'] as $t => $x) {
+                    out(sprintf('PRESERVADO %-22s %7d linha(s) — %s', $t, $x['linhas'], $x['descricao']));
+                }
+                out(sprintf('Simulação #%d: %d linha(s) seriam eliminadas. Lista completa: gmax-secrets/gmax-retencao/%s (sha256 %s). NADA foi apagado.', $r['simulacao'], $r['total_eliminavel'], $r['lista'], substr($r['lista_sha256'], 0, 16)));
+                out('Para executar (só depois de conferir): gmax-admin-cli.php retencao executar --simulacao ' . $r['simulacao'] . ' --confirmo ' . Gmax\Retention::PHRASE);
+            } elseif ($sub === 'executar') {
+                out(Gmax\Retention::execute($pdo, (int)($after('--simulacao') ?? 0), (string)($after('--confirmo') ?? ''), 'cli'));
+            } else {
+                throw new RuntimeException('Uso: retencao simular | retencao executar --simulacao N --confirmo ' . Gmax\Retention::PHRASE);
+            }
             break;
         case 'autolab':
             $sub = $args[1] ?? 'status';

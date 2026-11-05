@@ -168,11 +168,15 @@ final class Runner
         }
     }
 
-    /** Execuções interrompidas (processo morto pelo servidor) viram "falhou". */
+    /**
+     * Execuções interrompidas (processo morto pelo servidor) viram "falhou".
+     * 3.2.1: só é chamado com a trava de execução obtida; toda execução nasce dentro dessa trava,
+     * então qualquer "executando" encontrado aqui pertence a um processo que já morreu: é fechado
+     * na hora (antes esperava 15 min), com alerta, e a continuação é agendada.
+     */
     private static function closeStale(PDO $pdo): void
     {
-        $limit = Time::now()->modify('-' . self::STALE_MINUTES . ' minutes')->format('Y-m-d H:i:s');
-        foreach (Db::all($pdo, "SELECT r.id, r.job, r.slot_key, j.name FROM gmax3_job_runs r LEFT JOIN gmax3_jobs j ON j.job=r.job WHERE r.status='executando' AND r.started_at < ?", [$limit]) as $run) {
+        foreach (Db::all($pdo, "SELECT r.id, r.job, r.slot_key, j.name FROM gmax3_job_runs r LEFT JOIN gmax3_jobs j ON j.job=r.job WHERE r.status='executando'") as $run) {
             Db::run($pdo, "UPDATE gmax3_job_runs SET status='falhou', finished_at=?, detail=COALESCE(detail,'') || ' Interrompida (tempo esgotado no servidor).' WHERE id=? AND status='executando'", [Time::nowSql(), $run['id']]);
             Alerts::raise($pdo, 'falha_automacao', 'Tarefa ' . ($run['name'] ?? $run['job']) . ' foi interrompida pelo servidor (execução #' . $run['id'] . ')' . (in_array($run['job'], self::CONTINUABLE, true) ? ': retomada automática agendada.' : '.'));
             if (in_array($run['job'], self::CONTINUABLE, true)) {
@@ -234,6 +238,10 @@ final class Runner
             $c = ['found' => 0, 'created' => 0, 'updated' => 0, 'approved' => 0, 'blocked' => 0, 'errors' => 1, 'pending' => 0, 'detail' => ['Erro: ' . get_class($e) . ' — ' . mb_substr($e->getMessage(), 0, 200)]];
             $status = 'falhou';
             Alerts::raise($pdo, 'falha_automacao', 'Tarefa ' . $job['name'] . ' falhou: ' . mb_substr($e->getMessage(), 0, 200));
+        }
+        try {
+            RunLog::flush($pdo); // linhas informativas pendentes (se a tarefa terminou com erro)
+        } catch (Throwable) {
         }
         Db::run($pdo, 'UPDATE gmax3_job_runs SET status=?, finished_at=?, found=?, created=?, updated=?, approved=?, blocked=?, errors=?, detail=? WHERE id=?', [
             $status, Time::nowSql(), $c['found'], $c['created'], $c['updated'], $c['approved'], $c['blocked'], $c['errors'],

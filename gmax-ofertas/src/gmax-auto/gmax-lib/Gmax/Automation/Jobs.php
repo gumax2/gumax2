@@ -197,7 +197,7 @@ final class Jobs
         foreach (self::reviewCandidates($pdo) as $r) {
             if (($why = self::reviewExclusion($r, $includeDrafts)) !== null) {
                 if (++$excluded <= self::MAX_EXCLUDED_LOG) {
-                    RunLog::add($pdo, $runId, $r, 'fora_da_revisao', $why);
+                    RunLog::defer($runId, $r, 'fora_da_revisao', $why);
                 }
                 continue;
             }
@@ -210,7 +210,7 @@ final class Jobs
                 $timeUp = $timeUp || $byTime;
                 $c['pending'] += $byTime ? 1 : 0;
                 if (++$notProcessed <= self::MAX_PENDING_LOG) {
-                    RunLog::add($pdo, $runId, $r, 'nao_processado', !$byTime
+                    RunLog::defer($runId, $r, 'nao_processado', !$byTime
                         ? "Limite de $limit produtos por execução atingido: fica para a próxima revisão"
                         : 'Prazo da execução atingido: continuação automática agendada');
                 }
@@ -269,6 +269,7 @@ final class Jobs
                 'price_api' => $d['price_promo_cents'] ?? null, 'original_api' => $d['price_original_cents'] ?? null, 'availability' => $d['availability'] ?? null,
             ]);
         }
+        RunLog::flush($pdo);
         if ($timeUp) {
             $c['detail'][] = sprintf('Prazo da execução atingido: %d produto(s) pendente(s) ficam para a continuação automática', $c['pending']);
         }

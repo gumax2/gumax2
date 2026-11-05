@@ -23,6 +23,10 @@ final class Db
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->exec('PRAGMA busy_timeout = 5000');
+        // 3.2.1: até 8 MB de cache por conexão e temporários em memória (ordenações e agrupamentos).
+        // O modo de diário NÃO é alterado (continua o atual, sem WAL).
+        $pdo->exec('PRAGMA cache_size = -8000');
+        $pdo->exec('PRAGMA temp_store = MEMORY');
         self::$pdo = $pdo;
     }
 

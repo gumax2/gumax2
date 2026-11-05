@@ -41,12 +41,47 @@ final class RunLog
         return mb_substr((string)$text, 0, 300);
     }
 
+    /** @var list<array> linhas informativas aguardando gravação em lote */
+    private static array $deferred = [];
+
+    /**
+     * 3.2.1: linhas informativas ("fora da revisão", "não processado") vão em lote, numa única transação
+     * no fim da revisão, em vez de uma gravação (e um fsync) por linha. Elas não participam da retomada
+     * (que usa só os resultados de consulta), então perder o lote numa queda do servidor é inofensivo.
+     */
+    public static function defer(int $runId, array $r, string $outcome, string $reason): void
+    {
+        if ($runId > 0) {
+            self::$deferred[] = [$runId, $r, $outcome, $reason];
+        }
+    }
+
+    public static function flush(PDO $pdo): int
+    {
+        $rows = self::$deferred;
+        self::$deferred = [];
+        if (!$rows || !self::enabled($pdo)) {
+            return 0;
+        }
+        Db::immediate($pdo, static function (PDO $pdo) use ($rows) {
+            foreach ($rows as [$runId, $r, $outcome, $reason]) {
+                self::insert($pdo, $runId, $r, $outcome, $reason, []);
+            }
+        });
+        return count($rows);
+    }
+
     /** @param array<string,mixed> $f */
     public static function add(PDO $pdo, int $runId, array $r, string $outcome, string $reason, array $f = []): void
     {
         if ($runId <= 0 || !self::enabled($pdo)) {
             return;
         }
+        self::insert($pdo, $runId, $r, $outcome, $reason, $f);
+    }
+
+    private static function insert(PDO $pdo, int $runId, array $r, string $outcome, string $reason, array $f): void
+    {
         $int = static fn($v) => $v === null || $v === '' ? null : (int)$v;
         Db::run($pdo, 'INSERT INTO gmax3_job_run_items(run_id,catalog_id,marketplace,external_id,title,outcome,reason,api_endpoint,http_status,api_error,
             price_before_cents,price_api_cents,original_before_cents,original_api_cents,availability_api,checked_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [

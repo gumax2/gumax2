@@ -1,0 +1,60 @@
+{
+    "executado_em": "2026-11-05T11:27:06-03:00",
+    "php": "8.3.6",
+    "sqlite": "3.45.1",
+    "journal_mode": "delete",
+    "base": {
+        "produtos": 10000,
+        "historico": 100000,
+        "linhas_execucao": 200000,
+        "descobertas": 50000,
+        "execucoes": 2001
+    },
+    "consultas": {
+        "lista_de_ofertas_ordenada": {
+            "sem_indices_ms": 4.47,
+            "com_indices_ms": 0.61,
+            "mesmo_resultado": true
+        },
+        "assinatura_do_cache": {
+            "sem_indices_ms": 2.86,
+            "com_indices_ms": 2.07,
+            "mesmo_resultado": true
+        },
+        "historico_conferido_ranking": {
+            "sem_indices_ms": 43.14,
+            "com_indices_ms": 16.48,
+            "mesmo_resultado": true
+        },
+        "execucoes_em_andamento": {
+            "sem_indices_ms": 0.11,
+            "com_indices_ms": 0.02,
+            "mesmo_resultado": true
+        },
+        "ultima_execucao_por_tarefa": {
+            "sem_indices_ms": 0.89,
+            "com_indices_ms": 0.08,
+            "mesmo_resultado": true
+        },
+        "simulacao_retencao_contagem": {
+            "sem_indices_ms": 22.9,
+            "com_indices_ms": 10.8,
+            "mesmo_resultado": true
+        },
+        "relatorio_fila_30_dias": {
+            "sem_indices_ms": 0.15,
+            "com_indices_ms": 0.21,
+            "mesmo_resultado": true
+        },
+        "ranking_potencial_pagina1": {
+            "sem_indices_ms": 299.45,
+            "com_indices_ms": 352.41,
+            "mesmo_resultado": true
+        }
+    },
+    "gravacao_400_linhas": {
+        "uma_a_uma_ms": 724.1,
+        "em_lote_ms": 7.5
+    },
+    "observacao": "Ambiente de desenvolvimento (não é a HostGator): use para comparar, não como tempo absoluto do servidor. O ganho de gravação em lote tende a ser MAIOR em disco de hospedagem (fsync mais lento)."
+}
