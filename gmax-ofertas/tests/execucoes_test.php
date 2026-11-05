@@ -169,6 +169,7 @@ test('Mensagens de erro passam por limpeza de credenciais', function () {
 });
 test('Sem a migração 003 a revisão funciona como na 3.1.1 (sem detalhamento)', function () use ($ready) {
     $pdo = $ready();
+    eq('004', Migrator::down($pdo, 'teste')['version']);
     eq('003', Migrator::down($pdo, 'teste')['version']);
     $r = Runner::runManual($pdo, 'revisao_precos', 'admin');
     eq([5, 5], [$r['found'], $r['blocked']]);
@@ -178,6 +179,7 @@ test('Execuções e dados anteriores preservados pela migração 003', function 
     Registry::resetOverrides();
     $pdo = t_seed('hostgator');
     Migrator::up($pdo, 'teste');
+    Migrator::down($pdo, 'teste'); // desfaz 004
     Migrator::down($pdo, 'teste'); // volta para 002
     Runner::runManual($pdo, 'revisao_precos', 'admin');
     $runs = Db::all($pdo, 'SELECT * FROM gmax3_job_runs');

@@ -16,29 +16,6 @@ use Gmax\{Catalog, Db, Message, Migrator, Pricing, Ranking, Settings};
 
 const T_ML_TOKEN = 'APP_USR-9988776655443322-110512-ffffeeeeddddccccbbbbaaaa99998888-1234';
 
-/** HTTP falso por endpoint: [regex do caminho, com token?] => [status, corpo]. Conta requisições. */
-final class MapHttp extends Gmax\Http
-{
-    public array $calls = [];
-
-    public function __construct(private array $map)
-    {
-    }
-
-    public function request(string $method, string $url, array $headers = [], ?string $body = null, int $timeout = 15): array
-    {
-        $auth = (bool)array_filter($headers, static fn($h) => str_starts_with($h, 'Authorization: Bearer '));
-        $path = substr($url, strlen(MercadoLivre::API));
-        $this->calls[] = [$path, $auth];
-        foreach ($this->map as [$re, $needAuth, $status, $resp]) {
-            if (preg_match($re, $path) && ($needAuth === null || $needAuth === $auth)) {
-                return ['status' => $status, 'body' => is_string($resp) ? $resp : json_encode($resp), 'error' => null];
-            }
-        }
-        return ['status' => 404, 'body' => '{"message":"not found"}', 'error' => null];
-    }
-}
-
 $pa = ['code' => 'PA_UNAUTHORIZED_RESULT_FROM_POLICIES', 'blocked_by' => 'PolicyAgent', 'status' => 403, 'message' => 'At least one policy returned UNAUTHORIZED.'];
 $ready = static function (): PDO {
     Registry::resetOverrides();

@@ -314,3 +314,10 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0;min-height:32px}
 }
 @media (min-width:1366px){.filters-rank{grid-template-columns:repeat(6,minmax(0,1fr))}}
 .table-wrap{position:relative}
+/* 3.1.9 — candidatos do catálogo ML */
+.cand-list{display:grid;gap:12px;margin:0;padding:0;list-style:none}
+.cand{display:grid;gap:10px;margin:0}
+.cand-head{display:grid;grid-template-columns:72px 1fr;gap:12px;align-items:start}
+.cand-img{width:72px;height:72px;object-fit:contain;background:#fff;border-radius:10px}
+@media (min-width:1024px){.cand-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1600px){.cand-list{grid-template-columns:repeat(3,minmax(0,1fr))}}

@@ -266,6 +266,194 @@ final class MercadoLivre implements Connector, Discovery
         return ['ok' => true, 'error' => null, 'items' => $items];
     }
 
+    // ------------------------------------------------------------------ catálogo (3.1.9)
+    /** ID de produto de CATÁLOGO (não confundir com ID de anúncio "item:MLB…"). */
+    public static function isCatalogId(string $id): bool
+    {
+        return preg_match('/^MLB\d{4,15}$/D', $id) === 1;
+    }
+
+    /** Imagem só de https do CDN oficial (*.mlstatic.com); qualquer outra é descartada. */
+    private static function picture(mixed $pics): ?string
+    {
+        $u = is_array($pics) && isset($pics[0]['url']) && is_string($pics[0]['url']) ? $pics[0]['url'] : null;
+        $h = $u ? strtolower((string)parse_url($u, PHP_URL_HOST)) : '';
+        return $u && str_starts_with($u, 'https://') && ($h === 'mlstatic.com' || str_ends_with($h, '.mlstatic.com')) && !preg_match('/[\s"\'<>]/', $u) ? mb_substr($u, 0, 500) : null;
+    }
+
+    private static function str(mixed $v, int $max = 300): ?string
+    {
+        return is_scalar($v) && trim((string)$v) !== '' ? mb_substr(trim(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string)$v)), 0, $max) : null;
+    }
+
+    /**
+     * Pesquisa no catálogo (/products/search). Devolve produtos de catálogo SEM preço de anúncio.
+     * @return array{ok:bool,error:?string,suspended?:bool,http?:?int,items:list<array{product_id:string,name:string,domain_id:?string,picture_url:?string}>}
+     */
+    public function catalogSearch(string $query, int $limit = 10, bool $supervised = false): array
+    {
+        if ($this->token() === null) {
+            return ['ok' => false, 'error' => 'Conector Mercado Livre não conectado (OAuth)', 'items' => []];
+        }
+        $path = '/products/search?' . http_build_query(['status' => 'active', 'site_id' => 'MLB', 'q' => mb_substr($query, 0, 80), 'limit' => max(1, min(50, $limit))]);
+        $res = $this->get($path, $supervised);
+        if (!empty($res['suspended'])) {
+            return ['ok' => false, 'error' => $res['error'], 'items' => [], 'suspended' => true];
+        }
+        if ($res['error'] !== null || $res['status'] !== 200) {
+            return ['ok' => false, 'error' => self::httpReason($res, '/products/search'), 'items' => [], 'http' => $res['status'] ?: null];
+        }
+        $j = json_decode((string)$res['body'], true);
+        if (!is_array($j) || !isset($j['results']) || !is_array($j['results'])) {
+            return ['ok' => false, 'error' => 'Resposta inesperada da pesquisa no catálogo', 'items' => [], 'http' => 200];
+        }
+        $items = [];
+        foreach ($j['results'] as $r) {
+            $id = is_array($r) ? (string)($r['id'] ?? '') : '';
+            $name = is_array($r) ? self::str($r['name'] ?? null) : null;
+            if (!self::isCatalogId($id) || $name === null) {
+                continue;
+            }
+            $items[] = ['product_id' => $id, 'name' => $name, 'domain_id' => self::str($r['domain_id'] ?? null, 80), 'picture_url' => self::picture($r['pictures'] ?? null)];
+        }
+        return ['ok' => true, 'error' => null, 'items' => $items, 'http' => 200];
+    }
+
+    /**
+     * Produto de catálogo (/products/{id}): permalink oficial e, SE a API informar, o anúncio vencedor
+     * (buy_box_winner) com o preço dele no momento da consulta. Nada é estimado.
+     */
+    public function catalogProduct(string $productId, bool $supervised = false): array
+    {
+        if (!self::isCatalogId($productId)) {
+            return ['ok' => false, 'error' => 'ID de catálogo inválido', 'data' => []];
+        }
+        $res = $this->get('/products/' . $productId, $supervised);
+        if (!empty($res['suspended'])) {
+            return ['ok' => false, 'error' => $res['error'], 'data' => [], 'suspended' => true];
+        }
+        if ($res['error'] !== null || $res['status'] !== 200) {
+            return ['ok' => false, 'error' => self::httpReason($res, '/products/{id}'), 'data' => [], 'http' => $res['status'] ?: null];
+        }
+        $j = json_decode((string)$res['body'], true);
+        if (!is_array($j) || (string)($j['id'] ?? '') !== $productId) {
+            return ['ok' => false, 'error' => 'Resposta inesperada do produto de catálogo', 'data' => [], 'http' => 200];
+        }
+        $perma = is_string($j['permalink'] ?? null) && \Gmax\Url::isProduct('mercadolivre', $j['permalink']) && \Gmax\Url::mlId($j['permalink']) === 'catalogo:' . $productId
+            ? $j['permalink'] : null; // domínio oficial + mesmo ID de catálogo
+        $d = ['name' => self::str($j['name'] ?? null), 'permalink' => $perma, 'picture_url' => self::picture($j['pictures'] ?? null),
+            'category_id' => self::str($j['category_id'] ?? ($j['settings']['category_id'] ?? null), 20), 'domain_id' => self::str($j['domain_id'] ?? null, 80),
+            'bb_item_id' => null, 'bb_price_cents' => null, 'bb_original_cents' => null, 'bb_currency' => null, 'bb_free_shipping' => null, 'bb_official_store' => null];
+        $bb = $j['buy_box_winner'] ?? null;
+        if (is_array($bb) && preg_match('/^MLB\d{5,15}$/D', (string)($bb['item_id'] ?? ''))) {
+            $d['bb_item_id'] = 'item:' . $bb['item_id'];
+            $d['bb_currency'] = self::str($bb['currency_id'] ?? null, 5);
+            if (isset($bb['price']) && is_numeric($bb['price']) && $bb['price'] > 0 && ($d['bb_currency'] ?? 'BRL') === 'BRL') {
+                $d['bb_price_cents'] = (int)round((float)$bb['price'] * 100);
+            }
+            if (isset($bb['original_price']) && is_numeric($bb['original_price']) && $d['bb_price_cents'] && $bb['original_price'] * 100 > $d['bb_price_cents']) {
+                $d['bb_original_cents'] = (int)round((float)$bb['original_price'] * 100);
+            }
+            $d['bb_free_shipping'] = isset($bb['shipping']['free_shipping']) ? (int)(bool)$bb['shipping']['free_shipping'] : null;
+            $d['bb_official_store'] = array_key_exists('official_store_id', $bb) ? (int)($bb['official_store_id'] !== null) : null;
+        }
+        return ['ok' => true, 'error' => null, 'data' => $d, 'http' => 200];
+    }
+
+    /** Nome da categoria (/categories/{id}); null se indisponível. */
+    public function categoryName(string $cat): ?string
+    {
+        if (!preg_match('/^MLB\d{1,10}$/D', $cat) || $this->token() === null) {
+            return null;
+        }
+        $res = $this->get('/categories/' . $cat);
+        $j = $res['status'] === 200 ? json_decode((string)$res['body'], true) : null;
+        return is_array($j) ? self::str($j['name'] ?? null, 80) : null;
+    }
+
+    /** Tendências de busca (/trends/MLB[/categoria]). @return array{ok:bool,error:?string,keywords:list<string>} */
+    public function trends(?string $categoryId = null, bool $supervised = false): array
+    {
+        if ($this->token() === null) {
+            return ['ok' => false, 'error' => 'Conector Mercado Livre não conectado (OAuth)', 'keywords' => []];
+        }
+        $path = '/trends/MLB' . ($categoryId !== null && preg_match('/^MLB\d{1,10}$/D', $categoryId) ? '/' . $categoryId : '');
+        $res = $this->get($path, $supervised);
+        if ($res['error'] !== null || $res['status'] !== 200) {
+            return ['ok' => false, 'error' => self::httpReason($res, '/trends/MLB'), 'keywords' => []];
+        }
+        $j = json_decode((string)$res['body'], true);
+        $kw = [];
+        foreach (is_array($j) ? $j : [] as $t) {
+            if (is_array($t) && ($k = self::str($t['keyword'] ?? null, 80)) !== null) {
+                $kw[] = $k;
+            }
+        }
+        return ['ok' => true, 'error' => null, 'keywords' => array_values(array_unique($kw))];
+    }
+
+    /** Caminhos de campos de um JSON (estrutura, sem valores), para a inspeção. @return list<string> */
+    public static function fieldPaths(mixed $j, string $prefix = '', int $depth = 0): array
+    {
+        if ($depth > 4) {
+            return [];
+        }
+        $out = [];
+        if (is_array($j) && array_is_list($j)) {
+            return $j ? self::fieldPaths($j[0], $prefix . '[]', $depth + 1) : [$prefix . '[] (vazio)'];
+        }
+        if (is_array($j)) {
+            foreach ($j as $k => $v) {
+                $p = $prefix === '' ? (string)$k : $prefix . '.' . $k;
+                $out[] = $p . ' (' . (is_array($v) ? (array_is_list($v) ? 'lista' : 'objeto') : ($v === null ? 'nulo' : gettype($v))) . ')';
+                if (is_array($v)) {
+                    $out = array_merge($out, self::fieldPaths($v, $p, $depth + 1));
+                }
+            }
+        }
+        return array_slice($out, 0, 120);
+    }
+
+    /**
+     * Inspeção de campos (supervisionada, somente leitura): estrutura real de cada recurso
+     * de catálogo/descoberta. Grava só nomes e tipos de campos e indicadores — sem valores.
+     */
+    public function inspectFields(string $term = 'fone de ouvido', ?string $mlb = null): array
+    {
+        $out = ['em' => Time::nowSql(), 'termo' => mb_substr($term, 0, 60), 'recursos' => []];
+        $probe = function (string $key, string $path) use (&$out): ?array {
+            $res = $this->get($path, true);
+            $j = json_decode((string)$res['body'], true);
+            $out['recursos'][$key] = ['endpoint' => 'GET ' . strtok($path, '?'), 'http' => $res['status'] ?: null, 'mensagem_api' => $res['status'] === 200 ? null : self::apiError($res)['texto'],
+                'campos' => $res['status'] === 200 ? self::fieldPaths($j) : []];
+            return $res['status'] === 200 && is_array($j) ? $j : null;
+        };
+        $ps = $probe('catalogo_busca', '/products/search?' . http_build_query(['status' => 'active', 'site_id' => 'MLB', 'q' => $term, 'limit' => 3]));
+        $pid = (string)($ps['results'][0]['id'] ?? '');
+        $out['indicadores']['busca_por_palavra'] = $ps !== null && !empty($ps['results']);
+        $out['indicadores']['busca_tem_imagem'] = $ps !== null && self::picture($ps['results'][0]['pictures'] ?? null) !== null;
+        $out['indicadores']['busca_tem_preco'] = $ps !== null && (isset($ps['results'][0]['price']) || is_array($ps['results'][0]['buy_box_winner'] ?? null));
+        if (self::isCatalogId($pid)) {
+            $p = $probe('catalogo_produto', "/products/$pid");
+            $bb = $p['buy_box_winner'] ?? null;
+            $out['indicadores']['produto_tem_vencedor'] = is_array($bb);
+            $out['indicadores']['vencedor_tem_preco'] = is_array($bb) && isset($bb['price']) && is_numeric($bb['price']);
+            $out['indicadores']['vencedor_tem_anuncio'] = is_array($bb) && preg_match('/^MLB\d{5,15}$/D', (string)($bb['item_id'] ?? '')) === 1;
+            $out['indicadores']['produto_tem_permalink'] = is_string($p['permalink'] ?? null);
+        }
+        $dd = $probe('dominio', '/sites/MLB/domain_discovery/search?' . http_build_query(['q' => $term, 'limit' => 1]));
+        $cat = (string)($dd[0]['category_id'] ?? '');
+        if (preg_match('/^MLB\d{1,10}$/D', $cat)) {
+            $probe('categoria', "/categories/$cat");
+            $probe('tendencias_categoria', "/trends/MLB/$cat");
+        }
+        $probe('tendencias', '/trends/MLB');
+        if ($mlb !== null && preg_match('/^MLB\d{5,15}$/D', $mlb = strtoupper(str_replace('-', '', $mlb)))) {
+            $probe('descricao', "/items/$mlb/description");
+        }
+        return $out;
+    }
+
     /**
      * Diagnóstico completo (somente leitura, supervisionado): ignora a suspensão automática e não a altera.
      * Pares com e sem token distinguem restrição da plataforma de falta de autorização do aplicativo.

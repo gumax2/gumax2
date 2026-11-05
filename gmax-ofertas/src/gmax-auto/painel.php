@@ -15,7 +15,7 @@ header('Cache-Control: no-store, private');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: no-referrer');
-header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.mlstatic.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
 header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 
 Auth::start();
@@ -27,7 +27,7 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'automacoes', 'execucoes', 'integracoes', 'ofertas', 'oferta', 'conferir', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'automacoes', 'execucoes', 'integracoes', 'candidatos', 'ofertas', 'oferta', 'conferir', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
@@ -227,6 +227,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 Audit::log($pdo, $actor, 'ml_diagnostico', 'integracao', 'mercadolivre', ['resultados' => array_map(static fn($t) => $t['id'] . '=' . ($t['http'] ?? 'rede'), $d['testes'])]);
                 View::flash('ok', 'Diagnóstico do Mercado Livre concluído (' . count($d['testes']) . ' testes, somente leitura).');
                 gmax_redirect('integracoes');
+            case 'ml_inspect':
+                // Inspeção de campos: somente leitura, supervisionada; grava só nomes/tipos de campos.
+                @set_time_limit(90);
+                $d = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, null, $pdo))->inspectFields(gmax_post_str('termo', 60) ?: 'fone de ouvido');
+                Settings::store($pdo, 'ml_campos_ultimo', json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $actor);
+                Audit::log($pdo, $actor, 'ml_campos_inspecionados', 'integracao', 'mercadolivre', ['http' => array_map(static fn($r) => $r['http'], $d['recursos'])]);
+                View::flash('ok', 'Inspeção de campos concluída (somente leitura).');
+                gmax_redirect('candidatos');
+            case 'ml_candidates_run':
+                if (!Gmax\MlCandidates::enabled($pdo)) {
+                    throw new RuntimeException('Aplique a migração 004 em Sistema.');
+                }
+                @set_time_limit(120);
+                $r = Gmax\Automation\Runner::runManual($pdo, 'candidatos_ml', $actor);
+                View::flash($r['resultado'] === 'concluido' ? 'ok' : 'aviso', 'Busca de candidatos: ' . $r['resultado'] . ' — ' . (int)($r['found'] ?? 0) . ' encontrado(s), ' . (int)($r['created'] ?? 0) . ' novo(s). Nenhuma oferta foi criada.');
+                gmax_redirect('candidatos');
+            case 'ml_candidate_draft':
+                $cid = Gmax\MlCandidates::createDraft($pdo, gmax_post_int('id'), $actor);
+                View::flash('ok', 'Rascunho #' . $cid . ' criado. Gere o link afiliado oficial e faça a conferência na loja antes de aprovar.');
+                gmax_redirect('oferta', ['id' => $cid]);
+            case 'ml_candidate_discard':
+                View::flash(Gmax\MlCandidates::discard($pdo, gmax_post_int('id'), $actor) ? 'ok' : 'erro', 'Candidato descartado.');
+                gmax_redirect('candidatos');
             case 'ml_endpoint_reactivate':
                 if (gmax_post_str('confirm', 20) !== 'REATIVAR') {
                     throw new RuntimeException('Digite REATIVAR para confirmar.');
@@ -596,7 +619,7 @@ if ($page === 'exportar') {
 $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
-$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'execucoes' => 'Detalhes das execuções', 'integracoes' => 'Integrações', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'conferir' => 'Conferência rápida', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
+$titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'execucoes' => 'Detalhes das execuções', 'integracoes' => 'Integrações', 'candidatos' => 'Candidatos do Mercado Livre', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'conferir' => 'Conferência rápida', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
     'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';

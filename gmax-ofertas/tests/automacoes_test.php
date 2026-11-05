@@ -39,19 +39,21 @@ $approvedShopee = static function (PDO $pdo, string $item, int $price = 4990, ?i
 echo "\n== Migração 002 e configuração segura\n";
 test('Migração 002: tarefas criadas inativas, automações pausadas, aprovação automática desligada; reversível', function () use ($ready) {
     $pdo = $ready();
-    eq(6, (int)$pdo->query('SELECT COUNT(*) FROM gmax3_jobs')->fetchColumn());
+    eq(7, (int)$pdo->query('SELECT COUNT(*) FROM gmax3_jobs')->fetchColumn(), '6 da 002 + candidatos_ml da 004');
     eq(0, (int)$pdo->query('SELECT COUNT(*) FROM gmax3_jobs WHERE enabled=1')->fetchColumn(), 'todas inativas');
     eq('1', Settings::get($pdo, 'automacoes_pausadas'));
     eq('0', Settings::get($pdo, 'aprovacao_automatica'));
     eq('1', Settings::get($pdo, 'publicacao_pausada'), 'envios continuam pausados');
     $catalog = $pdo->query('SELECT COUNT(*) FROM gmax3_catalog')->fetchColumn();
+    eq('004', Migrator::down($pdo, 'teste')['version']);
+    ok(!Db::tableExists($pdo, 'gmax3_ml_candidates'), 'a 004 remove só a tabela de candidatos');
     eq('003', Migrator::down($pdo, 'teste')['version']);
     ok(!Db::tableExists($pdo, 'gmax3_job_run_items') && Db::tableExists($pdo, 'gmax3_job_runs'), 'a 003 remove só o detalhamento');
     eq('002', Migrator::down($pdo, 'teste')['version']);
     ok(!Db::tableExists($pdo, 'gmax3_jobs') && Db::tableExists($pdo, 'gmax3_catalog'), 'remove só as tabelas da 002');
     eq($catalog, $pdo->query('SELECT COUNT(*) FROM gmax3_catalog')->fetchColumn(), 'catálogo intacto');
     Migrator::up($pdo, 'teste');
-    eq(6, (int)$pdo->query('SELECT COUNT(*) FROM gmax3_jobs')->fetchColumn(), 'reaplicável');
+    eq(7, (int)$pdo->query('SELECT COUNT(*) FROM gmax3_jobs')->fetchColumn(), 'reaplicável');
 });
 
 echo "\n== Calendário, idempotência e concorrência\n";

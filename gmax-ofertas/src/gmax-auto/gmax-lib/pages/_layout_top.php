@@ -5,7 +5,7 @@ use Gmax\View;
 /** @var string $page @var string $title @var array $flash @var bool $paused @var bool $migrated */
 $nav = [
     'painel' => ['Visão geral', '◧'], 'ofertas' => ['Ofertas', '▤'], 'importar' => ['Importar', '⇪'], 'links' => ['Links afiliados', '⛓'],
-    'ranking' => ['Ranking', '★'], 'publicacoes' => ['Publicações', '✉'], 'automacoes' => ['Automações', '⟳'], 'relatorios' => ['Relatórios', '▥'],
+    'ranking' => ['Ranking', '★'], 'candidatos' => ['Candidatos ML', '◎'], 'publicacoes' => ['Publicações', '✉'], 'automacoes' => ['Automações', '⟳'], 'relatorios' => ['Relatórios', '▥'],
     'categorias' => ['Categorias', '◈'], 'sistema' => ['Sistema', '⚙'],
 ];
 $active = ['oferta' => 'ofertas', 'conferir' => 'ofertas', 'lote' => 'importar', 'lote_links' => 'links', 'integracoes' => 'automacoes', 'execucoes' => 'automacoes'][$page] ?? $page;

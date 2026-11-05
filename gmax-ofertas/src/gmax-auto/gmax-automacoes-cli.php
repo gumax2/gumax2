@@ -12,6 +12,7 @@ declare(strict_types=1);
  *   aprovacao-automatica --autorizar AUTORIZO_APROVACAO_AUTOMATICA | --desativar
  *   ml-oauth status | renovar | testar   Situação/renovação do token OAuth do Mercado Livre (sem exibir tokens)
  *   shopee testar | shopee item ITEM_ID [SHOP_ID]   Testa a Shopee Affiliate API (somente leitura, sem segredos)
+ *   ml-oauth campos [termo] [MLB123]    Inspeção dos campos do catálogo (/products) e tendências (somente leitura)
  *   ml-oauth diagnostico [MLB123]       Diagnóstico completo do Mercado Livre (somente leitura, sem tokens)
  *   ml-oauth item MLB123456789          Testa só a consulta /items/{id} (somente leitura; mostra HTTP, preço e situação)
  */
@@ -69,6 +70,12 @@ try {
             } elseif ($sub === 'item') {
                 // Teste isolado de /items/{id}: somente leitura, nada é gravado no catálogo.
                 $print((new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o))->probeItem((string)($args[2] ?? '')));
+            } elseif ($sub === 'campos') {
+                // Inspeção de campos do catálogo (somente leitura; só nomes/tipos de campos). Uso: ml-oauth campos [termo] [MLB123]
+                @set_time_limit(120);
+                $d = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o, $pdo))->inspectFields((string)($args[2] ?? 'fone de ouvido'), isset($args[3]) ? (string)$args[3] : null);
+                Settings::store($pdo, 'ml_campos_ultimo', json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'cli');
+                $print($d);
             } elseif ($sub === 'diagnostico') {
                 @set_time_limit(180);
                 // Diagnóstico completo, somente leitura (mesmo do painel). Uso: ml-oauth diagnostico [MLB123]

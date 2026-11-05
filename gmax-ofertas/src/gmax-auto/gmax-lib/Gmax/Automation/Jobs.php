@@ -40,6 +40,7 @@ final class Jobs
             'analise_semanal' => self::weekly($pdo, $params, $deadline, $actor, $runId),
             'revisao_vencidas' => self::expired($pdo, $params, $actor),
             'saude_catalogo' => self::health($pdo, $actor),
+            'candidatos_ml' => self::mlCandidates($pdo, $params, $deadline, $runId),
             default => throw new \RuntimeException("Tarefa desconhecida: $job"),
         };
     }
@@ -301,6 +302,93 @@ final class Jobs
         }
         $changed = array_values(array_diff($res['changed'], ['price_verified_at', 'price_verified_by', 'price_seen_at', 'price_source']));
         return ['changed' => $changed, 'verified' => $verified, 'why' => $why];
+    }
+
+    // ------------------------------------------------------------------ 2b. candidatos do catálogo ML (3.1.9)
+    /**
+     * Descobre CANDIDATOS no catálogo oficial do Mercado Livre (/products/search + /products/{id}).
+     * Nunca grava no catálogo de ofertas, nunca consulta endpoints suspensos (o guard do conector
+     * barra) e nunca estima preço: o preço do anúncio vencedor só é guardado se a API informar.
+     */
+    private static function mlCandidates(PDO $pdo, array $p, float $deadline, int $runId): array
+    {
+        $c = self::counters();
+        if (!\Gmax\MlCandidates::enabled($pdo)) {
+            $c['detail'][] = 'Aplique a migração 004 (Sistema) para registrar candidatos do Mercado Livre';
+            return $c;
+        }
+        $conn = Registry::get('mercadolivre', $pdo);
+        if (!$conn->configured() || !method_exists($conn, 'catalogSearch')) {
+            $c['detail'][] = 'Mercado Livre não conectado: candidatos não pesquisados';
+            return $c;
+        }
+        $perTerm = max(1, min(30, (int)($p['limite_por_termo'] ?? 10)));
+        $maxDetail = max(0, min(50, (int)($p['detalhe_max'] ?? 15)));
+        $sources = array_map(static fn($t) => [$t, 'termo', null], self::terms($pdo, 'mercadolivre'));
+        $tr = $conn->trends();
+        if ($tr['ok']) {
+            foreach (array_slice($tr['keywords'], 0, max(0, min(20, (int)($p['tendencias'] ?? 5)))) as $i => $k) {
+                $sources[] = [$k, 'tendencia', $i + 1];
+            }
+        } else {
+            $c['detail'][] = 'Tendências indisponíveis: ' . $tr['error'];
+        }
+        if (!$sources) {
+            $c['detail'][] = 'Sem termos de pesquisa do Mercado Livre e sem tendências disponíveis';
+            return $c;
+        }
+        foreach ($sources as [$term, $origem, $pos]) {
+            if (microtime(true) > $deadline) {
+                $c['detail'][] = 'Prazo da execução atingido; o restante fica para a próxima';
+                break;
+            }
+            $res = $conn->catalogSearch($term, $perTerm);
+            if (!empty($res['suspended'])) {
+                $c['detail'][] = 'mercadolivre: ' . $res['error'];
+                break;
+            }
+            if (!$res['ok']) {
+                $c['errors']++;
+                $c['detail'][] = "catálogo \"$term\": " . $res['error'];
+                continue;
+            }
+            foreach ($res['items'] as $item) {
+                $c['found']++;
+                $out = \Gmax\MlCandidates::upsert($pdo, $item, $origem, $term, $pos, $runId);
+                $out === 'novo' ? $c['created']++ : $c['updated']++;
+            }
+        }
+        $since = \Gmax\Time::now()->modify('-24 hours')->format('Y-m-d H:i:s');
+        $cats = [];
+        foreach (Db::all($pdo, "SELECT product_id FROM gmax3_ml_candidates WHERE status='novo' AND (bb_checked_at IS NULL OR bb_checked_at < ?) ORDER BY last_seen_at DESC LIMIT $maxDetail", [$since]) as $row) {
+            if (microtime(true) > $deadline) {
+                break;
+            }
+            $d = $conn->catalogProduct((string)$row['product_id']);
+            if (!empty($d['suspended'])) {
+                $c['detail'][] = 'mercadolivre: ' . $d['error'];
+                break;
+            }
+            if (!$d['ok']) {
+                $c['errors']++;
+                continue;
+            }
+            $name = null;
+            if ($d['data']['category_id']) {
+                $name = $cats[$d['data']['category_id']] ??= self::mlCategoryName($pdo, (string)$d['data']['category_id']);
+            }
+            \Gmax\MlCandidates::applyDetail($pdo, (string)$row['product_id'], $d['data'], $name);
+        }
+        $withPrice = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_ml_candidates WHERE status='novo' AND bb_price_cents IS NOT NULL");
+        $c['detail'][] = sprintf('Candidatos: %d encontrados (%d novos, %d atualizados); %d com preço do anúncio vencedor informado pela API (não conferido). Nenhuma oferta foi criada.', $c['found'], $c['created'], $c['updated'], $withPrice);
+        return $c;
+    }
+
+    /** Nome da categoria via /categories/{id} (somente leitura); null se indisponível. */
+    private static function mlCategoryName(PDO $pdo, string $cat): ?string
+    {
+        $conn = Registry::get('mercadolivre', $pdo);
+        return method_exists($conn, 'categoryName') ? $conn->categoryName($cat) : null;
     }
 
     // ------------------------------------------------------------------ 3. seleção

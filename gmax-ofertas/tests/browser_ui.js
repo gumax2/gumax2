@@ -29,13 +29,15 @@ const PROFILES = [
 ];
 const PAGES = ['painel', 'ofertas', `oferta&id=${C.ids.shopee[0]}`, `conferir&id=${C.ids.variacao}`, 'importar', 'links', 'ranking', 'publicacoes',
   'automacoes', 'execucoes', 'integracoes', 'relatorios', 'categorias', 'sistema', 'ofertas&marketplace=shopee&variation=1',
-  'ranking&modo=prontas', 'ranking&marketplace=shopee&conferido=nunca&ordem=preco&link=com'];
+  'ranking&modo=prontas', 'ranking&marketplace=shopee&conferido=nunca&ordem=preco&link=com', 'candidatos'];
 const STORE_HOSTS = /^https:\/\/(s\.shopee\.com\.br|shopee\.com\.br|meli\.la|[a-z]+\.mercadolivre\.com\.br|mercadolivre\.com\.br)\//;
 
 async function newContext(browser, p) {
   const ctx = await browser.newContext({ ...p.opts, locale: 'pt-BR' });
   const opened = [];
   await ctx.route(STORE_HOSTS, (route) => { opened.push(route.request().url()); route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Loja (simulada)</title>anúncio' }); });
+  // Imagens do CDN oficial do Mercado Livre (candidatos): simuladas, sem rede.
+  await ctx.route(/^https:\/\/[a-z0-9.-]*mlstatic\.com\//, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') }));
   ctx.opened = opened;
   return ctx;
 }
@@ -167,6 +169,13 @@ async function overflow(page) {
       const ig = await page.evaluate(() => ({ diag: !!document.querySelector('#ml-diagnostico table'), sup: !!document.querySelector('#ml-suporte'), txt: document.querySelector('#ml-diagnostico').textContent }));
       out(G, 'Integrações: diagnóstico do Mercado Livre com conclusões, situação dos recursos e solicitação ao suporte', ig.diag && ig.sup && /Restrição da plataforma/.test(ig.txt) && /PolicyAgent/.test(ig.txt) && !/APP_USR-/.test(ig.txt), ig.txt.slice(0, 200));
       if (p.shots) await page.locator('#ml-diagnostico').screenshot({ path: `${C.shots}/${p.shots}-diagnostico-ml.png` });
+
+      // 4c. Candidatos do Mercado Livre: separados das ofertas, ID de catálogo identificado, imagem do CDN oficial.
+      await page.goto(`${C.base}/painel.php?p=candidatos`);
+      const cd = await page.evaluate(() => ({ n: document.querySelectorAll('.cand').length, aviso: /Candidatos não são ofertas/.test(document.body.textContent),
+        idCat: /ID de catálogo/.test(document.body.textContent), img: document.querySelectorAll('.cand-img').length === 1 && [...document.querySelectorAll('.cand-img')].every((i) => /^https:\/\/[a-z0-9.-]*mlstatic\.com\//.test(i.src) && i.loading === 'lazy'), naoConf: /não conferido/.test(document.body.textContent) }));
+      out(G, 'Candidatos ML: aviso de que não são ofertas, ID de catálogo, imagem oficial e preço marcado como não conferido', cd.n === 2 && cd.aviso && cd.idCat && cd.img && cd.naoConf, JSON.stringify(cd));
+      if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-candidatos.png`, fullPage: true });
 
       // 5. Busca global.
       if (p.w >= 640 || p.mobile) {

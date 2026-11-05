@@ -43,6 +43,11 @@ $diagHttp = new class extends Gmax\Http {
     }
 };
 Settings::store($pdo, 'ml_diagnostico_ultimo', json_encode((new Gmax\Connectors\MercadoLivre($diagHttp, 'APP_USR-1234567890123456-000000-abcdefabcdefabcdefabcdefabcdefab-1'))->diagnose('MLB7519481690'), JSON_UNESCAPED_UNICODE), 'teste');
+// Candidatos do catálogo ML (3.1.9): um com preço do anúncio vencedor, outro sem.
+foreach ([['MLB19615283', 'Fone de Ouvido Bluetooth X1', 'https://http2.mlstatic.com/D_NQ_NP_1.jpg', 12990, 'item:MLB4455667788'], ['MLB20000001', 'Air Fryer 4L Z3', null, null, null]] as $i => [$pid, $nm, $pic, $price, $bb]) {
+    Db::run($pdo, "INSERT INTO gmax3_ml_candidates(product_id,name,category_name,picture_url,permalink,origem,termo,trend_pos,bb_item_id,bb_price_cents,bb_checked_at,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),datetime('now'))",
+        [$pid, $nm, 'Eletrônicos', $pic, "https://www.mercadolivre.com.br/x/p/$pid", $i ? 'tendencia' : 'termo', $i ? 'air fryer' : 'fone', $i ? 1 : null, $bb, $price]);
+}
 $before = [
     'pausa' => Settings::paused($pdo), 'auto' => Settings::get($pdo, 'automacoes_pausadas'), 'aprov' => Settings::get($pdo, 'aprovacao_automatica'),
     'links' => Db::all($pdo, 'SELECT id, affiliate_url FROM gmax3_catalog ORDER BY id'),
