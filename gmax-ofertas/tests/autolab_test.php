@@ -53,10 +53,10 @@ $chan = null;
 /** Banco migrado (001–006), Shopee com 5 produtos de link afiliado válido, canal falso. */
 $ready = static function (?FakeChannel $c = null) use (&$chan, $at): PDO {
     Registry::resetOverrides();
-    Time::freeze($at('10:05'));
     @unlink(AutoLab::pauseFile());
-    $pdo = t_seed('hostgator');
+    $pdo = t_seed('hostgator'); // t_seed zera o relógio congelado: congelar DEPOIS
     Migrator::up($pdo, 'teste');
+    Time::freeze($at('10:05'));
     Settings::set($pdo, 'api_intervalo_ms', '0', 't');
     Db::run($pdo, "UPDATE gmax3_catalog SET affiliate_url='https://s.shopee.com.br/AbCd' || id, affiliate_norm='s.shopee.com.br/AbCd' || id, availability='disponivel', variation_pending=0 WHERE marketplace='shopee'");
     $chan = $c ?? new FakeChannel();
@@ -344,6 +344,28 @@ test('Período autorizado (7 dias): terminado, o AutoLab se encerra; renovar só
     Time::freeze(Time::now()->modify('+8 days'));
     eq('autolab_encerrado', AutoLab::tick($pdo)['resultado']);
     throws(fn() => AutoLab::resume($pdo, 'admin'), 'não está pausado');
+});
+
+test('Revisão de segurança: painel não transforma falha/desativado em pausado; links sem http também são barrados', function () use ($ready, $activate, &$chan) {
+    $pdo = $ready();
+    Registry::override('shopee', new FakeMarketConnector('shopee', ok: false));
+    $activate($pdo);
+    AutoLab::pause($pdo, 'destino recusado', 't', 'falha');
+    AutoLab::pause($pdo, 'Pausa emergencial pelo painel', 'admin');
+    eq('falha', AutoLab::state($pdo), 'pausar não tira de "falha"');
+    throws(fn() => AutoLab::resume($pdo, 'admin'), 'em falha');
+    AutoLab::pause($pdo, 'cli', 't', 'desativado');
+    eq('', Settings::get($pdo, 'autolab_ate'), 'desativar encerra o período');
+    AutoLab::pause($pdo, 'painel', 'admin');
+    eq('desativado', AutoLab::state($pdo));
+    foreach (['meli.la/AbCd123', 't.me/grupo', 'www.site.com.br/x', 'compre em loja.exemplo.com'] as $bad) {
+        ok(in_array('texto contém endereço de site além do link permitido', AutoLab::textProblems("TESTE — CANDIDATO\n$bad", 'candidato'), true), $bad);
+    }
+    ok(in_array('texto contém endereço de site além do link permitido', AutoLab::textProblems("TESTE — OFERTA VALIDADA\nhttps://s.shopee.com.br/AbCd1\ns.shopee.com.br/Outro1", 'oferta_validada'), true), 'segundo link Shopee sem http');
+    eq([], AutoLab::textProblems("TESTE — OFERTA VALIDADA\nFone 2.0 R$ 39,90\nLink (afiliado Shopee): https://s.shopee.com.br/AbCd1\n\nRef. AutoLab 2026-11-05 10:00", 'oferta_validada'), 'mensagem normal passa');
+    Db::run($pdo, "INSERT INTO gmax3_ml_candidates(product_id,name,origem,first_seen_at,last_seen_at) VALUES('MLB1','Fone meli.la/AbCd123 @vendedor t.me/x','termo',?,?)", [Time::nowSql(), Time::nowSql()]);
+    $c = Composer::compose($pdo, 'x');
+    ok(!str_contains($c['text'], 'meli.la') && !str_contains($c['text'], 't.me') && !str_contains($c['text'], '@vendedor') && AutoLab::textProblems($c['text'], $c['kind']) === [], $c['text']);
 });
 
 echo "\n== Isolamento e compatibilidade\n";

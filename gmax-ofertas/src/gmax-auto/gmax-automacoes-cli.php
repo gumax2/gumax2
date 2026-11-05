@@ -72,14 +72,20 @@ try {
                 $print('proc_open indisponível nesta hospedagem: rode em duas chamadas, "validar-retomada etapa1" e depois "validar-retomada etapa2". Cópia preparada: ' . basename($dir));
                 break;
             }
-            foreach ([$RV::KILL_AFTER, 0] as $kill) {
-                $p = proc_open([PHP_BINARY, __FILE__, 'validar-retomada-filho', $dir, (string)$kill], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
-                stream_get_contents($pipes[1]);
-                stream_get_contents($pipes[2]);
-                $code = proc_close($p);
-                $print($kill ? "Etapa 1: processo encerrado à força (código $code)" : "Etapa 2: ciclo do Cron na cópia (código $code)");
+            try {
+                foreach ([$RV::KILL_AFTER, 0] as $kill) {
+                    // Saída do filho em arquivo dentro da pasta temporária (sem risco de travar lendo pipes).
+                    $p = proc_open([PHP_BINARY, __FILE__, 'validar-retomada-filho', $dir, (string)$kill], [1 => ['file', $dir . '/filho.log', 'a'], 2 => ['file', $dir . '/filho.log', 'a']], $pipes);
+                    $code = proc_close($p);
+                    $print($kill ? "Etapa 1: processo encerrado à força (código $code)" : "Etapa 2: ciclo do Cron na cópia (código $code)");
+                }
+                $print($RV::verify($dir));
+            } finally {
+                if (is_dir($dir)) {
+                    $RV::remove($dir); // a cópia nunca fica para trás
+                    @unlink($RV::pointer());
+                }
             }
-            $print($RV::verify($dir));
             break;
         case 'validar-retomada-filho':
             $print(Gmax\Automation\ResumeValidation::child((string)($args[1] ?? ''), (int)($args[2] ?? 0)));

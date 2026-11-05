@@ -24,17 +24,62 @@ final class ResumeValidation
     public const KILL_AFTER = 4;
 
     private static ?string $pointer = null;
+    private static ?string $root = null;
+
+    /** Pasta privada ORIGINAL (fixada antes de child() apontar GMAX_SECRETS_DIR para a cópia). */
+    public static function root(): string
+    {
+        return self::$root ??= Config::secretsDir();
+    }
 
     /** Arquivo que guarda a pasta da validação em andamento (fixado antes de child() trocar a pasta privada). */
     public static function pointer(): string
     {
-        return self::$pointer ??= Config::secretsDir() . '/gmax-validacao-atual.txt';
+        return self::$pointer ??= self::root() . '/gmax-validacao-atual.txt';
+    }
+
+    /** Só aceita uma pasta de validação criada por prepare(), diretamente dentro de gmax-secrets. */
+    public static function assertDir(string $dir): string
+    {
+        $real = realpath($dir);
+        $root = realpath(self::root());
+        if ($real === false || $root === false || dirname($real) !== $root || !preg_match('/^gmax-validacao-\d{8}-\d{6}-[0-9a-f]{6}$/D', basename($real))
+            || !is_file($real . '/copia.sqlite') || is_link($real . '/copia.sqlite')) {
+            throw new RuntimeException('Pasta de validação inválida');
+        }
+        return $real;
+    }
+
+    /** Remove cópias de validações abandonadas há mais de 1 h (podem conter configurações do banco). */
+    public static function cleanupOld(): int
+    {
+        $n = 0;
+        foreach (glob(self::root() . '/gmax-validacao-*', GLOB_ONLYDIR) ?: [] as $d) {
+            if (filemtime($d) < time() - 3600) {
+                try {
+                    self::remove(self::assertDir($d));
+                    $n++;
+                } catch (RuntimeException) {
+                }
+            }
+        }
+        return $n;
+    }
+
+    public static function remove(string $dir): void
+    {
+        $dir = self::assertDir($dir);
+        foreach (glob($dir . '/*') ?: [] as $f) {
+            @unlink($f); // só arquivos da cópia (a pasta foi validada acima)
+        }
+        @rmdir($dir);
     }
 
     /** Prepara a cópia e devolve a pasta temporária. */
     public static function prepare(PDO $live): string
     {
-        $dir = Config::secretsDir() . '/gmax-validacao-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(3));
+        self::cleanupOld();
+        $dir = self::root() . '/gmax-validacao-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(3));
         if (!@mkdir($dir, 0700, true)) {
             throw new RuntimeException('Não foi possível criar a pasta temporária em gmax-secrets');
         }
@@ -62,9 +107,8 @@ final class ResumeValidation
     public static function child(string $dir, int $kill): array
     {
         self::pointer();
-        if (!is_file($dir . '/copia.sqlite') || !str_starts_with(realpath($dir) ?: '', realpath(Config::secretsDir()) ?: '-')) {
-            throw new RuntimeException('Pasta de validação inválida');
-        }
+        self::root();
+        $dir = self::assertDir($dir);
         putenv('GMAX_SECRETS_DIR=' . $dir); // trava e pausa na pasta temporária: o Cron de produção não é bloqueado
         Db::use(new PDO('sqlite:' . $dir . '/copia.sqlite'));
         $c = new ValidationConnector($dir . '/consultas.log', $kill);
@@ -76,6 +120,7 @@ final class ResumeValidation
     /** Confere o resultado depois das duas etapas e apaga a cópia. */
     public static function verify(string $dir): array
     {
+        $dir = self::assertDir($dir);
         $pdo = new PDO('sqlite:' . $dir . '/copia.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
         $seen = array_values(array_filter(array_map('intval', file($dir . '/consultas.log', FILE_IGNORE_NEW_LINES) ?: [])));
         $synthetic = array_map('intval', $pdo->query("SELECT id FROM gmax3_catalog WHERE dedup_key LIKE 'validacao%'")->fetchAll(PDO::FETCH_COLUMN));
@@ -90,10 +135,7 @@ final class ResumeValidation
             'todos os produtos de validação foram consultados' => !array_diff($synthetic, $seen),
         ];
         $pdo = null;
-        foreach (glob($dir . '/*') ?: [] as $f) {
-            @unlink($f);
-        }
-        @rmdir($dir);
+        self::remove($dir);
         @unlink(self::pointer());
         return ['aprovado' => !in_array(false, $checks, true), 'verificacoes' => $checks, 'consultas' => count($seen), 'consultas_distintas' => count(array_unique($seen)), 'execucoes' => $runs];
     }

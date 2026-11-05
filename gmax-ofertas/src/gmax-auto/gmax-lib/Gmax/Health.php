@@ -42,21 +42,6 @@ final class Health
         }
     }
 
-    /** Situação de uma trava (flock) sem segurá-la. */
-    private static function lockState(string $file): string
-    {
-        $fh = @fopen($file, 'c');
-        if ($fh === false) {
-            return 'indisponível (sem permissão)';
-        }
-        $free = flock($fh, LOCK_EX | LOCK_NB);
-        if ($free) {
-            flock($fh, LOCK_UN);
-        }
-        fclose($fh);
-        return $free ? 'livre' : 'em uso agora';
-    }
-
     public static function perms(string $path): ?array
     {
         if (!file_exists($path)) {
@@ -102,11 +87,12 @@ final class Health
             : 'nenhuma chamada registrada (o Cron "executar-pendentes" ainda não rodou)');
         // Execuções
         if (Db::tableExists($pdo, 'gmax3_job_runs')) {
+            // Sem tocar na trava das automações (pegá-la aqui faria um Cron simultâneo pular a chamada).
             $running = Db::all($pdo, "SELECT job, started_at FROM gmax3_job_runs WHERE status='executando'");
-            $lock = self::lockState(Runner::lockFile());
-            $c['Execuções em andamento'] = self::level(!$running || $lock === 'em uso agora', true, $running
-                ? count($running) . ' marcada(s) "executando"; trava ' . $lock . ($lock === 'livre' ? ' — processo interrompido: será fechado e retomado no próximo Cron' : '')
-                : 'nenhuma; trava ' . $lock);
+            $old = array_filter($running, static fn($r) => Time::hoursSince($r['started_at']) * 60 > 10);
+            $c['Execuções em andamento'] = self::level(!$old, true, $running
+                ? count($running) . ' marcada(s) "executando"' . ($old ? ' há mais de 10 min — provavelmente interrompida: o próximo Cron fecha e retoma' : ' (em andamento)')
+                : 'nenhuma');
             $fails = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_job_runs WHERE status='falhou' AND started_at >= ?", [Time::now()->modify('-7 days')->format('Y-m-d H:i:s')]);
             $c['Falhas de tarefas (7 dias)'] = self::level($fails === 0, true, $fails . ' execução(ões) com falha');
         }
@@ -240,8 +226,13 @@ final class Health
             }
         }
         try {
-            $pdo->exec('BEGIN IMMEDIATE');
-            $pdo->exec('ROLLBACK');
+            // Conexão NOVA: a já aberta não enxerga mudança de permissão.
+            $fresh = new PDO('sqlite:' . Db::path($pdo), null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $fresh->exec('PRAGMA busy_timeout = 5000');
+            $fresh->exec('BEGIN IMMEDIATE');
+            $fresh->exec('CREATE TEMP TABLE IF NOT EXISTS gmax_perm_teste(x)');
+            $fresh->exec('ROLLBACK');
+            $fresh = null;
         } catch (Throwable $e) {
             foreach ($done as [$p, $from]) {
                 @chmod($p, octdec($from));

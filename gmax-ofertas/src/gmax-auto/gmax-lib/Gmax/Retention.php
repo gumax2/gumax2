@@ -84,6 +84,31 @@ final class Retention
         return ["id BETWEEN ? AND ? AND {$s['coluna']} < ?", [$s['min_id'], $s['max_id'], $s['corte']]];
     }
 
+    /** Lista exata (tabela,id,data) do conjunto, em ordem; usada na simulação e reconferida na execução. */
+    private static function listLines(PDO $pdo, array $sel): \Generator
+    {
+        foreach ($sel as $t => $s) {
+            if ((int)$s['quantidade'] === 0) {
+                continue;
+            }
+            [$w, $a] = self::where($s);
+            $st = $pdo->prepare("SELECT id, {$s['coluna']} d FROM $t WHERE $w ORDER BY id");
+            $st->execute($a);
+            while ($r = $st->fetch(PDO::FETCH_NUM)) {
+                yield "$t,{$r[0]},{$r[1]}\n";
+            }
+        }
+    }
+
+    private static function listHash(PDO $pdo, array $sel): string
+    {
+        $h = hash_init('sha256');
+        foreach (self::listLines($pdo, $sel) as $line) {
+            hash_update($h, $line);
+        }
+        return hash_final($h);
+    }
+
     /** Simulação: grava exatamente o que seria eliminado (critério e lista completa de IDs). Não apaga nada. */
     public static function simulate(PDO $pdo, string $actor): array
     {
@@ -107,22 +132,17 @@ final class Retention
         $file = self::dir() . "/simulacao-$id.csv.gz";
         $gz = gzopen($file, 'wb6');
         gzwrite($gz, "tabela,id,data\n");
-        foreach ($sel as $t => $s) {
-            if ($s['quantidade'] === 0) {
-                continue;
-            }
-            [$w, $a] = self::where($s);
-            $st = $pdo->prepare("SELECT id, {$s['coluna']} d FROM $t WHERE $w ORDER BY id");
-            $st->execute($a);
-            while ($r = $st->fetch(PDO::FETCH_NUM)) {
-                gzwrite($gz, "$t,{$r[0]},{$r[1]}\n");
-            }
+        $h = hash_init('sha256');
+        foreach (self::listLines($pdo, $sel) as $line) {
+            gzwrite($gz, $line);
+            hash_update($h, $line);
         }
         gzclose($gz);
+        $contentHash = hash_final($h);
         @chmod($file, 0600);
         $result = ['eliminaveis' => $sel, 'total_eliminavel' => array_sum(array_column($sel, 'quantidade')), 'protegidos' => $protected,
             'backups' => ['quantidade' => count($backups), 'bytes' => array_sum(array_column($backups, 'bytes')), 'acao' => 'nenhum backup é apagado nesta versão'],
-            'lista' => basename($file), 'lista_sha256' => hash_file('sha256', $file)];
+            'lista' => basename($file), 'lista_sha256' => hash_file('sha256', $file), 'lista_conteudo_sha256' => $contentHash];
         Db::run($pdo, 'UPDATE gmax3_retention_runs SET result=?, finished_at=?, export_file=?, export_sha256=? WHERE id=?', [
             json_encode($result, JSON_UNESCAPED_UNICODE), Time::nowSql(), basename($file), $result['lista_sha256'], $id,
         ]);
@@ -169,6 +189,11 @@ final class Retention
             if ($n !== (int)$s['quantidade']) {
                 throw new RuntimeException("$t: a simulação previa {$s['quantidade']} linha(s) e hoje há $n. Simule de novo.");
             }
+        }
+        // Além da quantidade, a LISTA (tabela, id, data) tem de ser idêntica à simulada.
+        $simResult = json_decode((string)$sim['result'], true);
+        if (!empty($simResult['lista_conteudo_sha256']) && !hash_equals((string)$simResult['lista_conteudo_sha256'], self::listHash($pdo, $planned))) {
+            throw new RuntimeException('A lista atual difere da simulada: simule de novo e confira. Nada foi apagado.');
         }
         $total = array_sum(array_map(static fn($s) => (int)$s['quantidade'], $planned));
         if ($total === 0) {

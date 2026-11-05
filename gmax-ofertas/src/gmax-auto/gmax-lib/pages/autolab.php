@@ -44,7 +44,7 @@ $stateTag = static fn(string $s) => '<span class="tag ' . (['confirmado' => 'tag
   <p class="small">Período autorizado até <strong><?= View::e(Time::show(Settings::get($pdo, 'autolab_ate', '') ?: null)) ?></strong> · horários <strong><?= View::e(implode(', ', AutoLab::times($pdo))) ?></strong> (Brasília) · última execução
     <?= $last ? View::e(Time::show($last['started_at'])) . ' — ' . View::e($last['status']) : '—' ?></p>
   <div class="actions">
-    <?php if (in_array($st, ['ativo', 'falha'], true)): ?>
+    <?php if ($st === 'ativo'): ?>
       <?= View::actionButton('autolab_pause', ['back' => 'autolab'], 'PAUSAR AUTOLAB AGORA', 'btn btn-danger') ?>
     <?php elseif ($st === 'pausado'): ?>
       <?= View::actionButton('autolab_resume', ['back' => 'autolab'], 'Retomar AutoLab', 'btn', 'Retomar o AutoLab? Ele volta a enviar mensagens de TESTE ao grupo privado nos próximos horários.') ?>

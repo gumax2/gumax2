@@ -143,8 +143,8 @@ Todos sem rede e com canal Telegram **falso**: nenhum teste envia mensagem real.
 
 | Suíte | Cobertura |
 |---|---|
-| `tests/autolab_test.php` (20) | Cobre os testes obrigatórios que você listou:<br>• destino permitido e não autorizado (público, canal, outro chat, membros demais, bot fora);<br>• canal real recusa outro chat ou texto sem rótulo **sem requisição**;<br>• oferta validada;<br>• preço alterado: usa o preço da API e o catálogo fica intacto;<br>• dados ausentes, link inválido e candidato ML;<br>• simulação;<br>• falhas de rede (Shopee e Telegram);<br>• duplicidade e **6 processos simultâneos → 1 envio**;<br>• **processo morto (SIGKILL) no meio do envio**: vira incerto e não reenvia;<br>• timeout do Telegram, reconciliação, limite diário e intervalo;<br>• pausa emergencial, também no meio da preparação;<br>• fim do período;<br>• **isolamento da fila comercial**;<br>• compatibilidade (006 e 005 revertem separadamente);<br>• CLI. |
-| `tests/v321_test.php` (12) | Índices em uso, gatilhos de proteção, simulação exata, execução protegida, **retenção interrompida por SIGKILL sem apagar nada**, nenhuma exclusão automática, **revisão morta e retomada no Cron seguinte**, dois Crons simultâneos, `validar-retomada` de ponta a ponta, monitor, permissões, SQLite sem WAL |
+| `tests/autolab_test.php` (21) | Cobre os testes obrigatórios que você listou:<br>• destino permitido e não autorizado (público, canal, outro chat, membros demais, bot fora);<br>• canal real recusa outro chat ou texto sem rótulo **sem requisição**;<br>• oferta validada;<br>• preço alterado: usa o preço da API e o catálogo fica intacto;<br>• dados ausentes, link inválido e candidato ML;<br>• simulação;<br>• falhas de rede (Shopee e Telegram);<br>• duplicidade e **6 processos simultâneos → 1 envio**;<br>• **processo morto (SIGKILL) no meio do envio**: vira incerto e não reenvia;<br>• timeout do Telegram, reconciliação, limite diário e intervalo;<br>• pausa emergencial, também no meio da preparação;<br>• fim do período;<br>• painel não tira o AutoLab de "falha" nem de "desativado" (só a CLI);<br>• endereços de site sem `http://` (por exemplo `meli.la/…`, `t.me/…`) são removidos dos títulos e barrados na mensagem;<br>• **isolamento da fila comercial**;<br>• compatibilidade (006 e 005 revertem separadamente);<br>• CLI. |
+| `tests/v321_test.php` (13) | Índices em uso, gatilhos de proteção, simulação exata, execução protegida, **retenção interrompida por SIGKILL sem apagar nada**, nenhuma exclusão automática, **revisão morta e retomada no Cron seguinte**, dois Crons simultâneos, `validar-retomada` de ponta a ponta, pasta de validação restrita (nunca a raiz de `gmax-secrets`) e limpeza de cópias antigas, monitor, permissões, SQLite sem WAL |
 | `tests/http_test.php` | Páginas AutoLab e Diagnóstico pelo servidor PHP real. Pausa com CSRF. "Falha" não se retoma pelo painel. Destino e duração não editáveis. A exclusão não existe no painel. |
 | `tests/ui_test.php` | AutoLab e Diagnóstico nos 9 perfis emulados |
 | Demais suítes | Regressão completa |
@@ -154,6 +154,22 @@ Todos sem rede e com canal Telegram **falso**: nenhum teste envia mensagem real.
 - o primeiro envio real;
 - `validar-retomada` na HostGator;
 - uma semana de AutoLab acompanhada (veja `RELATORIO_HOMOLOGACAO_AUTOLAB.md`).
+
+## 5.1 Revisão independente de segurança
+
+Um revisor independente (agente separado, só leitura) não encontrou falha crítica ou alta. Ele confirmou que o destino é fixo, que nenhuma trava comercial é liberada, que não há envio duplicado e que a retenção não pode apagar nada sozinha. Todos os achados foram corrigidos nesta versão e têm teste:
+
+| Achado | Gravidade | Correção |
+|---|---|---|
+| O painel conseguia transformar "falha" ou "desativado" em "pausado" e depois retomar sem a CLI | Média | "Pausar" só age sobre "ativo". "Desativado" e "encerrado" apagam o período, e retomar exige nova ativação. O botão de pausa só aparece com o AutoLab ativo |
+| Endereços sem `http://` em títulos (`meli.la/…`, `t.me/…`, `www…`) passariam como link clicável | Média | Os títulos perdem qualquer coisa com cara de domínio e as menções `@`. A última barreira recusa qualquer domínio além do link afiliado Shopee permitido |
+| A ferramenta de validação aceitava pasta vizinha ou a própria `gmax-secrets` | Baixa | Só aceita uma pasta `gmax-validacao-…` diretamente dentro de `gmax-secrets`, com a cópia como arquivo comum, e fixa a pasta original antes de trocar para a cópia |
+| Cópias temporárias abandonadas | Baixa | Cópias com mais de 1 h são removidas, e o modo automático sempre apaga a cópia (`finally`) |
+| A conferência depois de ajustar permissões usava a conexão já aberta | Baixa | A conferência abre uma conexão **nova** |
+| O Diagnóstico pegava a trava das automações por um instante | Baixa | Não pega mais. A situação vem dos registros "executando" |
+| A retenção conferia só a quantidade | Baixa | Também confere o resumo SHA-256 da lista exata (tabela, ID, data) |
+| Uma simulação nova a cada clique | Baixa | Pelo painel, uma simulação de menos de 1 h é reaproveitada |
+| A leitura da saída dos processos filhos podia travar | Baixa | A saída vai para um arquivo dentro da pasta temporária |
 
 ## 6. Benchmarks (ambiente de desenvolvimento, não a HostGator)
 

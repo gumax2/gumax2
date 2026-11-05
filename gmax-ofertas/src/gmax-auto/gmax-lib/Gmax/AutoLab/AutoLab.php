@@ -35,6 +35,8 @@ final class AutoLab
     public const MAX_MEMBERS_CAP = 50;
     public const MAX_UNCERTAIN_IN_ROW = 2;
     public const DEDUP_DAYS = 7;
+    /** Qualquer coisa com cara de domínio (o Telegram transforma em link mesmo sem http). */
+    public const DOMAIN_RE = '~\b(?:[a-z0-9-]+\.)+(?:[a-z]{2,})\b(?:/\S*)?~iu';
     public const DEFAULTS = ['autolab_horarios' => '10:00,18:00', 'autolab_limite_diario' => '2', 'autolab_max_membros' => '10', 'autolab_link_afiliado_shopee' => '1'];
 
     /** Fábrica do canal (testes injetam um canal falso; em produção, o Telegram real). */
@@ -92,7 +94,12 @@ final class AutoLab
                 $p[] = 'link fora do padrão afiliado Shopee';
             }
         }
-        return $p;
+        // Domínios sem http(s):// também viram link no Telegram (ex.: meli.la/abc, t.me/x, www.site.com).
+        $rest = (string)preg_replace('~https?://[^\s]+~i', ' ', $text);
+        if (preg_match(self::DOMAIN_RE, $rest)) {
+            $p[] = 'texto contém endereço de site além do link permitido';
+        }
+        return array_values(array_unique($p));
     }
 
     /** @return list<string> horários locais HH:MM */
@@ -218,6 +225,14 @@ final class AutoLab
 
     public static function pause(PDO $pdo, string $reason, string $actor, string $state = 'pausado'): void
     {
+        // "Pausar" só vale a partir de "ativo": nunca transforma falha/desativado/encerrado (que exigem a CLI)
+        // em "pausado", que o painel poderia retomar.
+        if ($state === 'pausado' && self::state($pdo) !== 'ativo') {
+            return;
+        }
+        if (in_array($state, ['desativado', 'encerrado'], true)) {
+            Settings::set($pdo, 'autolab_ate', '', $actor); // retomar exige nova ativação pela CLI
+        }
         Settings::set($pdo, 'autolab_estado', $state, $actor);
         Settings::set($pdo, 'autolab_motivo', mb_substr($reason, 0, 300), $actor);
         Audit::log($pdo, $actor, $state === 'falha' ? 'autolab_falha' : 'autolab_pausado', 'autolab', null, ['motivo' => $reason]);

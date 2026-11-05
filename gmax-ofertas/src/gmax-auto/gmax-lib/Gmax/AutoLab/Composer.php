@@ -34,7 +34,7 @@ final class Composer
     {
         $s = trim((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string)$s));
         // Sem links ou menções vindos dos dados do marketplace.
-        $s = (string)preg_replace(['~https?://\S+~i', '~(^|\s)@\w+~u'], ['[link removido]', '$1'], $s);
+        $s = (string)preg_replace(['~https?://\S+~i', AutoLab::DOMAIN_RE, '~@\w+~u'], ['[link removido]', '[link removido]', ''], $s);
         return mb_substr($s, 0, $max);
     }
 
@@ -134,7 +134,7 @@ final class Composer
         }
         $linkOk = Url::isAffiliate('shopee', $r['affiliate_url'] ?? null) && AutoLab::setting($pdo, 'autolab_link_afiliado_shopee') === '1';
         if (!$linkOk) {
-            $missing[] = Url::isAffiliate('shopee', $r['affiliate_url'] ?? null) ? 'autorização de link afiliado no grupo de teste' : 'link afiliado Shopee válido (s.shopee.com.br)';
+            $missing[] = Url::isAffiliate('shopee', $r['affiliate_url'] ?? null) ? 'autorização de link afiliado no grupo de teste' : 'link afiliado Shopee válido (link curto da Central de Afiliados)';
         }
         $catalogPrice = isset($r['price_promo_cents']) ? (int)$r['price_promo_cents'] : null;
         $title = self::clean(($d['title'] ?? '') !== '' ? (string)$d['title'] : (string)$r['title']);

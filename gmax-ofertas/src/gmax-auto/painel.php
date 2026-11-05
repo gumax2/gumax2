@@ -262,6 +262,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 View::flash($res === 'ok' ? 'ok' : 'erro', $res === 'ok' ? 'Integridade do banco: ok.' : 'Integridade do banco com problema: ' . mb_substr($res, 0, 200));
                 gmax_redirect('diagnostico');
             case 'retention_simulate':
+                $last = Gmax\Retention::last($pdo);
+                if ($last && Gmax\Time::hoursSince((string)$last['created_at']) < 1) {
+                    View::flash('ok', 'Já existe uma simulação de menos de 1 hora (#' . (int)$last['id'] . '): resultado abaixo. Nada foi apagado.');
+                    gmax_redirect('diagnostico');
+                }
                 $r = Gmax\Retention::simulate($pdo, $actor);
                 View::flash('ok', sprintf('Simulação #%d: %d linha(s) seriam eliminadas. Nada foi apagado.', $r['simulacao'], $r['total_eliminavel']));
                 gmax_redirect('diagnostico');

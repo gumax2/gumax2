@@ -223,6 +223,25 @@ test('validar-retomada (para a hospedagem): cópia temporária, processo morto, 
     ok(str_contains($o2, '"aprovado": true'), $o2);
 });
 
+test('Validação: só aceita pasta própria dentro de gmax-secrets (nunca a raiz nem pasta vizinha); cópias antigas são limpas', function () use ($ready) {
+    $pdo = $ready();
+    $root = Config::secretsDir();
+    touch($root . '/copia.sqlite');
+    throws(fn() => ResumeValidation::assertDir($root), 'inválida');
+    @mkdir($root . '-x/gmax-validacao-20260101-000000-abcdef', 0700, true);
+    touch($root . '-x/gmax-validacao-20260101-000000-abcdef/copia.sqlite');
+    throws(fn() => ResumeValidation::assertDir($root . '-x/gmax-validacao-20260101-000000-abcdef'), 'inválida');
+    throws(fn() => ResumeValidation::child($root, 0), 'inválida');
+    unlink($root . '/copia.sqlite');
+    $old = ResumeValidation::prepare($pdo);
+    touch($old, time() - 7200);
+    ResumeValidation::prepare($pdo);
+    ok(!is_dir($old), 'cópia abandonada há mais de 1 h removida');
+    foreach (glob($root . '/gmax-validacao-*', GLOB_ONLYDIR) as $d) {
+        ResumeValidation::remove($d);
+    }
+});
+
 echo "\n== Monitor de saúde e permissões\n";
 test('Monitor: tarefas, Cron, travas, banco, disco, backups e permissões; integridade sob demanda', function () use ($ready) {
     $pdo = $ready();
