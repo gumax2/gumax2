@@ -9,7 +9,7 @@ require __DIR__ . '/harness.php';
 define('GMAX_APP_DIR', t_app());
 require GMAX_APP_DIR . '/gmax-lib/bootstrap.php';
 
-use Gmax\Db;
+use Gmax\{Db, Settings};
 
 t_seed();
 $app = t_app();
@@ -600,6 +600,32 @@ if (!$hasPw) {
     @unlink("$secrets/mercadolivre-app.php");
     @unlink("$secrets/mercadolivre-token.enc");
 }
+
+echo "\n== GMAX AutoLab pelo navegador\n";
+test('AutoLab: página abre; pausa de emergência imediata com CSRF; retomar só de "pausado"; destino e duração não editáveis', function () {
+    $pdo = Db::get();
+    Settings::set($pdo, 'autolab_estado', 'ativo', 'teste');
+    Settings::set($pdo, 'autolab_ate', gmdate('Y-m-d H:i:s', time() + 86400), 'teste');
+    $r = http('GET', 'painel.php?p=autolab');
+    eq(200, $r['status']);
+    ok(str_contains($r['body'], 'PAUSAR AUTOLAB AGORA') && str_contains($r['body'], '-1004443626419'), 'botão de pausa e destino fixo');
+    http('POST', 'painel.php', ['action' => 'autolab_pause', 'csrf' => 'errado']);
+    eq('ativo', Settings::get($pdo, 'autolab_estado'), 'sem CSRF válido nada acontece');
+    follow(http('POST', 'painel.php', ['action' => 'autolab_pause', 'csrf' => csrf($r['body'])]));
+    eq('pausado', Settings::get($pdo, 'autolab_estado'));
+    $r = http('GET', 'painel.php?p=autolab');
+    ok(str_contains($r['body'], 'Retomar AutoLab'), 'retomar disponível');
+    follow(http('POST', 'painel.php', ['action' => 'autolab_resume', 'csrf' => csrf($r['body'])]));
+    eq('ativo', Settings::get($pdo, 'autolab_estado'));
+    Settings::set($pdo, 'autolab_estado', 'falha', 'teste');
+    $r = follow(http('POST', 'painel.php', ['action' => 'autolab_resume', 'csrf' => csrf(http('GET', 'painel.php?p=autolab')['body'])]));
+    eq('falha', Settings::get($pdo, 'autolab_estado'), 'falha não se retoma pelo painel');
+    ok(str_contains($r['body'], 'retome pela CLI'), 'explica o caminho');
+    follow(http('POST', 'painel.php', ['action' => 'settings_save', 'back' => 'sistema', 'csrf' => csrf(http('GET', 'painel.php?p=sistema')['body']), 'autolab_ate' => '2099-01-01 00:00:00', 'autolab_estado' => 'ativo']));
+    eq('falha', Settings::get($pdo, 'autolab_estado'), 'estado não muda pelas configurações');
+    ok(Settings::get($pdo, 'autolab_ate') < '2099', 'duração não muda pelo painel');
+    Settings::set($pdo, 'autolab_estado', 'desativado', 'teste');
+});
 
 echo "\n== Agendadores existentes e CLI (sem rede)\n";
 $cli = static function (array $cmd) use ($env, $app): array {

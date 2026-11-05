@@ -29,7 +29,7 @@ const PROFILES = [
 ];
 const PAGES = ['painel', 'ofertas', `oferta&id=${C.ids.shopee[0]}`, `conferir&id=${C.ids.variacao}`, 'importar', 'links', 'ranking', 'publicacoes',
   'automacoes', 'execucoes', 'integracoes', 'relatorios', 'categorias', 'sistema', 'ofertas&marketplace=shopee&variation=1',
-  'ranking&modo=prontas', 'ranking&marketplace=shopee&conferido=nunca&ordem=preco&link=com', 'candidatos'];
+  'ranking&modo=prontas', 'ranking&marketplace=shopee&conferido=nunca&ordem=preco&link=com', 'candidatos', 'autolab'];
 const STORE_HOSTS = /^https:\/\/(s\.shopee\.com\.br|shopee\.com\.br|meli\.la|[a-z]+\.mercadolivre\.com\.br|mercadolivre\.com\.br)\//;
 
 async function newContext(browser, p) {
@@ -176,6 +176,14 @@ async function overflow(page) {
         idCat: /ID de catálogo/.test(document.body.textContent), img: document.querySelectorAll('.cand-img').length === 1 && [...document.querySelectorAll('.cand-img')].every((i) => /^https:\/\/[a-z0-9.-]*mlstatic\.com\//.test(i.src) && i.loading === 'lazy'), naoConf: /não conferido/.test(document.body.textContent) }));
       out(G, 'Candidatos ML: aviso de que não são ofertas, ID de catálogo, imagem oficial e preço marcado como não conferido', cd.n === 2 && cd.aviso && cd.idCat && cd.img && cd.naoConf, JSON.stringify(cd));
       if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-candidatos.png`, fullPage: true });
+
+      // 4d. GMAX AutoLab: aviso de homologação, botão de pausa imediata, destino e histórico.
+      await page.goto(`${C.base}/painel.php?p=autolab`);
+      const al = await page.evaluate(() => ({ aviso: /Homologação, não publicação comercial/.test(document.body.textContent),
+        pausa: [...document.querySelectorAll('button')].some((b) => /PAUSAR AUTOLAB AGORA/.test(b.textContent)), destino: /-1004443626419/.test(document.body.textContent),
+        hist: /Oferta validada/.test(document.body.textContent) && /Candidato/.test(document.body.textContent), conf: /confirmado/.test(document.body.textContent) }));
+      out(G, 'AutoLab: aviso de homologação, pausa imediata, destino fixo e histórico com tipo e resultado do Telegram', al.aviso && al.pausa && al.destino && al.hist && al.conf, JSON.stringify(al));
+      if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-autolab.png`, fullPage: true });
 
       // 5. Busca global.
       if (p.w >= 640 || p.mobile) {

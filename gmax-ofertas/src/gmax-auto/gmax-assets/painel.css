@@ -321,3 +321,4 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0;min-height:32px}
 .cand-img{width:72px;height:72px;object-fit:contain;background:#fff;border-radius:10px}
 @media (min-width:1024px){.cand-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (min-width:1600px){.cand-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.tag-bad{background:#5a1f24;color:#ffd5d8}

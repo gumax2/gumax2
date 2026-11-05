@@ -48,6 +48,16 @@ foreach ([['MLB19615283', 'Fone de Ouvido Bluetooth X1', 'https://http2.mlstatic
     Db::run($pdo, "INSERT INTO gmax3_ml_candidates(product_id,name,category_name,picture_url,permalink,origem,termo,trend_pos,bb_item_id,bb_price_cents,bb_checked_at,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'),datetime('now'))",
         [$pid, $nm, 'Eletrônicos', $pic, "https://www.mercadolivre.com.br/x/p/$pid", $i ? 'tendencia' : 'termo', $i ? 'air fryer' : 'fone', $i ? 1 : null, $bb, $price]);
 }
+// GMAX AutoLab (3.2.1): ativo, com uma oferta validada enviada e um candidato incerto no histórico.
+Settings::set($pdo, 'autolab_estado', 'ativo', 'teste');
+Settings::set($pdo, 'autolab_ate', gmdate('Y-m-d H:i:s', time() + 5 * 86400), 'teste');
+Settings::store($pdo, 'autolab_destino_info', json_encode(['chat_id' => Gmax\Config::PRIVATE_CHAT_ID, 'type' => 'supergroup', 'title' => 'GMAX homologação', 'public_username' => false, 'members' => 3, 'bot_status' => 'administrator', 'problemas' => [], 'em' => gmdate('Y-m-d H:i:s')]), 'teste');
+foreach ([['2026-11-04 10:00', 'oferta_validada', 'api_shopee', 1, 3990, 'confirmado', "TESTE — OFERTA VALIDADA\nHomologação GMAX AutoLab · não é publicação comercial\n\nGarrafa térmica\nPreço: R$ 39,90 — confirmado pela API Shopee"],
+          ['2026-11-04 18:00', 'candidato', 'catalogo_ml', 0, null, 'incerto', "TESTE — CANDIDATO\nHomologação GMAX AutoLab · não é oferta e não tem link de compra\n\nFone\nID de catálogo: MLB19615283 (não é ID de anúncio)"]] as $i => [$slot, $kind, $src, $conf, $price, $state, $text]) {
+    Db::run($pdo, "INSERT INTO gmax3_autolab_runs(slot_key,status,started_at,finished_at,detail) VALUES(?,'concluido',datetime('now'),datetime('now'),'teste')", [$slot]);
+    Db::run($pdo, 'INSERT INTO gmax3_autolab_messages(run_id,slot_key,kind,source,price_confirmed,price_cents,dedup_key,text,text_hash,state,created_at,http_code,telegram_message_id) VALUES(?,?,?,?,?,?,?,?,?,?,datetime(\'now\'),?,?)',
+        [$i + 1, $slot, $kind, $src, $conf, $price, "k$i", $text, hash('sha256', $text), $state, $state === 'confirmado' ? 200 : 0, $state === 'confirmado' ? 501 : null]);
+}
 $before = [
     'pausa' => Settings::paused($pdo), 'auto' => Settings::get($pdo, 'automacoes_pausadas'), 'aprov' => Settings::get($pdo, 'aprovacao_automatica'),
     'links' => Db::all($pdo, 'SELECT id, affiliate_url FROM gmax3_catalog ORDER BY id'),

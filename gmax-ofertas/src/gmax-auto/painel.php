@@ -27,7 +27,7 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'automacoes', 'execucoes', 'integracoes', 'candidatos', 'ofertas', 'oferta', 'conferir', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'automacoes', 'autolab', 'execucoes', 'integracoes', 'candidatos', 'ofertas', 'oferta', 'conferir', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
@@ -257,6 +257,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $grp = gmax_post_str('grupo', 20);
                 View::flash(Gmax\Connectors\EndpointGuard::reactivate($pdo, $grp, $actor) ? 'ok' : 'erro', Gmax\Connectors\EndpointGuard::GROUPS[$grp] ?? 'Grupo inválido');
                 gmax_redirect('integracoes');
+            case 'autolab_pause':
+                // Botão de emergência: imediato, sem confirmação extra (só CSRF). Não mexe na publicação comercial.
+                Gmax\AutoLab\AutoLab::pause($pdo, 'Pausa emergencial pelo painel', $actor);
+                View::flash('ok', 'AutoLab PAUSADO. Nenhuma mensagem de teste será enviada até ser retomado.');
+                gmax_redirect('autolab');
+            case 'autolab_resume':
+                Gmax\AutoLab\AutoLab::resume($pdo, $actor);
+                View::flash('ok', 'AutoLab retomado: volta a enviar mensagens de teste nos próximos horários.');
+                gmax_redirect('autolab');
+            case 'autolab_config':
+                Gmax\AutoLab\AutoLab::configure($pdo, gmax_post_str('horarios', 60), gmax_post_str('limite', 2), $actor);
+                View::flash('ok', 'Horários do AutoLab salvos.');
+                gmax_redirect('autolab');
             case 'auto_pause':
                 Settings::set($pdo, 'automacoes_pausadas', '1', $actor);
                 View::flash('ok', 'Todas as automações foram pausadas.');
@@ -620,7 +633,7 @@ $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
 $titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'execucoes' => 'Detalhes das execuções', 'integracoes' => 'Integrações', 'candidatos' => 'Candidatos do Mercado Livre', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'conferir' => 'Conferência rápida', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
-    'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança'];
+    'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança', 'autolab' => 'GMAX AutoLab — homologação'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';
 require __DIR__ . '/gmax-lib/pages/' . $page . '.php';
