@@ -5,7 +5,8 @@ declare(strict_types=1);
  * Cron sugerido (a cada 15 minutos):
   *   0,15,30,45 * * * * /usr/local/bin/php /home1/gust1922/gmaxcanais.com.br/gmax-auto/gmax-automacoes-cli.php executar-pendentes > /dev/null 2>&1
  * Comandos:
- *   executar-pendentes            Executa as tarefas cujo horário venceu (respeita a pausa geral)
+ *   executar-pendentes            Executa as tarefas cujo horário venceu (respeita a pausa geral) e, depois,
+ *                                 um ciclo do GMAX AutoLab (só age se o AutoLab estiver ativo; pausa própria)
  *   executar <tarefa>             Execução manual de uma tarefa
  *   listar                        Tarefas, próximas execuções e últimos resultados
  *   pausar | retomar              Pausa geral das automações
@@ -41,6 +42,10 @@ try {
     switch ($cmd) {
         case 'executar-pendentes':
             $print(Runner::runDue($pdo, 'cron'));
+            // GMAX AutoLab (3.2.1): estado, trava e pausa próprios; não depende nem altera as automações comerciais.
+            if (\Gmax\AutoLab\AutoLab::installed($pdo)) {
+                $print(['autolab' => \Gmax\AutoLab\AutoLab::tick($pdo, 'cron')]);
+            }
             break;
         case 'executar':
             $print(Runner::runManual($pdo, (string)($args[1] ?? ''), 'cli'));

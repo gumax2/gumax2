@@ -18,6 +18,8 @@ declare(strict_types=1);
  *   criar-senha               Cria a senha inicial a partir de gmax-secrets/senha-inicial.txt (só se não existir
  *                             usuário; o arquivo é apagado depois). Nunca sobrescreve uma senha existente.
  *   desbloquear-login         Libera o login bloqueado pelo limite de tentativas (registrado na auditoria)
+ *   autolab status|validar-destino|previa|ativar AUTORIZO_AUTOLAB_HOMOLOGACAO [--dias 7]|pausar|retomar|desativar
+ *                             GMAX AutoLab: homologação automática no Telegram privado (separada da publicação comercial)
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
@@ -69,6 +71,48 @@ try {
                 }
             }
             out('Senha inicial criada. Entre pelo painel.php.' . ($loose ? ' Aviso: o arquivo da senha estava legível por outros usuários (permissão diferente de 600); se o servidor for compartilhado, troque a senha.' : ''));
+            break;
+        case 'autolab':
+            $sub = $args[1] ?? 'status';
+            $AL = Gmax\AutoLab\AutoLab::class;
+            if (!$AL::installed($pdo)) {
+                throw new RuntimeException('Migração 006 (AutoLab) pendente: aplique em Sistema → MIGRAR');
+            }
+            switch ($sub) {
+                case 'status':
+                    out(['estado' => $AL::state($pdo), 'motivo' => Settings::get($pdo, 'autolab_motivo', ''), 'ate_utc' => Settings::get($pdo, 'autolab_ate', ''),
+                        'destino' => Gmax\Config::PRIVATE_CHAT_ID, 'destino_validado_em_utc' => Settings::get($pdo, 'autolab_destino_validado_em', ''),
+                        'horarios' => $AL::times($pdo), 'limite_diario' => $AL::dailyLimit($pdo), 'proximo_horario' => $AL::nextSlot($pdo),
+                        'arquivo_de_pausa' => is_file($AL::pauseFile()), 'relatorio_7_dias' => $AL::report($pdo, 7)]);
+                    break;
+                case 'validar-destino':
+                    out($AL::validateDestination($pdo, 'cli') + ['observacao' => 'Somente leitura: nenhuma mensagem foi enviada.']);
+                    break;
+                case 'previa':
+                    // Monta a próxima mensagem (consulta a API Shopee só para leitura) e NÃO envia nem grava.
+                    $c = Gmax\AutoLab\Composer::compose($pdo, 'previa ' . Gmax\Time::now()->format('Y-m-d H:i'));
+                    out(['tipo' => $c['kind'], 'faltando' => $c['missing'], 'verificacoes' => $c['checks'], 'problemas' => $AL::textProblems($c['text'], $c['kind'])]);
+                    out("----- mensagem (não enviada) -----\n" . $c['text']);
+                    break;
+                case 'ativar':
+                    $days = (int)($after('--dias') ?? 7);
+                    out($AL::activate($pdo, (string)($args[2] ?? ''), $days, 'cli') + ['observacao' => 'O primeiro envio acontece no próximo horário do AutoLab, pelo Cron já existente.']);
+                    break;
+                case 'pausar':
+                    $AL::pause($pdo, trim(implode(' ', array_slice($args, 2))) ?: 'Pausa pela linha de comando', 'cli');
+                    out('AutoLab pausado.');
+                    break;
+                case 'retomar':
+                    $AL::resume($pdo, 'cli', true);
+                    out('AutoLab ativo de novo.');
+                    break;
+                case 'desativar':
+                    $AL::pause($pdo, 'Desativado pela linha de comando', 'cli', 'desativado');
+                    out('AutoLab desativado (para voltar: validar-destino e ativar).');
+                    break;
+                default:
+                    throw new RuntimeException('Uso: autolab status | validar-destino | previa | ativar ' . $AL::ACTIVATION_PHRASE . ' [--dias 7] | pausar [motivo] | retomar | desativar');
+            }
             break;
         case 'desbloquear-login':
             // Libera o login bloqueado por tentativas (ex.: ataque que atingiu o limite global de 50/15 min).
