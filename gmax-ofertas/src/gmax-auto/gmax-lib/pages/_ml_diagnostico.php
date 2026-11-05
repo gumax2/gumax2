@@ -14,7 +14,8 @@ $failed = $diag ? array_values(array_filter($diag['testes'], static fn($t) => !$
 $support = null;
 if ($diag && $failed) {
     $lines = ["Assunto: GMAX Smart Sales — HTTP 403 em recursos de leitura de anúncios (MLB)", '',
-        'Aplicação: GMAX Smart Sales (App ID: informe o número que aparece no DevCenter)',
+        'Aplicação: GMAX Smart Sales (Client ID / App ID: ' . ((new \Gmax\OAuth\MercadoLivreOAuth())->clientId() ?? 'ver DevCenter') . '; aplicativo não certificado; finalidade: negócios; 1 a 10 usuários)',
+        'Permissões funcionais configuradas: Usuários (leitura e escrita), Comunicações pré e pós-venda (leitura), Publicação e sincronização (leitura). Conta reautorizada após salvar as permissões.',
         'Conta autorizada: usuário terminado em ' . ($s['user_id_end'] ?? '????') . ' (OAuth Authorization Code + PKCE S256; escopos concedidos: ' . (($s['scope'] ?? '') ?: 'ver DevCenter') . ')',
         'Uso pretendido: somente leitura (GET) de preço, disponibilidade e dados públicos de anúncios para conferência de ofertas do Programa de Afiliados; nenhuma publicação ou alteração.',
         'Data/hora do teste: ' . Time::show((string)$diag['em']) . ' (horário de Brasília)', '', 'Resultados:'];
@@ -63,7 +64,7 @@ if ($diag && $failed) {
   <form method="post" action="painel.php" class="inline-form" data-loading>
     <?= View::csrfField() ?><input type="hidden" name="action" value="ml_diagnose"><input type="hidden" name="back" value="integracoes">
     <input name="mlb" maxlength="30" placeholder="Anúncio para testar (MLB…), opcional" list="gmax-mlb-ids" aria-label="Anúncio para testar">
-    <button class="btn btn-primary" type="submit">Executar diagnóstico (≈ 15 s)</button>
+    <button class="btn btn-primary" type="submit">Executar diagnóstico (≈ 25 s)</button>
   </form>
   <?php endif; ?>
   <?php if ($diag): ?>

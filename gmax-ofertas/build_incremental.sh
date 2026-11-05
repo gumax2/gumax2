@@ -2,8 +2,8 @@
 # Pacote INCREMENTAL: roda todos os testes e empacota só os arquivos alterados/novos desde BASE_COMMIT.
 set -euo pipefail
 cd "$(dirname "$0")"
-NAME="${NAME:-GMAX_Ofertas_3.1.7_incremental}"
-BASE_COMMIT="${BASE_COMMIT:-be35b8b}"   # be35b8b = 3.1.6 instalada; 72a05b7 = 3.1.5; 16c081f = 3.1.4; 592ed19 = 3.1.3; 645659a = 3.1.1; cd8ac74 = 3.0.2
+NAME="${NAME:-GMAX_Ofertas_3.1.8_incremental}"
+BASE_COMMIT="${BASE_COMMIT:-da82f0e}"   # da82f0e = 3.1.7 instalada; be35b8b = 3.1.6; 72a05b7 = 3.1.5; 16c081f = 3.1.4; 592ed19 = 3.1.3; 645659a = 3.1.1; cd8ac74 = 3.0.2
 OUT="dist-inc/$NAME"
 rm -rf dist-inc && mkdir -p "$OUT"
 find src -name '*.php' -print0 | xargs -0 -n1 php -l | grep -v '^No syntax errors' || true
@@ -35,12 +35,12 @@ FILES=$(echo "$FILES" | sed 's#^gmax-ofertas/src/gmax-auto/##' | sort -u)
     printf '  %s  %s  %s\n' "$tipo" "$(sha256sum "src/gmax-auto/$f" | cut -c1-16)" "$f"
   done
   echo
-  echo "BANCO: nenhuma migração nova (exige a 3.1.6 instalada). ARQUIVOS ANTIGOS (app.php, index.php, cron.php, publicador...): não tocados."
+  echo "BANCO: nenhuma migração nova (exige a 3.1.7 instalada). ARQUIVOS ANTIGOS (app.php, index.php, cron.php, publicador...): não tocados."
   echo "ENVIOS: nenhum habilitado. Cron e credenciais: não alterados."
 } > "$OUT/MANIFESTO.txt"
-cp docs/ATUALIZACAO_3.1.7_RANKING_E_MERCADOLIVRE.md "$OUT/00_LEIA_PRIMEIRO_3.1.7.md"
+cp docs/ATUALIZACAO_3.1.8_DIAGNOSTICO_MERCADOLIVRE.md "$OUT/00_LEIA_PRIMEIRO_3.1.8.md"
 cp docs/SOLICITACAO_SUPORTE_MERCADOLIVRE.md "$OUT/"
-mkdir -p "$OUT/capturas" && cp docs/capturas/3.1.5/*ranking*.png docs/capturas/3.1.5/*diagnostico-ml*.png "$OUT/capturas/"
+mkdir -p "$OUT/capturas" && cp docs/capturas/3.1.5/desktop-1366-diagnostico-ml.png "$OUT/capturas/"
 cp docs/TESTES.md "$OUT/TESTES.md"
 ( cd dist-inc && zip -q -X -r "$NAME.zip" "$NAME" )
 ls -la dist-inc

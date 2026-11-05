@@ -8,12 +8,22 @@ use RuntimeException;
 /** Cliente HTTP mínimo e substituível (testes usam um cliente falso, sem rede). */
 class Http
 {
+    /** Identificação explícita: sem isso o PHP envia a requisição SEM User-Agent (ini user_agent vazio). */
+    public static function withUserAgent(array $headers): array
+    {
+        if (!array_filter($headers, static fn($h) => stripos((string)$h, 'User-Agent:') === 0)) {
+            $headers[] = 'User-Agent: GMAX-Ofertas/' . (defined('GMAX_VERSION') ? GMAX_VERSION : '3') . ' (PHP ' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '; integracao-oficial)';
+        }
+        return $headers;
+    }
+
     /** @return array{status:int,body:?string,error:?string} */
     public function request(string $method, string $url, array $headers = [], ?string $body = null, int $timeout = 15): array
     {
         if (Config::testing()) {
             throw new RuntimeException('Requisição de rede proibida em modo de teste');
         }
+        $headers = self::withUserAgent($headers);
         $ctx = stream_context_create(['http' => [
             'method' => $method,
             'header' => implode("\r\n", $headers),

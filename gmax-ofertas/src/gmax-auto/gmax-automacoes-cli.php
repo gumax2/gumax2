@@ -70,6 +70,7 @@ try {
                 // Teste isolado de /items/{id}: somente leitura, nada é gravado no catálogo.
                 $print((new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o))->probeItem((string)($args[2] ?? '')));
             } elseif ($sub === 'diagnostico') {
+                @set_time_limit(180);
                 // Diagnóstico completo, somente leitura (mesmo do painel). Uso: ml-oauth diagnostico [MLB123]
                 $d = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, $o, $pdo))->diagnose(isset($args[2]) ? (string)$args[2] : null);
                 Settings::store($pdo, 'ml_diagnostico_ultimo', json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 'cli');

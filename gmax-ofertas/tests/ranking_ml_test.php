@@ -197,6 +197,40 @@ test('Diagnóstico distingue falta de autorização (sem token 200), token rejei
     ok($none['testes'] === [] || $none['conclusoes'] !== [], 'sem token: nenhuma requisição ou conclusão de configuração');
 });
 
+test('Resultados reais da HostGator (05/11): anônimo negado ≠ bloqueio de IP; app ativo e escopo read presentes; restrição específica a dados de terceiros', function () use ($pa) {
+    $denied = ['error' => 'access_denied', 'message' => 'Access to the requested resource is forbidden', 'status' => 403];
+    $h = new MapHttp([
+        ['~^/sites/MLB$~', false, 403, $denied], ['~^/sites/MLB$~', true, 200, ['id' => 'MLB']], ['~^/users/me$~', true, 200, ['id' => 123456789]],
+        ['~^/applications/113121888045570$~', true, 200, ['id' => 113121888045570, 'active' => true, 'certification_status' => 'not_certified', 'max_requests_per_hour' => 18000, 'sandbox_mode' => false]],
+        ['~^/users/123456789/applications$~', true, 200, [['app_id' => '113121888045570', 'user_id' => '123456789', 'scopes' => ['offline_access', 'read', 'write'], 'date_created' => '2026-11-05T10:00:00.000-03:00']]],
+        ['~^/sites/MLB/search~', null, 403, $pa], ['~^/items/MLB7519481690/description$~', true, 200, ['plain_text' => 'x']], ['~^/items/MLB7519481690~', null, 403, $denied],
+        ['~^/items\?ids=~', true, 200, [['code' => 403, 'body' => $denied]]], ['~^/products/search~', true, 403, $pa],
+        ['~^/sites/MLB/domain_discovery~', true, 200, [['category_id' => 'MLB1055']]], ['~^/categories/MLB1055$~', true, 200, ['id' => 'MLB1055']], ['~^/trends/MLB$~', true, 200, [['keyword' => 'fone']]],
+        ['~^/users/123456789/items/search~', true, 200, ['results' => []]],
+    ]);
+    $d = (new MercadoLivre($h, T_ML_TOKEN))->diagnose('MLB7519481690', '113121888045570');
+    $by = array_column($d['testes'], null, 'id');
+    eq([403, 200, 200, 200], [$by['site']['http'], $by['site_token']['http'], $by['aplicativo']['http'], $by['escopos']['http']]);
+    ok(str_contains($by['aplicativo']['mensagem_api'], 'ativo: true') && str_contains($by['aplicativo']['mensagem_api'], 'certificação: not_certified'), $by['aplicativo']['mensagem_api']);
+    ok(str_contains($by['escopos']['mensagem_api'], 'offline_access, read, write'), $by['escopos']['mensagem_api']);
+    $txt = implode(' | ', array_column($d['conclusoes'], 'texto'));
+    ok(str_contains($txt, 'não é bloqueio geral do IP') && !str_contains($txt, 'suspeite de bloqueio de rede'), $txt);
+    ok(str_contains($txt, 'escopo "read" concedido'), $txt);
+    ok(str_contains($txt, 'descrição do anúncio de terceiro é liberada'), $txt);
+    ok(str_contains($txt, 'Nenhuma fonte oficial com PREÇO'), $txt);
+    ok(str_contains($txt, 'Alternativa oficial disponível: Categorias') && str_contains($txt, 'Tendências'), $txt);
+    ok(!str_contains(json_encode($d), T_ML_TOKEN), 'sem token');
+    $inactive = new MapHttp([['~^/applications/~', true, 200, ['active' => false]], ['~^/users/me$~', true, 200, ['id' => 1]], ['~^/users/1/applications$~', true, 200, [['app_id' => '999999', 'scopes' => ['offline_access']]]]]);
+    $t2 = implode(' | ', array_column((new MercadoLivre($inactive, T_ML_TOKEN))->diagnose(null, '999999')['conclusoes'], 'texto'));
+    ok(str_contains($t2, 'INATIVO') && str_contains($t2, 'NÃO aparece'), $t2);
+});
+test('Cliente HTTP sempre envia User-Agent (o PHP não envia nenhum por padrão), sem duplicar o informado', function () {
+    $h = Gmax\Http::withUserAgent(['Accept: application/json']);
+    ok(count(array_filter($h, fn($x) => str_starts_with($x, 'User-Agent: GMAX-Ofertas/'))) === 1, json_encode($h));
+    eq(['User-Agent: X'], Gmax\Http::withUserAgent(['User-Agent: X']));
+    eq('', (string)ini_get('user_agent'), 'confirma que o PHP não define User-Agent sozinho');
+});
+
 echo "\n== Mercado Livre: suspensão automática de 403 repetido\n";
 test('Três 403 seguidos suspendem /items: sem novas requisições, um único alerta, OAuth preservado; reativação manual', function () use ($ready, $pa) {
     $pdo = $ready();

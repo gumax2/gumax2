@@ -221,6 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 gmax_redirect('integracoes');
             case 'ml_diagnose':
                 // Diagnóstico supervisionado, somente leitura: não altera catálogo, tokens nem a suspensão automática.
+                @set_time_limit(120); // ~18 chamadas espaçadas pelo limitador de requisições
                 $d = (new Gmax\Connectors\MercadoLivre(new Gmax\RateLimiter(new Gmax\Http(), $pdo, 'mercadolivre'), null, null, $pdo))->diagnose(gmax_post_str('mlb', 30) ?: null);
                 Settings::store($pdo, 'ml_diagnostico_ultimo', json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $actor);
                 Audit::log($pdo, $actor, 'ml_diagnostico', 'integracao', 'mercadolivre', ['resultados' => array_map(static fn($t) => $t['id'] . '=' . ($t['http'] ?? 'rede'), $d['testes'])]);

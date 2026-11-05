@@ -272,7 +272,7 @@ final class MercadoLivre implements Connector, Discovery
      * Nunca devolve token, segredo nem o corpo completo das respostas.
      * @return array{em:string,mlb:?string,testes:list<array>,conclusoes:list<array{tipo:string,texto:string}>}
      */
-    public function diagnose(?string $mlb = null): array
+    public function diagnose(?string $mlb = null, ?string $appId = null): array
     {
         $mlb = $mlb !== null ? strtoupper(str_replace('-', '', trim($mlb))) : null;
         $mlb = $mlb !== null && preg_match('/^MLB\d{5,15}$/D', $mlb) ? $mlb : null;
@@ -288,9 +288,32 @@ final class MercadoLivre implements Connector, Discovery
         if ($this->token() === null) {
             return ['em' => Time::nowSql(), 'mlb' => $mlb, 'testes' => [], 'conclusoes' => [['tipo' => 'configuracao', 'texto' => 'Sem token OAuth válido: conecte ou reconecte a conta em Integrações. Nenhuma requisição foi feita.']]];
         }
-        $run('site', 'Metadados públicos do site (controle de rede/IP)', '/sites/MLB', false);
+        $run('site', 'Metadados do site sem token (acesso anônimo)', '/sites/MLB', false);
+        $run('site_token', 'Metadados do site com token', '/sites/MLB', true);
         $me = $run('conta', 'Conta autenticada', '/users/me', true);
         $uid = (string)(json_decode((string)$me['body'], true)['id'] ?? '');
+        // Estado real do aplicativo e escopos efetivamente concedidos (documentação "Gerenciar aplicações").
+        $appId ??= $this->oauth?->clientId();
+        if ($appId !== null) {
+            $app = $run('aplicativo', 'Estado do aplicativo (/applications/{id})', "/applications/$appId", true);
+            $a = json_decode((string)$app['body'], true);
+            if ($app['status'] === 200 && is_array($a)) {
+                $t['aplicativo']['mensagem_api'] = self::safeText(sprintf('ativo: %s · certificação: %s · limite/hora: %s · sandbox: %s',
+                    var_export($a['active'] ?? null, true), is_scalar($a['certification_status'] ?? null) ? (string)$a['certification_status'] : '—',
+                    is_scalar($a['max_requests_per_hour'] ?? null) ? (string)$a['max_requests_per_hour'] : '—', var_export($a['sandbox_mode'] ?? null, true)));
+                $t['aplicativo']['app_ativo'] = ($a['active'] ?? null) === true || ($a['active'] ?? null) === 'true';
+            }
+        }
+        if (ctype_digit($uid)) {
+            $gr = $run('escopos', 'Escopos concedidos ao aplicativo (/users/{id}/applications)', "/users/$uid/applications", true);
+            $list = json_decode((string)$gr['body'], true);
+            if ($gr['status'] === 200 && is_array($list)) {
+                $mine = array_values(array_filter($list, static fn($x) => is_array($x) && (string)($x['app_id'] ?? '') === (string)$appId));
+                $scopes = $mine ? array_values(array_filter((array)($mine[0]['scopes'] ?? []), 'is_scalar')) : [];
+                $t['escopos']['mensagem_api'] = $mine ? 'escopos: ' . self::safeText(implode(', ', array_map('strval', $scopes))) . (isset($mine[0]['date_created']) && is_scalar($mine[0]['date_created']) ? ' · autorizado em ' . self::safeText((string)$mine[0]['date_created']) : '') : 'aplicativo não encontrado entre as autorizações da conta';
+                $t['escopos']['escopos'] = array_map('strval', $scopes);
+            }
+        }
         $run('busca', 'Pesquisa de anúncios', '/sites/MLB/search?' . http_build_query(['q' => 'fone', 'limit' => 1]), true);
         $run('busca_publica', 'Pesquisa de anúncios sem token', '/sites/MLB/search?' . http_build_query(['q' => 'fone', 'limit' => 1]), false);
         if ($mlb) {
@@ -306,13 +329,19 @@ final class MercadoLivre implements Connector, Discovery
                 $t['item_lote'] = array_merge($t['item_lote'], self::classify(['status' => (int)$j[0]['code'], 'error' => null], true, $code));
             }
             $run('preco_venda', 'Preço de venda do anúncio (sale_price)', "/items/$mlb/sale_price", true);
+            $run('descricao', 'Descrição do anúncio de terceiro', "/items/$mlb/description", true);
         }
         $ps = $run('catalogo_busca', 'Pesquisa no catálogo de produtos', '/products/search?' . http_build_query(['status' => 'active', 'site_id' => 'MLB', 'q' => 'fone', 'limit' => 1]), true);
         $pid = (string)(json_decode((string)$ps['body'], true)['results'][0]['id'] ?? '');
         if (preg_match('/^MLB\d{4,15}$/D', $pid)) {
             $run('catalogo_produto', 'Produto do catálogo', "/products/$pid", true);
         }
-        $run('dominio', 'Descoberta de categoria (domain_discovery)', '/sites/MLB/domain_discovery/search?' . http_build_query(['q' => 'fone', 'limit' => 1]), true);
+        $dd = $run('dominio', 'Descoberta de categoria (domain_discovery)', '/sites/MLB/domain_discovery/search?' . http_build_query(['q' => 'fone', 'limit' => 1]), true);
+        $cat = (string)(json_decode((string)$dd['body'], true)[0]['category_id'] ?? '');
+        if (preg_match('/^MLB\d{1,10}$/D', $cat)) {
+            $run('categoria', 'Categoria (/categories/{id})', "/categories/$cat", true);
+        }
+        $run('tendencias', 'Tendências de busca (/trends/MLB)', '/trends/MLB', true);
         if (ctype_digit($uid)) {
             $own = $run('itens_proprios', 'Anúncios da própria conta', "/users/$uid/items/search?limit=1", true);
             $oid = (string)(json_decode((string)$own['body'], true)['results'][0] ?? '');
@@ -321,6 +350,11 @@ final class MercadoLivre implements Connector, Discovery
             }
         }
         return ['em' => Time::nowSql(), 'mlb' => $mlb, 'testes' => array_values($t), 'conclusoes' => self::conclude($t)];
+    }
+
+    private static function safeText(string $s): string
+    {
+        return mb_substr((string)\Gmax\Automation\RunLog::sanitize(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $s)), 0, 200);
     }
 
     /** Resultado, causa provável, tipo e orientação de uma resposta. */
@@ -349,8 +383,23 @@ final class MercadoLivre implements Connector, Discovery
     {
         $c = [];
         $st = static fn(string $id) => $t[$id]['http'] ?? null;
-        if (($t['site']['http'] ?? null) !== 200) {
-            $c[] = ['tipo' => 'implementacao', 'texto' => 'Nem o recurso público /sites/MLB respondeu 200: suspeite de rede ou bloqueio de IP da hospedagem antes de qualquer outra causa.'];
+        $authOk = $st('conta') === 200 || $st('dominio') === 200 || $st('site_token') === 200;
+        if (($t['site']['http'] ?? null) !== 200 && $authOk) {
+            $c[] = ['tipo' => 'plataforma', 'texto' => 'Chamadas SEM token são negadas a partir deste servidor, mas chamadas COM token funcionam (ex.: /users/me): não é bloqueio geral do IP da hospedagem; o acesso anônimo é que está fechado para esta origem. Para comparar, abra https://api.mercadolibre.com/sites/MLB no navegador do seu computador ou celular (sem login, sem token).'];
+        } elseif (($t['site']['http'] ?? null) !== 200 && !$authOk && ($t['site']['http'] ?? null) !== null) {
+            $c[] = ['tipo' => 'implementacao', 'texto' => 'Nenhuma chamada respondeu 200, com ou sem token: suspeite de bloqueio de rede/IP da hospedagem antes de qualquer outra causa.'];
+        }
+        if (isset($t['aplicativo']['app_ativo']) && $t['aplicativo']['app_ativo'] === false) {
+            $c[] = ['tipo' => 'configuracao', 'texto' => 'O Mercado Livre informa o aplicativo como INATIVO: reative-o no DevCenter antes de qualquer outro teste.'];
+        }
+        if (isset($t['escopos']['escopos'])) {
+            $sc = $t['escopos']['escopos'];
+            $c[] = in_array('read', $sc, true)
+                ? ['tipo' => 'ok', 'texto' => 'O token atual tem o escopo "read" concedido (' . implode(', ', $sc) . '): o 403 não vem de escopo OAuth ausente.']
+                : ['tipo' => 'configuracao', 'texto' => 'O escopo "read" NÃO aparece entre os concedidos ao aplicativo (' . (implode(', ', $sc) ?: 'nenhum') . '): reconecte a conta depois de salvar as permissões no DevCenter.'];
+        }
+        if ($st('descricao') === 200 && $st('item') === 403) {
+            $c[] = ['tipo' => 'plataforma', 'texto' => 'A descrição do anúncio de terceiro é liberada, mas o anúncio (preço/detalhe) não: a restrição é específica a dados comerciais de anúncios de outros vendedores, não ao aplicativo como um todo.'];
         }
         if ($st('conta') === 200) {
             $c[] = ['tipo' => 'ok', 'texto' => 'O token é válido e a conta é reconhecida (/users/me = 200): não é falha de implementação do OAuth nem do cabeçalho Authorization.'];
@@ -374,13 +423,15 @@ final class MercadoLivre implements Connector, Discovery
         if ($st('item_proprio') === 200 && $st('item') === 403) {
             $c[] = ['tipo' => 'plataforma', 'texto' => 'Anúncios da própria conta podem ser lidos, mas os de terceiros não: a política restringe leitura de anúncios de outros vendedores.'];
         }
-        foreach (['catalogo_busca' => 'Pesquisa no catálogo (/products/search)', 'catalogo_produto' => 'Produto do catálogo (/products/{id})', 'preco_venda' => 'Preço de venda (/items/{id}/sale_price)', 'dominio' => 'Descoberta de categoria'] as $id => $label) {
+        foreach (['catalogo_busca' => 'Pesquisa no catálogo (/products/search)', 'catalogo_produto' => 'Produto do catálogo (/products/{id})', 'preco_venda' => 'Preço de venda (/items/{id}/sale_price)',
+            'dominio' => 'Descoberta de categoria', 'categoria' => 'Categorias', 'tendencias' => 'Tendências de busca', 'descricao' => 'Descrição de anúncio'] as $id => $label) {
             if ($st($id) === 200) {
                 $c[] = ['tipo' => 'ok', 'texto' => "Alternativa oficial disponível: $label."];
             }
         }
-        if (!array_filter($c, static fn($x) => $x['tipo'] === 'ok' && str_contains($x['texto'], 'Alternativa'))) {
-            $c[] = ['tipo' => 'plataforma', 'texto' => 'Nenhuma alternativa oficial de leitura de produtos respondeu 200 para este aplicativo: mantenha a conferência manual e envie a solicitação ao suporte.'];
+        // Multiget responde 200 no envelope mesmo com o item negado: vale o resultado por item ("ok").
+        if (!array_filter(['catalogo_busca', 'catalogo_produto', 'preco_venda', 'item', 'item_lote'], static fn($id) => !empty($t[$id]['ok']))) {
+            $c[] = ['tipo' => 'plataforma', 'texto' => 'Nenhuma fonte oficial com PREÇO de anúncios de terceiros respondeu 200 para este aplicativo (anúncio, lote, sale_price, catálogo): mantenha a conferência manual e envie a solicitação ao suporte.'];
         }
         return $c;
     }

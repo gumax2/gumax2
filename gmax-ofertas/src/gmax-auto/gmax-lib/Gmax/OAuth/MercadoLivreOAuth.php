@@ -64,6 +64,13 @@ final class MercadoLivreOAuth
         return $p;
     }
 
+    /** Client ID (App ID) do aplicativo — identificador público, nunca o Secret. */
+    public function clientId(): ?string
+    {
+        $id = (string)($this->app['client_id'] ?? '');
+        return preg_match('/^\d{6,25}$/D', $id) ? $id : null;
+    }
+
     public function appConfigured(): bool
     {
         return $this->appProblems() === [];
