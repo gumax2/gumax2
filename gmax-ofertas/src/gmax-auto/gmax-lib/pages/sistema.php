@@ -63,6 +63,8 @@ try {
     <?= View::csrfField() ?><input type="hidden" name="action" value="settings_save"><input type="hidden" name="back" value="sistema">
     <label>Janela anti-duplicidade (dias) <input name="janela_duplicidade_dias" inputmode="numeric" value="<?= View::e($s['janela_duplicidade_dias'] ?? '7') ?>"></label>
     <label>Validade da conferência de preço (horas) <input name="validade_preco_horas" inputmode="numeric" value="<?= View::e($s['validade_preco_horas'] ?? '24') ?>"></label>
+    <label>Seleção: agendar no máximo para os próximos (dias, 1–14) <input name="selecao_horizonte_dias" inputmode="numeric" maxlength="2" value="<?= View::e($s['selecao_horizonte_dias'] ?? '3') ?>"></label>
+    <label>Seleção: máximo por categoria na janela (1–20) <input name="selecao_max_por_categoria" inputmode="numeric" maxlength="2" value="<?= View::e($s['selecao_max_por_categoria'] ?? '2') ?>"></label>
     <label class="span2">Horários de publicação (HH:MM separados por vírgula) <input name="horarios" value="<?= View::e($s['horarios'] ?? '') ?>"></label>
     <div class="span2"><button type="submit" class="btn">Salvar configurações</button></div>
   </form>

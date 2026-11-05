@@ -28,14 +28,15 @@ final class Jobs
     /** @return array{found:int,created:int,updated:int,approved:int,blocked:int,errors:int,detail:list<string>} */
     private static function counters(): array
     {
-        return ['found' => 0, 'created' => 0, 'updated' => 0, 'approved' => 0, 'blocked' => 0, 'errors' => 0, 'detail' => []];
+        // pending = itens dentro do limite que NÃO foram processados por falta de tempo (continuação agendada).
+        return ['found' => 0, 'created' => 0, 'updated' => 0, 'approved' => 0, 'blocked' => 0, 'errors' => 0, 'pending' => 0, 'detail' => []];
     }
 
     public static function run(string $job, PDO $pdo, array $params, float $deadline, int $runId, string $actor): array
     {
         return match ($job) {
             'descoberta' => self::discovery($pdo, $params, $deadline, $runId, $actor),
-            'revisao_precos' => self::review($pdo, (int)($params['limite'] ?? 60), $deadline, $actor, false, $runId),
+            'revisao_precos' => self::review($pdo, (int)($params['limite'] ?? 60), $deadline, $actor, false, $runId, self::doneIds($params)),
             'selecao' => self::selection($pdo, $params, $actor),
             'analise_semanal' => self::weekly($pdo, $params, $deadline, $actor, $runId),
             'revisao_vencidas' => self::expired($pdo, $params, $actor),
@@ -143,8 +144,9 @@ final class Jobs
     public const REVIEW_STATES = ['aprovado', 'aguardando_validacao'];
     private const FIELD_LABELS = ['price_promo_cents' => 'preço Por', 'price_original_cents' => 'preço De', 'availability' => 'disponibilidade',
         'variation_pending' => 'variação', 'variation_note' => 'nota de variação', 'commission_rate' => 'comissão', 'validation_status' => 'estado'];
-    /** Máximo de linhas "fora da revisão" gravadas por execução (o total sempre vai no resumo). */
+    /** Máximo de linhas "fora da revisão" e "não processado" gravadas por execução (o total sempre vai no resumo). */
     private const MAX_EXCLUDED_LOG = 300;
+    private const MAX_PENDING_LOG = 100;
 
     /** Produtos candidatos, na ordem de prioridade da revisão (arquivados e rejeitados ficam de fora). */
     public static function reviewCandidates(PDO $pdo): array
@@ -173,9 +175,21 @@ final class Jobs
         return null;
     }
 
-    private static function review(PDO $pdo, int $limit, float $deadline, string $actor, bool $includeDrafts, int $runId = 0): array
+    /**
+     * IDs já consultados nas rodadas anteriores da mesma execução (continuação). A ordem da revisão muda
+     * conforme os preços são conferidos, então a continuação não pode depender da posição: pula pelo ID.
+     * @return array<int,true>
+     */
+    private static function doneIds(array $params): array
+    {
+        $ids = $params['_ja_consultados'] ?? [];
+        return is_array($ids) ? array_fill_keys(array_map('intval', $ids), true) : [];
+    }
+
+    private static function review(PDO $pdo, int $limit, float $deadline, string $actor, bool $includeDrafts, int $runId = 0, array $done = []): array
     {
         $c = self::counters();
+        $c['done_ids'] = [];
         $limit = max(1, min(200, $limit));
         $connectors = [];
         $eligible = $excluded = $validated = $notProcessed = 0;
@@ -188,16 +202,23 @@ final class Jobs
                 continue;
             }
             $eligible++;
+            if (isset($done[(int)$r['id']])) {
+                continue; // consultado em rodada anterior desta execução: conta no limite, não repete a consulta
+            }
             if ($eligible > $limit || microtime(true) > $deadline) {
-                $timeUp = $timeUp || $eligible <= $limit;
-                $notProcessed++;
-                RunLog::add($pdo, $runId, $r, 'nao_processado', $eligible > $limit
-                    ? "Limite de $limit produtos por execução atingido: fica para a próxima revisão"
-                    : 'Prazo da execução atingido: fica para a próxima revisão');
+                $byTime = $eligible <= $limit;
+                $timeUp = $timeUp || $byTime;
+                $c['pending'] += $byTime ? 1 : 0;
+                if (++$notProcessed <= self::MAX_PENDING_LOG) {
+                    RunLog::add($pdo, $runId, $r, 'nao_processado', !$byTime
+                        ? "Limite de $limit produtos por execução atingido: fica para a próxima revisão"
+                        : 'Prazo da execução atingido: continuação automática agendada');
+                }
                 continue;
             }
             $conn = $connectors[$r['marketplace']] ??= Registry::get($r['marketplace'], $pdo);
             $c['found']++;
+            $c['done_ids'][] = (int)$r['id'];
             if (!$conn->configured()) {
                 $c['blocked']++;
                 RunLog::add($pdo, $runId, $r, 'bloqueado', 'Integração ' . (Registry::MARKETPLACES[$r['marketplace']] ?? $r['marketplace']) . ' indisponível: '
@@ -249,7 +270,10 @@ final class Jobs
             ]);
         }
         if ($timeUp) {
-            $c['detail'][] = 'Prazo da execução atingido; o restante fica para a próxima';
+            $c['detail'][] = sprintf('Prazo da execução atingido: %d produto(s) pendente(s) ficam para a continuação automática', $c['pending']);
+        }
+        if ($notProcessed > self::MAX_PENDING_LOG) {
+            $c['detail'][] = sprintf('Registro detalhado limitado a %d linhas de "não processado" (total: %d)', self::MAX_PENDING_LOG, $notProcessed);
         }
         $c['detail'][] = sprintf('Elegíveis: %d · fora da revisão: %d · não processados: %d · consultados: %d · preços confirmados pela API: %d',
             $eligible, $excluded, $notProcessed, $c['found'], $validated);
@@ -398,6 +422,11 @@ final class Jobs
         $minScore = (int)($p['pontuacao_minima'] ?? 55);
         $minConf = (int)($p['confianca_minima'] ?? 60);
         $auto = Settings::get($pdo, 'aprovacao_automatica', '0') === '1';
+        // Tetos (3.2.0): no máximo as vagas livres dos próximos N dias e N itens por categoria nessa janela.
+        [$capacity, $perCat] = self::selectionBudget($pdo);
+        $maxCat = max(1, min(20, Settings::int($pdo, 'selecao_max_por_categoria', 2)));
+        $queued = 0;
+        $skippedCat = 0;
         foreach (Ranking::list($pdo, [], 200) as $row) {
             $r = $row['item'];
             if (!in_array($r['validation_status'], ['aprovado', 'aguardando_validacao'], true)) {
@@ -422,7 +451,20 @@ final class Jobs
             if (!$good) {
                 continue;
             }
+            if ($queued >= $capacity) {
+                $c['detail'][] = "Teto da seleção atingido: $capacity vaga(s) livre(s) na janela; o restante fica para a próxima seleção";
+                break;
+            }
+            $cat = (string)($r['category'] ?? '') ?: '(sem categoria)';
+            if (($perCat[$cat] ?? 0) >= $maxCat) {
+                $skippedCat++;
+                continue;
+            }
             $reasons = Queue::enqueue($pdo, (int)$r['id'], 'telegram_privado', null, 'selecao_automatica');
+            if (!$reasons) {
+                $queued++;
+                $perCat[$cat] = ($perCat[$cat] ?? 0) + 1;
+            }
             if ($reasons) {
                 $c['blocked']++;
                 if (!str_contains(implode(' ', $reasons), 'Duplicidade')) {
@@ -433,13 +475,40 @@ final class Jobs
                 Alerts::clear($pdo, 'aprovacao_pendente', (int)$r['id']);
             }
         }
+        if ($skippedCat) {
+            $c['detail'][] = "$skippedCat item(ns) não enfileirado(s) pelo limite de $maxCat por categoria na janela";
+        }
         return $c;
+    }
+
+    /**
+     * Vagas livres nos próximos N dias (limite diário − já agendados/feitos por dia) e quantos
+     * itens de cada categoria já estão agendados nessa janela.
+     * @return array{0:int,1:array<string,int>}
+     */
+    public static function selectionBudget(PDO $pdo): array
+    {
+        $days = max(1, min(14, Settings::int($pdo, 'selecao_horizonte_dias', 3)));
+        $limit = Settings::int($pdo, 'limite_diario_telegram_privado', 6);
+        $tz = new \DateTimeZone('America/Sao_Paulo');
+        $today = Time::now()->setTimezone($tz)->setTime(12, 0);
+        $capacity = 0;
+        for ($d = 0; $d < $days; $d++) {
+            $capacity += max(0, $limit - Queue::countOnDay($pdo, $today->modify("+$d days")));
+        }
+        $until = $today->modify("+$days days")->setTime(0, 0)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $perCat = [];
+        foreach (Db::all($pdo, "SELECT COALESCE(NULLIF(c.category,''),'(sem categoria)') cat, COUNT(*) n FROM gmax3_pub_queue q JOIN gmax3_catalog c ON c.id=q.catalog_id
+            WHERE q.state IN ('agendado','reservado') AND q.scheduled_for < ? GROUP BY cat", [$until]) as $x) {
+            $perCat[(string)$x['cat']] = (int)$x['n'];
+        }
+        return [$capacity, $perCat];
     }
 
     // ------------------------------------------------------------------ 4. análise semanal
     private static function weekly(PDO $pdo, array $p, float $deadline, string $actor, int $runId = 0): array
     {
-        $c = self::review($pdo, (int)($p['limite'] ?? 100), $deadline, $actor, true, $runId);
+        $c = self::review($pdo, (int)($p['limite'] ?? 100), $deadline, $actor, true, $runId, self::doneIds($p));
         $h = self::health($pdo, $actor);
         $c['blocked'] += $h['blocked'];
         $c['detail'] = array_merge($c['detail'], $h['detail']);

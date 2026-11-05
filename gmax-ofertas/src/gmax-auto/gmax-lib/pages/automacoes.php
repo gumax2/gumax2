@@ -15,7 +15,7 @@ $alertCount = (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_alerts WHERE reso
 $runs = Db::all($pdo, 'SELECT r.*, j.name FROM gmax3_job_runs r LEFT JOIN gmax3_jobs j ON j.job=r.job ORDER BY r.id DESC LIMIT 30');
 $usage = Db::all($pdo, 'SELECT * FROM gmax3_api_usage WHERE day=?', [\Gmax\RateLimiter::day()]);
 $usageBy = array_column($usage, null, 'connector');
-$top = array_slice(array_values(array_filter(Ranking::list($pdo, [], 60), static fn($r) => in_array($r['item']['validation_status'], ['aprovado', 'aguardando_validacao'], true))), 0, 6);
+$top = array_slice(array_values(array_filter(Ranking::listCached($pdo, 60), static fn($r) => in_array($r['item']['validation_status'], ['aprovado', 'aguardando_validacao'], true))), 0, 6);
 $todayQueue = Queue::countOnDay($pdo, Time::now()->setTimezone(new DateTimeZone('America/Sao_Paulo')));
 $limit = Settings::int($pdo, 'limite_diario_telegram_privado', 6);
 $templates = Db::all($pdo, "SELECT * FROM gmax3_templates ORDER BY (marketplace='*' AND category='*') DESC, marketplace, category");

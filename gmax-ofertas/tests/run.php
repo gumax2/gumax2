@@ -169,7 +169,10 @@ test('Preflight: ambiente de teste sem falhas e arquivos iguais à referência',
     foreach ($files as $f) {
         // O publicador do teste foi ajustado para a pasta isolada: deve ser apontado como DIFERENTE.
         // app.php e publicador do teste apontam para a pasta isolada: devem ser DIFERENTES da produção.
-        $expected = in_array($f[1], ['Arquivo gmax-publicador-cli.php', 'Arquivo app.php'], true) ? 'DIFERENTE' : 'idêntico';
+        // 3.2.0: index.php foi substituído de propósito pelo redirecionamento ao login centralizado.
+        $expected = in_array($f[1], ['Arquivo gmax-publicador-cli.php', 'Arquivo app.php'], true) ? 'DIFERENTE'
+            : ($f[1] === 'Arquivo index.php' ? 'redirecionamento ao login centralizado'
+            : ($f[1] === 'Arquivo mercadolivre.php' ? 'sessão do login centralizado' : 'idêntico'));
         ok(str_contains($f[2], $expected), $f[1] . " => $expected");
     }
 });

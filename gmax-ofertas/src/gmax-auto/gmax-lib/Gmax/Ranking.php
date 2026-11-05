@@ -124,10 +124,14 @@ final class Ranking
         }
         $total = array_sum(self::WEIGHTS);
         $priceNote = null;
-        if (count($verifiedHistory) >= 3 && !empty($r['price_promo_cents'])) {
-            $min = min(array_map('intval', $verifiedHistory));
+        // Histórico: lista de preços conferidos OU agregado ['count' => n, 'min' => centavos] (3.2.0, mesma regra).
+        [$hCount, $hMin] = isset($verifiedHistory['count'])
+            ? [(int)$verifiedHistory['count'], (int)$verifiedHistory['min']]
+            : [count($verifiedHistory), $verifiedHistory ? min(array_map('intval', $verifiedHistory)) : 0];
+        if ($hCount >= 3 && !empty($r['price_promo_cents'])) {
+            $min = $hMin;
             $priceNote = (int)$r['price_promo_cents'] <= $min
-                ? 'Menor preço entre ' . count($verifiedHistory) . ' conferências registradas'
+                ? 'Menor preço entre ' . $hCount . ' conferências registradas'
                 : 'Já houve preço menor (' . Money::format($min) . ') em conferências anteriores';
         }
         return [
@@ -148,16 +152,27 @@ final class Ranking
      * Rules::duplicate) + "De" verificável quando usado na comunicação. Pontuação alta não é autorização.
      * @return list<string>
      */
-    public static function readiness(PDO $pdo, array $r, string $channel = 'telegram_privado'): array
+    public static function readiness(PDO $pdo, array $r, string $channel = 'telegram_privado', ?array $ctx = null): array
     {
-        $b = Rules::blockers($pdo, $r, $channel);
+        $b = Rules::blockers($pdo, $r, $channel, $ctx);
         if (!empty($r['price_original_cents']) && Pricing::originalSource($r) === 'importado') {
             $b[] = 'Preço original (De) não confirmado: confira na loja ou retire o De antes de divulgar';
         }
-        if ($dup = Rules::duplicate($pdo, $r)) {
+        if ($dup = Rules::duplicate($pdo, $r, null, $ctx)) {
             $b[] = $dup;
         }
         return array_values(array_unique($b));
+    }
+
+    /** Quantidade e menor preço conferido por produto, agregados no SQLite (antes: todo o histórico em memória). */
+    public static function historyStats(PDO $pdo, ?array $ids = null): array
+    {
+        $out = [];
+        $in = $ids !== null ? ' AND catalog_id IN (' . (implode(',', array_map('intval', $ids)) ?: '0') . ')' : '';
+        foreach ($pdo->query('SELECT catalog_id, COUNT(*) n, MIN(price_promo_cents) m FROM gmax3_price_history WHERE verified = 1 AND price_promo_cents IS NOT NULL' . $in . ' GROUP BY catalog_id') as $h) {
+            $out[$h['catalog_id']] = ['count' => (int)$h['n'], 'min' => (int)$h['m']];
+        }
+        return $out;
     }
 
     /** Destaques comerciais curtos (somente dados existentes), do mais relevante ao menos. @return list<string> */
@@ -243,17 +258,17 @@ final class Ranking
         if (preg_match('/^(\d{1,5})-(\d{1,6})$/D', Settings::get($pdo, 'faixa_preco_conversao', ''), $m) && (int)$m[1] < (int)$m[2]) {
             $band = [(int)$m[1], (int)$m[2]];
         }
-        $history = [];
-        foreach ($pdo->query('SELECT catalog_id, price_promo_cents FROM gmax3_price_history WHERE verified = 1')->fetchAll() as $h) {
-            $history[$h['catalog_id']][] = $h['price_promo_cents'];
-        }
+        $history = self::historyStats($pdo); // agregado no SQLite (antes: todo o histórico em memória)
+        $ctx = Rules::context($pdo); // configurações, fila e tabelas antigas lidas uma vez (antes: 3 a 6 consultas por produto)
+        $eval = static fn(array $r) => self::evaluate($r, isset($potentials[$r['category'] ?? '']) ? (int)$potentials[$r['category']] : null, $history[$r['id']] ?? [], $band, $fresh);
+        // Passagem completa com linhas COMPACTAS (só o necessário para filtrar e ordenar); detalhes só da página exibida.
         $rows = [];
         $ready = 0;
-        foreach (Db::all($pdo, 'SELECT * FROM gmax3_catalog WHERE ' . implode(' AND ', $where), $args) as $r) {
-            $pot = isset($potentials[$r['category'] ?? '']) ? (int)$potentials[$r['category']] : null;
-            $e = self::evaluate($r, $pot, $history[$r['id']] ?? [], $band, $fresh);
-            $pend = self::readiness($pdo, $r);
-            $ok = $pend === [];
+        $st = $pdo->prepare('SELECT * FROM gmax3_catalog WHERE ' . implode(' AND ', $where));
+        $st->execute($args);
+        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+            $e = $eval($r);
+            $ok = self::readiness($pdo, $r, 'telegram_privado', $ctx) === [];
             $ready += $ok ? 1 : 0;
             if (($mode === 'prontas' && !$ok) || (($f['pronto'] ?? '') === 'sim' && !$ok) || (($f['pronto'] ?? '') === 'nao' && $ok)) {
                 continue;
@@ -262,19 +277,85 @@ final class Ranking
                 || (isset($f['conf_min']) && ctype_digit((string)$f['conf_min']) && $e['confidence'] < (int)$f['conf_min'])) {
                 continue;
             }
-            $rows[] = ['item' => $r, 'pendencias' => $pend, 'pronto' => $ok, 'destaques' => self::highlights($r)] + $e;
+            $rows[] = ['id' => (int)$r['id'], 'score' => $e['score'], 'confidence' => $e['confidence'],
+                'price' => $r['price_promo_cents'] === null ? null : (int)$r['price_promo_cents'], 'verified' => (string)($r['price_verified_at'] ?? '')];
         }
         $key = static fn(array $x) => match ($f['ordem'] ?? 'score') {
             'conf' => [$x['confidence'], $x['score'] ?? -1],
-            'preco' => [-(int)($x['item']['price_promo_cents'] ?? PHP_INT_MAX), $x['score'] ?? -1],
-            'data' => [(string)($x['item']['price_verified_at'] ?? ''), $x['score'] ?? -1],
+            'preco' => [-($x['price'] ?? PHP_INT_MAX), $x['score'] ?? -1],
+            'data' => [$x['verified'], $x['score'] ?? -1],
             default => [$x['score'] ?? -1, $x['confidence']],
         };
-        usort($rows, static fn($a, $b) => $key($b) <=> $key($a) ?: (int)$a['item']['id'] <=> (int)$b['item']['id']);
+        usort($rows, static fn($a, $b) => $key($b) <=> $key($a) ?: $a['id'] <=> $b['id']);
         $total = count($rows);
         $pages = max(1, (int)ceil($total / self::PER_PAGE));
         $page = min($pages, max(1, (int)($f['page'] ?? 1)));
-        return ['rows' => array_slice($rows, ($page - 1) * self::PER_PAGE, self::PER_PAGE), 'total' => $total, 'prontas' => $ready, 'page' => $page, 'pages' => $pages, 'offset' => ($page - 1) * self::PER_PAGE];
+        $slice = array_slice($rows, ($page - 1) * self::PER_PAGE, self::PER_PAGE);
+        $items = self::itemsById($pdo, array_column($slice, 'id'));
+        $full = [];
+        foreach ($slice as $x) {
+            $r = $items[$x['id']];
+            $pend = self::readiness($pdo, $r, 'telegram_privado', $ctx);
+            $full[] = ['item' => $r, 'pendencias' => $pend, 'pronto' => $pend === [], 'destaques' => self::highlights($r)] + $eval($r);
+        }
+        return ['rows' => $full, 'total' => $total, 'prontas' => $ready, 'page' => $page, 'pages' => $pages, 'offset' => ($page - 1) * self::PER_PAGE];
+    }
+
+    /** @param list<int> $ids @return array<int,array> */
+    private static function itemsById(PDO $pdo, array $ids): array
+    {
+        if (!$ids) {
+            return [];
+        }
+        $out = [];
+        foreach (Db::all($pdo, 'SELECT * FROM gmax3_catalog WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', $ids) as $r) {
+            $out[(int)$r['id']] = $r;
+        }
+        return $out;
+    }
+
+    public const CACHE_TTL = 300;
+
+    /** Assinatura do que altera a pontuação: catálogo, histórico conferido, categorias e configurações usadas. */
+    private static function signature(PDO $pdo): string
+    {
+        $c = Db::one($pdo, 'SELECT COUNT(*) n, MAX(updated_at) u, MAX(id) i FROM gmax3_catalog');
+        $h = Db::value($pdo, 'SELECT MAX(id) FROM gmax3_price_history');
+        $g = Db::value($pdo, "SELECT group_concat(name || ':' || IFNULL(potential,'') || ':' || active, '|') FROM gmax3_categories");
+        return hash('sha256', json_encode([$c, $h, $g, Settings::get($pdo, 'faixa_preco_conversao', ''), Settings::get($pdo, 'validade_preco_horas', '')]));
+    }
+
+    /**
+     * list() com cache curto (só para telas: Visão Geral e Central). Invalida na hora quando muda
+     * qualquer produto, preço conferido, categoria ou configuração de pontuação; senão vale 5 min.
+     * Automações (seleção) continuam usando list() sem cache.
+     */
+    public static function listCached(PDO $pdo, int $limit = 60): array
+    {
+        $sig = self::signature($pdo);
+        $c = json_decode(Settings::get($pdo, 'cache_ranking_topo', ''), true);
+        if (is_array($c) && ($c['sig'] ?? '') === $sig && (int)($c['limit'] ?? 0) === $limit && time() - (int)($c['at'] ?? 0) < self::CACHE_TTL && is_array($c['ids'] ?? null)) {
+            $items = self::itemsById($pdo, array_map('intval', $c['ids']));
+            if (count($items) === count($c['ids'])) {
+                return self::detailed($pdo, array_map('intval', $c['ids']), $items);
+            }
+        }
+        $rows = self::list($pdo, [], $limit);
+        Settings::store($pdo, 'cache_ranking_topo', json_encode(['sig' => $sig, 'limit' => $limit, 'at' => time(), 'ids' => array_map(static fn($r) => (int)$r['item']['id'], $rows)]), 'cache');
+        return $rows;
+    }
+
+    /** Recalcula a avaliação completa (com componentes) para ids já ordenados. */
+    private static function detailed(PDO $pdo, array $ids, array $items): array
+    {
+        $potentials = $pdo->query('SELECT name, potential FROM gmax3_categories WHERE potential IS NOT NULL')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $band = self::DEFAULT_PRICE_BAND;
+        if (preg_match('/^(\d{1,5})-(\d{1,6})$/D', Settings::get($pdo, 'faixa_preco_conversao', ''), $m) && (int)$m[1] < (int)$m[2]) {
+            $band = [(int)$m[1], (int)$m[2]];
+        }
+        $fresh = Settings::int($pdo, 'validade_preco_horas', 24);
+        $history = self::historyStats($pdo, $ids);
+        return array_map(static fn($id) => ['item' => $items[$id]] + self::evaluate($items[$id], isset($potentials[$items[$id]['category'] ?? '']) ? (int)$potentials[$items[$id]['category']] : null, $history[$id] ?? [], $band, $fresh), $ids);
     }
 
     /** @return list<array> produtos ordenados por pontuação (exclui rejeitados, arquivados e indisponíveis) */
@@ -287,22 +368,25 @@ final class Ranking
             $args[] = $filters['marketplace'];
         }
         $potentials = $pdo->query('SELECT name, potential FROM gmax3_categories WHERE potential IS NOT NULL')->fetchAll(PDO::FETCH_KEY_PAIR);
-        $history = [];
         $band = self::DEFAULT_PRICE_BAND;
         $cfg = Settings::get($pdo, 'faixa_preco_conversao', '');
         if (preg_match('/^(\d{1,5})-(\d{1,6})$/D', $cfg, $m) && (int)$m[1] < (int)$m[2]) {
             $band = [(int)$m[1], (int)$m[2]];
         }
         $fresh = Settings::int($pdo, 'validade_preco_horas', 24);
-        foreach ($pdo->query('SELECT catalog_id, price_promo_cents FROM gmax3_price_history WHERE verified = 1')->fetchAll() as $h) {
-            $history[$h['catalog_id']][] = $h['price_promo_cents'];
-        }
+        $history = self::historyStats($pdo); // agregado no SQLite (antes: todo o histórico em memória)
+        $eval = static fn(array $r) => self::evaluate($r, isset($potentials[$r['category'] ?? '']) ? (int)$potentials[$r['category']] : null, $history[$r['id']] ?? [], $band, $fresh);
+        // Linhas compactas na passagem completa; detalhes só dos $limit primeiros (mesma ordem estável de antes).
         $out = [];
-        foreach (Db::all($pdo, "SELECT * FROM gmax3_catalog WHERE $where", $args) as $r) {
-            $pot = isset($potentials[$r['category'] ?? '']) ? (int)$potentials[$r['category']] : null;
-            $out[] = ['item' => $r] + self::evaluate($r, $pot, $history[$r['id']] ?? [], $band, $fresh);
+        $st = $pdo->prepare("SELECT * FROM gmax3_catalog WHERE $where");
+        $st->execute($args);
+        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+            $e = $eval($r);
+            $out[] = ['id' => (int)$r['id'], 'score' => $e['score'], 'confidence' => $e['confidence']];
         }
         usort($out, static fn($a, $b) => [($b['score'] ?? -1), $b['confidence']] <=> [($a['score'] ?? -1), $a['confidence']]);
-        return array_slice($out, 0, $limit);
+        $out = array_slice($out, 0, $limit);
+        $items = self::itemsById($pdo, array_column($out, 'id'));
+        return array_map(static fn($x) => ['item' => $items[$x['id']]] + $eval($items[$x['id']]), $out);
     }
 }

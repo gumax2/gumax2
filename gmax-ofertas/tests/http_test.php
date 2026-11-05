@@ -16,7 +16,8 @@ $app = t_app();
 $port = 18000 + random_int(0, 999);
 $base = "http://127.0.0.1:$port";
 $env = ['GMAX_SECRETS_DIR' => t_sandbox() . '/gmax-secrets', 'GMAX_TESTING' => '1', 'PATH' => getenv('PATH')];
-$server = proc_open([PHP_BINARY, '-d', 'allow_url_fopen=0', '-d', 'display_errors=1', '-d', 'error_reporting=-1', '-S', "127.0.0.1:$port", '-t', $app], [1 => ['file', '/dev/null', 'w'], 2 => ['file', t_sandbox() . '/server.log', 'w']], $pipes, $app, $env);
+@mkdir(t_sandbox() . '/sessoes', 0700, true);
+$server = proc_open([PHP_BINARY, '-d', 'allow_url_fopen=0', '-d', 'display_errors=1', '-d', 'error_reporting=-1', '-d', 'session.save_path=' . t_sandbox() . '/sessoes', '-S', "127.0.0.1:$port", '-t', $app], [1 => ['file', '/dev/null', 'w'], 2 => ['file', t_sandbox() . '/server.log', 'w']], $pipes, $app, $env);
 register_shutdown_function(static function () use ($server) {
     proc_terminate($server);
 });
@@ -136,9 +137,20 @@ test('Arquivos internos não executam pela web (guarda direta e CLI)', function 
     eq(403, $r['status']);
     eq(403, http('GET', 'gmax-publicador-cli.php')['status'], 'publicador antigo continua só CLI');
 });
-test('Login pelo painel antigo (index.php) vale para o novo painel', function () {
-    $t = csrf(http('GET', 'index.php')['body']);
-    http('POST', 'index.php', ['csrf' => $t, 'action' => 'login', 'password' => T_PASSWORD]);
+test('index.php antigo (3.2.0): só redireciona ao painel; não tem login nem autentica', function () {
+    foreach (['GET', 'POST'] as $m) {
+        $r = http($m, 'index.php', $m === 'POST' ? ['action' => 'login', 'password' => T_PASSWORD, 'csrf' => 'x'] : []);
+        eq(302, $r['status'], $m);
+        eq('painel.php', header_value($r, 'Location'), 'destino fixo');
+        ok(!str_contains($r['body'], 'password'), 'sem formulário de senha');
+    }
+    $r = http('GET', 'index.php?next=https://evil.example');
+    eq('painel.php', header_value($r, 'Location'), 'ignora parâmetros (sem redirecionamento aberto)');
+    ok(str_contains(http('GET', 'painel.php')['body'], 'Senha de administrador'), 'continua deslogado');
+});
+test('Login centralizado no painel.php leva à migração pendente', function () {
+    $t = csrf(http('GET', 'painel.php')['body']);
+    follow(http('POST', 'painel.php', ['action' => 'login', 'password' => T_PASSWORD, 'csrf' => $t]));
     $r = http('GET', 'painel.php');
     ok(str_contains($r['body'], 'Migração pendente'), 'logado e direcionado à migração');
     no_php_errors($r, 'sistema (pré-migração)');
@@ -162,12 +174,11 @@ test('Painel unificado mostra as duas lojas (5 Shopee + 1 Mercado Livre)', funct
     ok(str_contains($r['body'], 'Parafusadeira Furadeira 48V'), 'ML-001 listado');
     ok(str_contains($r['body'], '65% OFF'), 'desconto calculado');
 });
-test('Páginas antigas continuam funcionando após a migração', function () {
+test('mercadolivre.php antigo continua funcionando com a sessão do painel', function () {
     $r = http('GET', 'mercadolivre.php');
     eq(200, $r['status']);
     ok(str_contains($r['body'], 'Parafusadeira Furadeira 48V'), 'mercadolivre.php mostra ML-001');
-    $r = http('GET', 'index.php');
-    ok(str_contains($r['body'], 'Fone Bluetooth TWS Teste A'), 'index.php lista ofertas Shopee');
+    eq('painel.php', header_value(http('GET', 'index.php'), 'Location'), 'index.php leva ao painel centralizado');
 });
 test('Todas as páginas do painel abrem sem erros', function () {
     foreach (['painel', 'automacoes', 'integracoes', 'ofertas', 'oferta', 'importar', 'links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema'] as $p) {
@@ -296,6 +307,72 @@ test('Logout encerra a sessão', function () {
     follow(http('POST', 'painel.php', ['action' => 'logout', 'csrf' => $t]));
     $r = http('GET', 'painel.php?p=ofertas');
     ok(str_contains($r['body'], 'Senha de administrador'), 'deslogado');
+    $jar = $saved;
+});
+
+/** Grava uma sessão PHP "pronta" (formato php serialize_handler) e devolve o cookie para usá-la. */
+function forge_session(array $data): array
+{
+    $id = bin2hex(random_bytes(16));
+    $raw = '';
+    foreach ($data as $k => $v) {
+        $raw .= $k . '|' . serialize($v);
+    }
+    file_put_contents(t_sandbox() . "/sessoes/sess_$id", $raw);
+    return ['PHPSESSID' => $id];
+}
+test('3.2.0: sessão criada pelo login antigo (sem marcador) não abre o painel e pede novo login', function () {
+    global $jar;
+    $saved = $jar;
+    $jar = forge_session(['auth' => true, 'csrf' => 'abc']);
+    $r = http('GET', 'painel.php?p=ofertas');
+    ok(str_contains($r['body'], 'Senha de administrador') && str_contains($r['body'], 'centralizado neste painel'), 'login exigido com aviso');
+    $jar = forge_session(['auth' => true, 'csrf' => 'abc']);
+    $n = (int)Db::value(Db::get(), "SELECT COUNT(*) FROM gmax3_audit WHERE action='configuracao_alterada' AND entity_id='motivo_pausa'");
+    $st = http('POST', 'painel.php', ['action' => 'pause', 'csrf' => 'abc'])['status'];
+    ok(in_array($st, [303, 403], true), "ação recusada sem o marcador (HTTP $st)");
+    eq($n, (int)Db::value(Db::get(), "SELECT COUNT(*) FROM gmax3_audit WHERE action='configuracao_alterada' AND entity_id='motivo_pausa'"), 'nada executado');
+    $jar = $saved;
+});
+test('3.2.0: inatividade de 2 h e sessão com mais de 12 h expiram', function () {
+    global $jar;
+    $saved = $jar;
+    $jar = forge_session(['auth' => true, 'gmax3_auth' => 1, 'gmax3_last' => time() - 7300, 'gmax3_since' => time() - 8000, 'csrf' => 'x']);
+    ok(str_contains(http('GET', 'painel.php')['body'], 'inatividade'), 'inatividade');
+    $jar = forge_session(['auth' => true, 'gmax3_auth' => 1, 'gmax3_last' => time() - 60, 'gmax3_since' => time() - 43300, 'csrf' => 'x']);
+    ok(str_contains(http('GET', 'painel.php')['body'], '12 horas'), 'tempo máximo');
+    $jar = forge_session(['auth' => true, 'gmax3_auth' => 1, 'gmax3_last' => time() - 60, 'gmax3_since' => time() - 600, 'csrf' => 'x']);
+    ok(!str_contains(http('GET', 'painel.php')['body'], 'Senha de administrador'), 'sessão válida continua');
+    $jar = $saved;
+});
+test('3.2.0: login gera nova sessão (id regenerado) e o mercadolivre.php antigo usa a sessão do painel', function () {
+    global $jar;
+    $saved = $jar;
+    $jar = [];
+    $t = csrf(http('GET', 'painel.php')['body']);
+    $before = $jar['PHPSESSID'] ?? '';
+    follow(http('POST', 'painel.php', ['action' => 'login', 'password' => T_PASSWORD, 'csrf' => $t]));
+    ok(($jar['PHPSESSID'] ?? '') !== '' && $jar['PHPSESSID'] !== $before, 'id da sessão regenerado');
+    eq(200, http('GET', 'mercadolivre.php')['status']);
+    $jar = [];
+    eq('painel.php', header_value(http('GET', 'mercadolivre.php'), 'Location'), 'sem sessão: mercadolivre.php manda ao painel');
+    $jar = $saved;
+});
+test('3.2.0: mercadolivre.php recusa sessão do login antigo, inativa ou com mais de 12 h', function () {
+    global $jar;
+    $saved = $jar;
+    foreach ([
+        'login antigo (sem marcador)' => ['auth' => true],
+        'inativa há mais de 2 h' => ['auth' => true, 'gmax3_auth' => 1, 'gmax3_last' => time() - 7300, 'gmax3_since' => time() - 8000],
+        'com mais de 12 h' => ['auth' => true, 'gmax3_auth' => 1, 'gmax3_last' => time() - 60, 'gmax3_since' => time() - 43300],
+    ] as $why => $data) {
+        $jar = forge_session($data);
+        $r = http('GET', 'mercadolivre.php');
+        eq('painel.php', header_value($r, 'Location'), $why);
+        ok(!str_contains($r['body'], 'Parafusadeira'), "$why: nada listado");
+    }
+    $jar = forge_session(['auth' => true, 'gmax3_auth' => 1, 'gmax3_last' => time() - 60, 'gmax3_since' => time() - 600]);
+    eq(200, http('GET', 'mercadolivre.php')['status'], 'sessão válida do painel continua abrindo');
     $jar = $saved;
 });
 

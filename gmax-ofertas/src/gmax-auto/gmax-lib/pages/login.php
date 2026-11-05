@@ -19,7 +19,7 @@ use Gmax\View;
   <p class="muted">Painel multiloja · Shopee + Mercado Livre</p>
   <?php foreach ($flash as [$type, $msg]): ?><div class="alert alert-<?= View::e($type) ?>" role="alert"><?= View::e($msg) ?></div><?php endforeach; ?>
   <?php if (!$hasUser): ?>
-    <div class="alert alert-aviso">Nenhuma senha cadastrada. Faça a configuração inicial em <a href="index.php">index.php</a>.</div>
+    <div class="alert alert-aviso">Nenhuma senha cadastrada. Crie o arquivo <code>gmax-secrets/senha-inicial.txt</code> com a senha (mínimo de 14 caracteres) e rode <code>gmax-admin-cli.php criar-senha</code> pelo Cron uma vez; o arquivo é apagado em seguida.</div>
   <?php else: ?>
   <form method="post" action="painel.php" data-loading>
     <?= View::csrfField() ?>
@@ -28,7 +28,7 @@ use Gmax\View;
     <input id="password" type="password" name="password" required autocomplete="current-password" autofocus>
     <button type="submit" class="btn btn-primary btn-block">Entrar</button>
   </form>
-  <p class="muted small">Mesma senha do painel atual (index.php).</p>
+  <p class="muted small">Acesso administrativo centralizado neste painel (mesma senha de antes).</p>
   <?php endif; ?>
 </main>
 <script src="gmax-assets/painel.js?v=<?= View::e(GMAX_VERSION) ?>"></script>

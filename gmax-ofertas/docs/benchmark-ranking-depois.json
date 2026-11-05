@@ -1,0 +1,86 @@
+{
+    "rotulo": "depois",
+    "php": "8.3.6",
+    "sqlite": "3.45.1",
+    "executado_em": "2026-11-05T10:01:27-03:00",
+    "bases": [
+        {
+            "produtos": 1000,
+            "historico": 10000,
+            "ranking_potencial_pagina1": {
+                "ms": 53.2,
+                "pico_mb": 1.6,
+                "impressao_digital": "8abeeeaef225b62d487ee6b7bab4c4ccd94f6eef6488b3b83954abe7078610de",
+                "total": 806,
+                "prontas": 0
+            },
+            "ranking_prontas": {
+                "ms": 46.1,
+                "pico_mb": 0.6,
+                "impressao_digital": "909d98dd4653eadce82e7450f85f8d4b9ed42392d2e256847ac7606b3848d27a",
+                "total": 0,
+                "prontas": 0
+            },
+            "ranking_filtros_combinados": {
+                "ms": 25.9,
+                "pico_mb": 1.1,
+                "impressao_digital": "ce8401deef457618d741ddea119d4fc31f193cb8fc3b581b2bbb22c51e3c9851",
+                "total": 229,
+                "prontas": 0
+            },
+            "visao_geral_top5": {
+                "ms": 28.2,
+                "pico_mb": 1,
+                "impressao_digital": "98005a0688bcaf527833040aee5347e20a0f8987054917839a1a774ff8a841b4"
+            },
+            "visao_geral_top5_cache": {
+                "ms": 2.8,
+                "pico_mb": 1,
+                "impressao_digital": "98005a0688bcaf527833040aee5347e20a0f8987054917839a1a774ff8a841b4"
+            },
+            "busca_ofertas": {
+                "ms": 1,
+                "pico_mb": 0.2
+            }
+        },
+        {
+            "produtos": 10000,
+            "historico": 100000,
+            "ranking_potencial_pagina1": {
+                "ms": 404.2,
+                "pico_mb": 8.5,
+                "impressao_digital": "8d4eaeef70ef0b3a33630ab4878b2e4380927a89b25c596ca8ffbd6e73c96b99",
+                "total": 8006,
+                "prontas": 0
+            },
+            "ranking_prontas": {
+                "ms": 437.1,
+                "pico_mb": 4.5,
+                "impressao_digital": "909d98dd4653eadce82e7450f85f8d4b9ed42392d2e256847ac7606b3848d27a",
+                "total": 0,
+                "prontas": 0
+            },
+            "ranking_filtros_combinados": {
+                "ms": 228.2,
+                "pico_mb": 5.9,
+                "impressao_digital": "96fed92305b0abb86892d3842124acae859d0c48a3862d6f0ed128562628e15a",
+                "total": 2285,
+                "prontas": 0
+            },
+            "visao_geral_top5": {
+                "ms": 351.5,
+                "pico_mb": 7.4,
+                "impressao_digital": "98005a0688bcaf527833040aee5347e20a0f8987054917839a1a774ff8a841b4"
+            },
+            "visao_geral_top5_cache": {
+                "ms": 9.8,
+                "pico_mb": 7.3,
+                "impressao_digital": "98005a0688bcaf527833040aee5347e20a0f8987054917839a1a774ff8a841b4"
+            },
+            "busca_ofertas": {
+                "ms": 15.3,
+                "pico_mb": 0.2
+            }
+        }
+    ]
+}

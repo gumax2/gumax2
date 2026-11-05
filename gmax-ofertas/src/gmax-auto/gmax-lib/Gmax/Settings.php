@@ -10,7 +10,8 @@ final class Settings
 {
     /** Chaves que o painel web pode alterar. As demais só mudam pela CLI, com frase de autorização. */
     public const WEB_EDITABLE = ['janela_duplicidade_dias', 'validade_preco_horas', 'horarios', 'limite_diario_telegram_privado',
-        'termos_descoberta_mercadolivre', 'termos_descoberta_shopee', 'faixa_preco_conversao', 'ml_suspensao_403', 'ml_403_limite'];
+        'termos_descoberta_mercadolivre', 'termos_descoberta_shopee', 'faixa_preco_conversao', 'ml_suspensao_403', 'ml_403_limite',
+        'selecao_horizonte_dias', 'selecao_max_por_categoria'];
     /** Chaves que liberam envio: só pela CLI com --autorizo. */
     public const CLI_ONLY = ['automacao_comercial', 'ml_grupo_privado_permitido', 'publicador_v21_aposentado', 'aprovacao_automatica'];
 
@@ -62,6 +63,8 @@ final class Settings
             'termos_descoberta_mercadolivre', 'termos_descoberta_shopee' => mb_strlen($value) <= 2000 && !preg_match('/[<>\x00-\x08]/', $value),
             'ml_suspensao_403' => in_array($value, ['0', '1'], true),
             'ml_403_limite' => preg_match('/^\d{1,2}$/D', $value) && (int)$value >= 2 && (int)$value <= 20,
+            'selecao_horizonte_dias' => preg_match('/^\d{1,2}$/D', $value) && (int)$value >= 1 && (int)$value <= 14,
+            'selecao_max_por_categoria' => preg_match('/^\d{1,2}$/D', $value) && (int)$value >= 1 && (int)$value <= 20,
             'faixa_preco_conversao' => $value === '' || (preg_match('/^(\d{1,5})-(\d{1,6})$/D', $value, $m) && (int)$m[1] < (int)$m[2]),
         };
         if (!$ok) {

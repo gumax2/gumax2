@@ -15,6 +15,9 @@ declare(strict_types=1);
  *   ml-grupo-privado --permitir CONFIRMO_REGRAS_ML_AFILIADOS | --bloquear
  *   publicador-v21 --aposentar CONFIRMO_V21_DESATIVADO | --reativar
  *   importar <arquivo> [--aplicar]  Prévia (e opcionalmente aplicação) de lote
+ *   criar-senha               Cria a senha inicial a partir de gmax-secrets/senha-inicial.txt (só se não existir
+ *                             usuário; o arquivo é apagado depois). Nunca sobrescreve uma senha existente.
+ *   desbloquear-login         Libera o login bloqueado pelo limite de tentativas (registrado na auditoria)
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
@@ -46,6 +49,33 @@ try {
         }
     };
     switch ($cmd) {
+        case 'criar-senha':
+            $f = Gmax\Config::secretsDir() . '/senha-inicial.txt';
+            if (is_link($f)) {
+                @unlink($f);
+                throw new RuntimeException('senha-inicial.txt não pode ser um link simbólico: o link foi apagado. Crie um arquivo comum.');
+            }
+            if (!is_file($f) || !is_readable($f)) {
+                throw new RuntimeException('Crie ' . $f . ' com a senha (de 14 a 72 caracteres) e rode de novo.');
+            }
+            $loose = (fileperms($f) & 0077) !== 0;
+            $pass = preg_replace('/^\xEF\xBB\xBF/', '', rtrim((string)file_get_contents($f), "\r\n"));
+            try {
+                Gmax\Auth::createInitialPassword($pdo, $pass);
+            } finally {
+                // a senha em texto nunca fica no servidor, mesmo se houver erro
+                if (!@unlink($f) && is_file($f)) {
+                    fwrite(STDERR, "ATENÇÃO: não foi possível apagar $f. Apague-o manualmente agora.\n");
+                }
+            }
+            out('Senha inicial criada. Entre pelo painel.php.' . ($loose ? ' Aviso: o arquivo da senha estava legível por outros usuários (permissão diferente de 600); se o servidor for compartilhado, troque a senha.' : ''));
+            break;
+        case 'desbloquear-login':
+            // Libera o login bloqueado por tentativas (ex.: ataque que atingiu o limite global de 50/15 min).
+            $n = Gmax\Auth::unlock($pdo);
+            Gmax\Audit::log($pdo, 'cli', 'login_desbloqueado', 'sessao', null, ['tentativas_apagadas' => $n]);
+            out("Login desbloqueado ($n tentativa(s) recente(s) apagada(s)).");
+            break;
         case 'verificar':
             $res = Preflight::run($pdo);
             foreach ($res as [$lvl, $item, $detail]) {

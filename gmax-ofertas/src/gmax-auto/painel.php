@@ -65,8 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($action === 'login') {
         if (!Auth::hasUser($pdo)) {
-            header('Location: index.php', true, 303);
-            exit;
+            View::flash('erro', 'Nenhuma senha cadastrada. Crie a senha inicial pela linha de comando (gmax-admin-cli.php criar-senha).');
+            gmax_redirect('painel');
         }
         $err = Auth::login($pdo, (string)($_POST['password'] ?? ''));
         if ($err) {

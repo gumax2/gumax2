@@ -20,7 +20,7 @@ $queue = $pdo->query('SELECT state, COUNT(*) FROM gmax3_pub_queue GROUP BY state
 $gates = Queue::gates($pdo);
 $pending = Queue::unreconciled($pdo);
 $recent = $pdo->query('SELECT * FROM gmax3_audit ORDER BY id DESC LIMIT 8')->fetchAll();
-$top = array_slice(array_values(array_filter(Ranking::list($pdo, [], 60), static fn($r) => in_array($r['item']['validation_status'], ['aprovado', 'aguardando_validacao'], true))), 0, 5);
+$top = array_slice(array_values(array_filter(Ranking::listCached($pdo, 60), static fn($r) => in_array($r['item']['validation_status'], ['aprovado', 'aguardando_validacao'], true))), 0, 5);
 $tile = static function (string $label, int $n, array $filter, string $hint, string $tone = '') {
     return '<a class="stat' . ($n && $tone ? ' ' . $tone : '') . '" href="' . View::e(View::url('ofertas', $filter)) . '"><span class="muted">' . View::e($label) . '</span><strong>' . $n . '</strong><span class="small">' . View::e($hint) . '</span></a>';
 };
@@ -74,7 +74,7 @@ $tile = static function (string $label, int $n, array $filter, string $hint, str
     <p><a class="btn" href="<?= View::e(View::url('oferta')) ?>">Cadastrar produto manualmente</a></p>
     <p><a class="btn" href="<?= View::e(View::url('ofertas', ['status' => 'aguardando_validacao'])) ?>">Validar ofertas pendentes</a></p>
     <p><a class="btn" href="<?= View::e(View::url('ranking')) ?>">Ver ranking de oportunidades</a></p>
-    <p class="muted small">Painel anterior: <a href="index.php">index.php</a> · <a href="mercadolivre.php">mercadolivre.php</a> (continuam funcionando).</p>
+    <p class="muted small">Painel anterior do Mercado Livre: <a href="mercadolivre.php">mercadolivre.php</a> (usa a sessão deste painel).</p>
   </div>
   <div class="card">
     <h2>Atividade recente</h2>

@@ -80,6 +80,14 @@ final class Preflight
             }
             $sha = hash_file('sha256', $file);
             $ref = $hashes[$f] ?? null;
+            if ($f === 'index.php' && str_contains((string)file_get_contents($file), 'GMAX Ofertas 3.2.0 — o antigo index.php')) {
+                $add('ok', 'Arquivo index.php', 'substituído pelo redirecionamento ao login centralizado (3.2.0)');
+                continue;
+            }
+            if ($f === 'mercadolivre.php' && str_contains((string)file_get_contents($file), 'GMAX Ofertas 3.2.0: só aceita a sessão do login centralizado')) {
+                $add('ok', 'Arquivo mercadolivre.php', 'atualizado para a sessão do login centralizado (3.2.0); listagem inalterada');
+                continue;
+            }
             $add($sha === $ref || $ref === null ? 'ok' : 'aviso', "Arquivo $f", $ref === null ? 'sem referência para comparar' : ($sha === $ref ? 'idêntico à cópia de produção de 29/10/2026' : 'DIFERENTE da cópia de produção de 29/10/2026 (alterado depois?) — revise antes de migrar'));
         }
         $pub = @file_get_contents(GMAX_APP_DIR . '/gmax-publicador-cli.php');

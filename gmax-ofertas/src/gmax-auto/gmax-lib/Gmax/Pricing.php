@@ -73,7 +73,7 @@ final class Pricing
             // Só o Mercado Livre devolve o preço original; a API da Shopee informa apenas o "Por".
             return $src === 'api_mercadolivre' && ($r['marketplace'] ?? '') === 'mercadolivre' ? 'api' : 'importado';
         }
-        return $src === 'conferencia_manual' || in_array($src, ['edicao', 'manual'], true) || (!empty($r['price_verified_at']) && !str_starts_with((string)$r['price_verified_by'], 'api:')) ? 'manual' : 'importado';
+        return $src === 'conferencia_manual' || in_array($src, ['edicao', 'manual'], true) || (!empty($r['price_verified_at']) && !str_starts_with((string)($r['price_verified_by'] ?? ''), 'api:')) ? 'manual' : 'importado';
     }
 
     /**

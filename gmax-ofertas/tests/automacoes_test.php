@@ -238,6 +238,7 @@ test('Seleção coloca as melhores na fila respeitando o limite diário (nada é
     $pdo = $ready();
     Settings::set($pdo, 'publicador_v21_aposentado', '1', 't');
     Settings::set($pdo, 'limite_diario_telegram_privado', '2', 't');
+    Settings::set($pdo, 'selecao_max_por_categoria', '20', 't'); // 3.2.0: teto por categoria testado em v320_test.php
     $links = ['22812345602', '22812345603', '22812345604', '22812345605'];
     foreach ($links as $i => $item) {
         $approvedShopee($pdo, $item, 3000 + $i * 100, 9000);
