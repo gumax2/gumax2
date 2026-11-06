@@ -99,7 +99,6 @@ test('Somente leitura: calcular funil, fila e resumo não grava nada no banco', 
     $before = $dump($pdo);
     Funnel::summary($pdo);
     Funnel::workQueue($pdo, ['prio' => '2']);
-    Funnel::next($pdo, [], 1, 0);
     eq($before, $dump($pdo));
 });
 
@@ -122,41 +121,50 @@ test('Ordem de atendimento, filtros (loja, categoria, prioridade, situação, et
     ok(!array_filter(Funnel::workQueue($pdo, ['prio' => '1']), fn($x) => $x['a']['priority'] !== 1), 'só prioridade alta');
     eq([], Funnel::filters(['mp' => 'amazon', 'sit' => '<x>', 'prio' => '9', 'etapa' => 'x']), 'filtros inválidos ignorados');
 });
-test('Salvar e avançar: resolvido sai e o próximo ocupa a posição; pendente avança; fim da fila', function () use ($ready, $make) {
+test('3.2.2.1 — o ciclo da 3.2.2 (reproduzido) não existe na conferência sequencial: 10 produtos, cada um uma vez', function () use ($ready, $make) {
     $pdo = $ready();
+    $_SESSION = [];
     $ids = [];
-    for ($i = 0; $i < 3; $i++) {
-        $ids[] = $make($pdo, ['price_verified_at' => null]);
+    for ($i = 0; $i < 10; $i++) { // variação pendente: depois de conferido o produto CONTINUA na etapa de conferência
+        $ids[] = $make($pdo, ['price_verified_at' => null, 'variation_pending' => 1, 'category' => 'Seq']);
     }
-    $order = array_map(fn($x) => (int)$x['item']['id'], Funnel::workQueue($pdo, ['sit' => 'preco_desatualizado']));
-    $f = ['sit' => 'preco_desatualizado'];
-    $first = $order[0];
-    Catalog::confirmPrice($pdo, $first, 't'); // resolvido
-    eq($order[1], (int)Funnel::next($pdo, $f, $first, 0)['item']['id'], 'o próximo ocupa a posição do resolvido');
-    eq($order[2], (int)Funnel::next($pdo, $f, $order[1], 0)['item']['id'], 'pendente: avança uma posição');
-    foreach (array_slice($order, 1) as $id) {
-        Catalog::confirmPrice($pdo, $id, 't');
+    $seq = Gmax\Sequence::start($pdo, ['cat' => 'Seq']);
+    eq($ids, $seq['ids'], 'fotografia na ordem da fila');
+    $visited = [];
+    while (($id = Gmax\Sequence::nextId($pdo, $seq)) !== null && count($visited) < 30) {
+        $visited[] = $id;
+        Catalog::confirmPrice($pdo, $id, 't'); // salvo: continua pendente (variação) e muda de lugar na ordenação
+        Gmax\Sequence::mark($seq, $id, 'salvo');
     }
-    eq(null, Funnel::next($pdo, $f, $order[2], 1), 'fila concluída');
+    eq($ids, $visited, 'todos, na ordem, sem repetição');
+    ok($seq['finished'], 'sequência concluída');
+    eq(10, count(Funnel::workQueue($pdo, ['cat' => 'Seq'])), 'continuam pendentes (variação): visitado não é validado');
+    eq(['salvo' => 10, 'pulado' => 0, 'resolvido' => 0, 'removido' => 0], Gmax\Sequence::tally($seq));
 });
-test('Revisão técnica: resolvido que muda de etapa (conferência → aprovação) não faz pular os seguintes', function () use ($ready, $make) {
+test('Sequência: pular, revisitar anterior, resolvido fora, arquivado, produto novo e progresso', function () use ($ready, $make) {
     $pdo = $ready();
-    $conf = [];
-    for ($i = 0; $i < 3; $i++) {
-        $conf[] = $make($pdo, ['price_verified_at' => null, 'category' => 'Pulo']);
+    $_SESSION = [];
+    $ids = [];
+    for ($i = 0; $i < 5; $i++) {
+        $ids[] = $make($pdo, ['price_verified_at' => null, 'category' => 'Seq2']);
     }
-    $appr = $make($pdo, ['category' => 'Pulo']); // aguardando aprovação (etapa seguinte na ordenação)
-    $f = ['cat' => 'Pulo'];
-    $order = array_map(fn($x) => (int)$x['item']['id'], Funnel::workQueue($pdo, $f));
-    eq([...$conf, $appr], $order, 'conferências antes da aprovação');
-    $succ = Funnel::successors($pdo, $f, $conf[0], 0); // calculado ANTES de gravar
-    Catalog::confirmPrice($pdo, $conf[0], 't');          // A vira "aguardando aprovação" e vai para o fim
-    $next = Funnel::pick($pdo, $f, $conf[0], 0, $succ);
-    eq($conf[1], (int)$next['item']['id'], 'o próximo é B, não um item de aprovação');
-    eq(0, $next['index'], 'B ocupa a 1ª posição');
-    $succ = Funnel::successors($pdo, $f, $appr, 3);
-    Catalog::setStatus($pdo, $appr, 'aprovado', 't');
-    ok(in_array((int)Funnel::pick($pdo, $f, $appr, 3, $succ)['item']['id'], [$conf[0], $conf[1], $conf[2]], true), 'depois da última, volta ao começo');
+    $seq = Gmax\Sequence::start($pdo, ['cat' => 'Seq2'], $ids[1]); // a partir do 2º
+    eq(array_slice($ids, 1), $seq['ids'], 'a partir do produto escolhido');
+    eq([1, 4], Gmax\Sequence::progress($seq, $ids[1]));
+    Gmax\Sequence::mark($seq, $ids[1], 'pulado');
+    eq($ids[1], Gmax\Sequence::previous($seq, $ids[2]), 'anterior = o pulado (só revisita)');
+    $new = $make($pdo, ['price_verified_at' => null, 'category' => 'Seq2']); // novo durante a sequência
+    Catalog::confirmPrice($pdo, $ids[2], 't');                              // resolvido em outra aba
+    Catalog::setStatus($pdo, $ids[3], 'arquivado', 't');                   // arquivado
+    eq($ids[4], Gmax\Sequence::nextId($pdo, $seq), 'pula resolvido e arquivado');
+    eq(['salvo' => 0, 'pulado' => 1, 'resolvido' => 1, 'removido' => 1], Gmax\Sequence::tally($seq));
+    Gmax\Sequence::mark($seq, $ids[4], 'salvo');
+    eq(null, Gmax\Sequence::nextId($pdo, $seq), 'produto novo não entra na sequência');
+    ok(!in_array($new, $seq['ids'], true), 'novo fora');
+    eq([$ids[1]], Gmax\Sequence::skipped($seq));
+    $again = Gmax\Sequence::start($pdo, [], null, Gmax\Sequence::skipped($seq));
+    eq([$ids[1]], $again['ids'], 'revisitar pulados = nova sequência só com eles');
+    ok(!Gmax\Sequence::inSequence($again, $ids[1], $seq['id']), 'formulário de sequência antiga não vale na nova');
 });
 test('Versão do produto muda a cada alteração relevante (base da proteção contra ação duplicada)', function () use ($ready, $make) {
     $pdo = $ready();

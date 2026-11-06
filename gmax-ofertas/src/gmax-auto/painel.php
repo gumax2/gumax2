@@ -39,7 +39,7 @@ function gmax_redirect(string $page, array $params = [], string $anchor = ''): n
         // Volta para a mesma lista filtrada (filtros já validados pela página de ofertas).
         $params = array_filter($_SESSION['gmax3_ofertas_f'], static fn($v) => is_string($v));
     }
-    $anchor = preg_match('/^p\d{1,10}$/D', $anchor) ? '#' . $anchor : '';
+    $anchor = preg_match('/^[prc]\d{1,10}$/D', $anchor) ? '#' . $anchor : '';
     header('Location: ' . View::url($page, $params) . $anchor, true, 303);
     exit;
 }
@@ -50,23 +50,35 @@ function gmax_fila_filters(): array
     return Gmax\Funnel::filters(is_array($_SESSION['gmax3_fila_f'] ?? null) ? $_SESSION['gmax3_fila_f'] : []);
 }
 
-/** Sucessores na fila, calculados ANTES de gravar (o produto resolvido pode mudar de lugar). */
-function gmax_fila_successors(PDO $pdo, int $id): array
-{
-    return Gmax\Funnel::successors($pdo, gmax_fila_filters(), $id, gmax_post_int('pos'));
-}
-
-/** Volta à fila no próximo produto a atender: página e âncora dele. */
-function gmax_fila_return(PDO $pdo, int $id, int $pos, array $successors): never
+/**
+ * Volta à fila na MESMA posição da lista (3.2.2.1): mostra o próprio produto se ele continua pendente,
+ * senão o que ocupa a posição dele. Não "adivinha" o próximo numa lista reordenada (causa do ciclo da 3.2.2).
+ */
+function gmax_fila_return(PDO $pdo, int $id, int $pos): never
 {
     $f = gmax_fila_filters();
-    $next = Gmax\Funnel::pick($pdo, $f, $id, $pos, $successors);
-    if ($next === null) {
+    $ids = array_map(static fn($x) => (int)$x['item']['id'], Gmax\Funnel::workQueue($pdo, $f));
+    if (!$ids) {
         View::flash('ok', 'Fila concluída com estes filtros.');
         gmax_redirect('fila', $f);
     }
+    $i = array_search($id, $ids, true);
+    $i = $i === false ? min(max(0, $pos), count($ids) - 1) : $i;
     $per = Gmax\Funnel::PER_PAGE;
-    gmax_redirect('fila', $f + ($next['index'] >= $per ? ['pg' => (string)(intdiv($next['index'], $per) + 1)] : []), 'p' . (int)$next['item']['id']);
+    gmax_redirect('fila', $f + ($i >= $per ? ['pg' => (string)(intdiv($i, $per) + 1)] : []), 'p' . $ids[$i]);
+}
+
+/** Conferência sequencial: abre o próximo produto ainda não visitado ou encerra com o resumo. */
+function gmax_seq_go(PDO $pdo, array $seq): never
+{
+    $next = Gmax\Sequence::nextId($pdo, $seq);
+    Gmax\Sequence::store($seq);
+    if ($next !== null) {
+        gmax_redirect('conferir', ['id' => (string)$next, 'seq' => $seq['id']]);
+    }
+    $t = Gmax\Sequence::tally($seq);
+    View::flash('ok', sprintf('Conferência da sequência concluída: %d conferido(s), %d pulado(s), %d resolvido(s) fora da sequência, %d removido(s).', $t['salvo'], $t['pulado'], $t['resolvido'], $t['removido']));
+    gmax_redirect('fila', is_array($seq['f']) ? Gmax\Funnel::filters($seq['f']) : []);
 }
 
 /** Recusa ação sobre dados que mudaram desde que a tela foi aberta (outra aba, automação ou clique repetido). */
@@ -286,7 +298,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 gmax_redirect('oferta', ['id' => $cid]);
             case 'ml_candidate_discard':
                 View::flash(Gmax\MlCandidates::discard($pdo, gmax_post_int('id'), $actor) ? 'ok' : 'erro', 'Candidato descartado.');
-                gmax_redirect('candidatos');
+                // 3.2.2.1: volta aos MESMOS filtros e à mesma página (antes voltava à página 1 sem filtros).
+                gmax_redirect('candidatos', array_filter(is_array($_SESSION['gmax3_cand_f'] ?? null) ? $_SESSION['gmax3_cand_f'] : [], static fn($v) => is_string($v)));
             case 'ml_endpoint_reactivate':
                 if (gmax_post_str('confirm', 20) !== 'REATIVAR') {
                     throw new RuntimeException('Digite REATIVAR para confirmar.');
@@ -396,25 +409,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($cur['validation_status'] === 'aprovado') {
                     throw new RuntimeException('Produto #' . $id . ' já está aprovado.');
                 }
-                $succ = gmax_fila_successors($pdo, $id);
                 $issues = Catalog::setStatus($pdo, $id, 'aprovado', $actor);
                 View::flash($issues ? 'erro' : 'ok', $issues ? 'Não aprovado: ' . implode('; ', $issues) : 'Produto #' . $id . ' aprovado.');
-                gmax_fila_return($pdo, $id, gmax_post_int('pos'), $succ);
+                gmax_fila_return($pdo, $id, gmax_post_int('pos'));
             case 'fila_enqueue':
                 $id = gmax_post_int('id');
                 gmax_check_version($pdo, $id);
-                $succ = gmax_fila_successors($pdo, $id);
                 $reasons = Queue::enqueue($pdo, $id, 'telegram_privado', null, $actor);
                 View::flash($reasons ? 'erro' : 'ok', $reasons ? 'Não agendado: ' . implode('; ', $reasons) : 'Produto #' . $id . ' agendado no próximo horário livre. O envio real continua bloqueado pelas travas.');
-                gmax_fila_return($pdo, $id, gmax_post_int('pos'), $succ);
+                gmax_fila_return($pdo, $id, gmax_post_int('pos'));
+            case 'seq_start':
+                // Fotografia ordenada dos produtos a conferir na fila filtrada (a partir do produto escolhido).
+                $seq = Gmax\Sequence::start($pdo, gmax_fila_filters(), gmax_post_int('from') ?: null);
+                if (!$seq['ids']) {
+                    Gmax\Sequence::clear();
+                    View::flash('erro', 'Nenhum produto para conferir com estes filtros.');
+                    gmax_redirect('fila', gmax_fila_filters());
+                }
+                gmax_seq_go($pdo, $seq);
+            case 'seq_resume':
+                $seq = Gmax\Sequence::current() ?? throw new RuntimeException('Nenhuma sequência em andamento.');
+                gmax_seq_go($pdo, $seq);
+            case 'seq_skip':
+                $id = gmax_post_int('id');
+                $seq = Gmax\Sequence::current();
+                if (!Gmax\Sequence::inSequence($seq, $id, gmax_post_str('seq', 20))) {
+                    throw new RuntimeException('Esta sequência foi encerrada ou substituída. Abra a fila de novo.');
+                }
+                Gmax\Sequence::mark($seq, $id, 'pulado');
+                gmax_seq_go($pdo, $seq);
+            case 'seq_skipped':
+                $old = Gmax\Sequence::current() ?? throw new RuntimeException('Nenhuma sequência para revisitar.');
+                $seq = Gmax\Sequence::start($pdo, is_array($old['f']) ? $old['f'] : [], null, Gmax\Sequence::skipped($old));
+                gmax_seq_go($pdo, $seq);
+            case 'seq_end':
+                $seq = Gmax\Sequence::current();
+                Gmax\Sequence::clear();
+                View::flash('ok', 'Sequência encerrada. Nada foi alterado nos produtos.');
+                gmax_redirect('fila', $seq && is_array($seq['f']) ? Gmax\Funnel::filters($seq['f']) : gmax_fila_filters());
             case 'offer_status':
                 $id = gmax_post_int('id');
                 $issues = Catalog::setStatus($pdo, $id, gmax_post_str('status', 30), $actor, !empty($_POST['confirm_price']));
                 View::flash($issues ? 'erro' : 'ok', $issues ? 'Não aprovado: ' . implode('; ', $issues) : 'Estado atualizado.');
-                gmax_redirect(in_array($back, ['ofertas', 'ranking'], true) ? $back : 'oferta', in_array($back, ['ofertas', 'ranking'], true) ? [] : ['id' => $id]);
+                if ($back === 'ranking') {
+                    // 3.2.2.1: volta ao mesmo modo, filtros, página e produto do Ranking.
+                    gmax_redirect('ranking', array_filter(is_array($_SESSION['gmax3_ranking_f'] ?? null) ? $_SESSION['gmax3_ranking_f'] : [], static fn($v) => is_string($v)), 'r' . $id);
+                }
+                gmax_redirect($back === 'ofertas' ? 'ofertas' : 'oferta', $back === 'ofertas' ? [] : ['id' => $id]);
             case 'offer_check':
                 $id = gmax_post_int('id');
-                $succ = !empty($_POST['fila']) ? gmax_fila_successors($pdo, $id) : [];
+                $seq = Gmax\Sequence::current();
+                $inSeq = Gmax\Sequence::inSequence($seq, $id, gmax_post_str('seq', 20));
+                if ($inSeq && empty($_POST['rev']) && ($seq['done'][$id] ?? '') === 'salvo') {
+                    // Clique duplo / reenvio: já salvo nesta sequência; nada é gravado de novo.
+                    View::flash('ok', 'Este produto já foi salvo nesta sequência (envio repetido ignorado).');
+                    gmax_seq_go($pdo, $seq);
+                }
                 try {
                     gmax_check_version($pdo, $id); // dentro do try: a recusa preserva o que foi digitado
                     $res = Catalog::manualCheck($pdo, $id, [
@@ -432,16 +482,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . ($res['status'] !== $res['status_before'] ? ' Preço alterado: aprovação retirada para nova validação.' : '')
                     . ($res['estimativa'] ? ' Preço original ESTIMADO pelo desconto de ' . $res['estimativa']['percentual'] . '%: ≈ ' . Money::format($res['estimativa']['original']) . ' (calculado, não confirmado; não é usado como "De" nas publicações).' : '')
                     . ($res['preservado_api'] ? ' O preço original confirmado pela API foi mantido.' : ''));
-                if (!empty($_POST['fila_next'])) {
-                    // Salvar e avançar: próximo da fila; se também for conferência, abre direto a conferência.
-                    $next = Gmax\Funnel::pick($pdo, gmax_fila_filters(), $id, gmax_post_int('pos'), $succ);
-                    if ($next && ($next['a']['action']['page'] ?? '') === 'conferir') {
-                        gmax_redirect('conferir', ['id' => (int)$next['item']['id'], 'fila' => '1', 'pos' => (string)$next['index']]);
-                    }
-                    gmax_fila_return($pdo, $id, gmax_post_int('pos'), $succ);
+                if ($inSeq) {
+                    // Registra a visita NESTA sequência (não é validação) e abre o próximo não visitado.
+                    Gmax\Sequence::mark($seq, $id, 'salvo');
+                    gmax_seq_go($pdo, $seq);
                 }
                 if (!empty($_POST['fila'])) {
-                    gmax_fila_return($pdo, $id, gmax_post_int('pos'), $succ);
+                    gmax_fila_return($pdo, $id, gmax_post_int('pos'));
                 }
                 gmax_redirect('conferir', ['id' => $id]);
             case 'offer_confirm_price':
@@ -475,7 +522,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'link_set':
                 $id = gmax_post_int('id');
                 $cur = gmax_check_version($pdo, $id);
-                $succ = $back === 'fila' ? gmax_fila_successors($pdo, $id) : [];
                 $url = gmax_post_str('affiliate_url', 300);
                 if (!Url::isAffiliate($cur['marketplace'], $url)) {
                     throw new RuntimeException('Link afiliado inválido para ' . Url::MARKETPLACES[$cur['marketplace']] . ($cur['marketplace'] === 'mercadolivre' ? ' (use o link curto https://meli.la/… do gerador oficial)' : ' (use https://s.shopee.com.br/…)'));
@@ -492,7 +538,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 });
                 View::flash('ok', 'Link associado ao produto #' . $id . '. Confira se o link abre exatamente este anúncio antes de aprovar.');
                 if ($back === 'fila') {
-                    gmax_fila_return($pdo, $id, gmax_post_int('pos'), $succ);
+                    gmax_fila_return($pdo, $id, gmax_post_int('pos'));
                 }
                 gmax_redirect($back === 'links' ? 'links' : 'oferta', $back === 'links' ? [] : ['id' => $id]);
             case 'queue_add':
@@ -585,6 +631,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($back === 'conferir' && !empty($_POST['fila'])) {
             $params += ['fila' => '1', 'pos' => (string)gmax_post_int('pos')];
+        }
+        if ($back === 'conferir' && ($seqId = gmax_post_str('seq', 20)) !== '' && Gmax\Sequence::inSequence(Gmax\Sequence::current(), gmax_post_int('id'), $seqId)) {
+            $params += ['seq' => $seqId] + (!empty($_POST['rev']) ? ['rev' => '1'] : []); // falhou: fica no MESMO produto, dados preservados
         }
         gmax_redirect($back, $params);
     }

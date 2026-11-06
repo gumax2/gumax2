@@ -200,50 +200,8 @@ final class Funnel
         return $out;
     }
 
-    /**
-     * IDs que vêm DEPOIS do produto atual na fila, calculados ANTES da gravação: depois de resolvido,
-     * o produto pode mudar de etapa e de lugar na ordenação, então a posição atual não serve de guia.
-     * @return list<int>
-     */
-    public static function successors(PDO $pdo, array $f, int $currentId, int $pos): array
-    {
-        $ids = array_map(static fn($x) => (int)$x['item']['id'], self::workQueue($pdo, $f));
-        $i = array_search($currentId, $ids, true);
-        $i = $i === false ? max(0, $pos) - 1 : $i;
-        return array_values(array_filter([...array_slice($ids, $i + 1), ...array_slice($ids, 0, max(0, $i + 1))], static fn($id) => $id !== $currentId));
-    }
-
-    /**
-     * Próximo a atender depois da gravação: o primeiro dos sucessores (calculados antes) que continua
-     * pendente; sem sucessores pendentes, o que estiver na mesma posição; fila vazia = null.
-     * @param list<int> $successors
-     * @return ?array{item:array,a:array,index:int}
-     */
-    public static function pick(PDO $pdo, array $f, int $currentId, int $pos, array $successors): ?array
-    {
-        $q = self::workQueue($pdo, $f);
-        $index = [];
-        foreach ($q as $i => $x) {
-            $index[(int)$x['item']['id']] = $i;
-        }
-        foreach ($successors as $id) {
-            if (isset($index[$id])) {
-                return $q[$index[$id]] + ['index' => $index[$id]];
-            }
-        }
-        foreach ([$pos, 0] as $i) {
-            if (isset($q[$i]) && (int)$q[$i]['item']['id'] !== $currentId) {
-                return $q[$i] + ['index' => $i];
-            }
-        }
-        return null;
-    }
-
-    /** Compatibilidade: próximo depois do atual, sem gravação no meio. */
-    public static function next(PDO $pdo, array $f, int $currentId, int $pos): ?array
-    {
-        return self::pick($pdo, $f, $currentId, $pos, self::successors($pdo, $f, $currentId, $pos));
-    }
+    // 3.2.2.1: removidos successors()/pick()/next(). Navegar pelo "próximo" de uma lista que se
+    // reordena após cada gravação causava o ciclo; a navegação sequencial agora é Gmax\Sequence.
 
     /** Contagem por etapa (inclui descoberta = candidatos ML novos) e por situação. */
     public static function summary(PDO $pdo, ?array $ctx = null, ?array $all = null): array

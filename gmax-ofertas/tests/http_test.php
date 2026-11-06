@@ -694,21 +694,132 @@ test('Link pela fila: inválido não grava e volta ao item; válido grava e segu
     ok(str_contains((string)header_value($r, 'Location'), 'p=fila'), 'segue na fila');
     eq('https://s.shopee.com.br/FilaOk' . $id, Gmax\Catalog::get($pdo, $id)['affiliate_url']);
 });
-test('Conferência rápida pela fila: "Salvar e ir para o próximo" abre a conferência do próximo item', function () use ($mk) {
-    $a = $mk('Conferir fila A', ['price_verified_at' => null, 'category' => 'Fila Conferir']);
-    $b = $mk('Conferir fila B', ['price_verified_at' => null, 'category' => 'Fila Conferir']);
-    http('GET', 'painel.php?p=fila&cat=' . rawurlencode('Fila Conferir') . '&sit=preco_desatualizado');
-    $page = http('GET', "painel.php?p=conferir&id=$a&fila=1&pos=0")['body'];
-    ok(str_contains($page, 'Salvar e ir para o próximo') && str_contains($page, 'Voltar à fila de trabalho'), 'modo fila');
-    preg_match('~name="v" value="([0-9a-f]+)"~', $page, $m);
-    $r = http('POST', 'painel.php', ['action' => 'offer_check', 'back' => 'conferir', 'id' => (string)$a, 'v' => $m[1], 'fila' => '1', 'pos' => '0', 'fila_next' => '1', 'csrf' => csrf($page),
-        'confirmo' => '1', 'price_promo' => '39,90', 'price_mode' => 'original', 'payment_condition' => 'normal', 'availability' => 'disponivel']);
-    ok(str_contains((string)header_value($r, 'Location'), "p=conferir&id=$b&fila=1"), 'vai direto ao próximo: ' . header_value($r, 'Location'));
-    ok(Gmax\Catalog::get(Db::get(), $a)['price_verified_at'] !== null, 'conferência gravada');
-    $r = http('POST', 'painel.php', ['action' => 'offer_check', 'back' => 'conferir', 'id' => (string)$a, 'v' => $m[1], 'fila' => '1', 'pos' => '0', 'fila_next' => '1', 'csrf' => csrf($page),
-        'confirmo' => '1', 'price_promo' => '39,90', 'price_mode' => 'original', 'payment_condition' => 'normal', 'availability' => 'disponivel']);
-    ok(str_contains((string)header_value($r, 'Location'), 'fila=1'), 'reenvio recusado volta à conferência em modo fila');
-    eq(1, (int)Db::value(Db::get(), "SELECT COUNT(*) FROM gmax3_audit WHERE action='preco_confirmado' AND entity_id=?", [(string)$a]), 'uma única conferência registrada');
+/** POST de conferência a partir da página de conferência já carregada. */
+$checkPost = static function (string $page, array $over = []): array {
+    preg_match('~name="id" value="(\d+)"~', $page, $mi);
+    preg_match('~name="v" value="([0-9a-f]+)"~', $page, $mv);
+    $f = ['action' => 'offer_check', 'back' => 'conferir', 'id' => $mi[1] ?? '', 'v' => $mv[1] ?? '', 'csrf' => csrf($page),
+        'confirmo' => '1', 'price_promo' => '39,90', 'price_mode' => 'original', 'payment_condition' => 'normal', 'availability' => 'disponivel'];
+    if (preg_match('~name="seq" value="([0-9a-f]+)"~', $page, $ms)) {
+        $f['seq'] = $ms[1];
+    }
+    if (str_contains($page, 'name="rev" value="1"')) {
+        $f['rev'] = '1';
+    }
+    return array_merge($f, $over);
+};
+$loc = static fn(array $r) => (string)header_value($r, 'Location');
+$idOf = static fn(string $url) => preg_match('~id=(\d+)~', $url, $m) ? (int)$m[1] : 0;
+$startSeq = static function (string $cat, ?int $from = null) use ($loc): string {
+    $page = http('GET', 'painel.php?p=fila&cat=' . rawurlencode($cat))['body'];
+    return $loc(http('POST', 'painel.php', ['action' => 'seq_start', 'back' => 'fila', 'csrf' => csrf($page)] + ($from ? ['from' => (string)$from] : [])));
+};
+test('3.2.2.1 — conferência sequencial: 10 produtos sem repetição mesmo continuando pendentes, mudando de prioridade e de ordem; termina com "concluída"', function () use ($mk, $checkPost, $loc, $idOf, $startSeq) {
+    $pdo = Db::get();
+    $ids = [];
+    for ($i = 1; $i <= 10; $i++) {
+        // variação pendente (continua na conferência depois de salvo); o 3º é APROVADO (prioridade alta → muda ao alterar o preço)
+        $ids[] = $mk("Sequencia $i", ['price_verified_at' => null, 'variation_pending' => 1, 'category' => 'Seq HTTP'], $i === 3 ? 'aprovado' : 'aguardando_validacao');
+    }
+    $outside = $mk('Fora do filtro', ['price_verified_at' => null, 'category' => 'Outra Cat']);
+    $url = $startSeq('Seq HTTP');
+    $seen = [];
+    for ($n = 0; $n < 30 && str_contains($url, 'p=conferir'); $n++) {
+        $page = http('GET', $url)['body'];
+        ok(str_contains($page, 'Conferência ' . ($n + 1) . ' de 10'), "indicador " . ($n + 1) . " de 10");
+        $seen[] = $idOf($url);
+        if ($n === 4) {
+            http('GET', $url); // atualizar a página não muda o progresso
+            ok(str_contains(http('GET', $url)['body'], 'Conferência 5 de 10'), 'atualizar mantém a posição');
+            $mk('Novo durante a sequência', ['price_verified_at' => null, 'category' => 'Seq HTTP']); // produto novo
+        }
+        $price = $idOf($url) === $ids[2] ? '35,00' : '39,90'; // preço alterado no APROVADO: perde a aprovação (regra comercial) e muda de prioridade
+        $url = $loc(http('POST', 'painel.php', $checkPost($page, ['price_promo' => $price])));
+    }
+    eq(10, count($seen), 'dez conferências: ' . implode(',', $seen));
+    eq(count($seen), count(array_unique($seen)), 'nenhuma repetição');
+    eq(sort($ids) ? $ids : [], (function () use ($seen) { $s = $seen; sort($s); return $s; })(), 'exatamente os 10 do filtro (novo e fora do filtro não entram)');
+    ok(!in_array($outside, $seen, true), 'filtro respeitado');
+    ok(str_contains($url, 'p=fila'), 'último: volta à fila');
+    $end = http('GET', $url)['body'];
+    ok(str_contains($end, 'Conferência da sequência concluída: 10 conferido(s)') && str_contains($end, 'Sequência concluída'), 'mensagem de conclusão');
+    eq('aguardando_validacao', Gmax\Catalog::get($pdo, $ids[2])['validation_status'], 'preço alterado retirou a aprovação (nada aprovado sem as regras)');
+    eq(0, (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_catalog WHERE id IN (' . implode(',', $ids) . ") AND validation_status='aprovado'"), 'nenhum aprovado pela sequência');
+    eq(0, (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_pub_queue WHERE catalog_id IN (' . implode(',', $ids) . ')'), 'nada enfileirado');
+    eq(10, count(Gmax\Funnel::workQueue($pdo, ['cat' => 'Seq HTTP', 'sit' => 'variacao'])), 'visitado ≠ validado: variações continuam pendentes');
+});
+test('3.2.2.1 — clique duplo, salvamento recusado, outra aba, sair e retomar, pular, voltar ao anterior e encerrar', function () use ($mk, $checkPost, $loc, $idOf, $startSeq) {
+    $pdo = Db::get();
+    $ids = [];
+    for ($i = 1; $i <= 4; $i++) {
+        $ids[] = $mk("Cenario $i", ['price_verified_at' => null, 'category' => 'Seq Casos']);
+    }
+    $url = $startSeq('Seq Casos');
+    eq($ids[0], $idOf($url));
+    $page = http('GET', $url)['body'];
+    // Salvamento recusado (sem "confirmo"): fica no MESMO produto, com os dados digitados, sem avançar.
+    $r = http('POST', 'painel.php', $checkPost($page, ['confirmo' => '', 'price_promo' => '12,34']));
+    eq($ids[0], $idOf($loc($r)), 'recusado: mesmo produto');
+    ok(str_contains($loc($r), 'seq='), 'continua na sequência');
+    $again = http('GET', $loc($r))['body'];
+    ok(str_contains($again, '12,34') && str_contains($again, 'Conferência 1 de 4'), 'dados preservados e progresso igual');
+    // Clique duplo: o mesmo formulário duas vezes → um salvamento e o mesmo próximo.
+    $post = $checkPost($again);
+    $r1 = http('POST', 'painel.php', $post);
+    $r2 = http('POST', 'painel.php', $post);
+    eq($ids[1], $idOf($loc($r1)), 'avançou para o 2º');
+    eq($ids[1], $idOf($loc($r2)), 'reenvio não pula o 2º');
+    eq(1, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_audit WHERE action='preco_confirmado' AND entity_id=?", [(string)$ids[0]]), 'uma única conferência registrada');
+    // Outra aba altera o 2º entre abrir e salvar: recusado, mesmo produto.
+    $p2 = http('GET', $loc($r1))['body'];
+    Db::run($pdo, "UPDATE gmax3_catalog SET updated_at=datetime('now','+1 minute') WHERE id=?", [$ids[1]]);
+    $r = http('POST', 'painel.php', $checkPost($p2));
+    eq($ids[1], $idOf($loc($r)), 'alterado em outra aba: fica no mesmo produto');
+    ok(str_contains(follow($r)['body'], 'mudou depois que a tela foi aberta'), 'explica a recusa');
+    // Outra aba RESOLVE o 3º: a sequência o pula como "resolvido fora".
+    Gmax\Catalog::confirmPrice($pdo, $ids[2], 'outra_aba');
+    // Pular o 2º.
+    $p2 = http('GET', 'painel.php?p=conferir&id=' . $ids[1] . '&seq=' . (preg_match('~seq=([0-9a-f]+)~', $url, $ms) ? $ms[1] : ''))['body'];
+    preg_match('~name="action" value="seq_skip">.*?name="seq" value="([0-9a-f]+)"~s', $p2, $mk2);
+    $r = http('POST', 'painel.php', ['action' => 'seq_skip', 'id' => (string)$ids[1], 'seq' => $mk2[1] ?? '', 'back' => 'conferir', 'csrf' => csrf($p2)]);
+    eq($ids[3], $idOf($loc($r)), 'pulou o 2º e o 3º (resolvido fora) → 4º');
+    // Sair e voltar: a fila oferece Retomar; retomar volta ao 4º.
+    $fila = http('GET', 'painel.php?p=fila&cat=' . rawurlencode('Seq Casos'))['body'];
+    ok(str_contains($fila, 'Sequência em andamento') && str_contains($fila, 'Retomar sequência'), 'banner de retomada');
+    eq($ids[3], $idOf($loc(http('POST', 'painel.php', ['action' => 'seq_resume', 'back' => 'fila', 'csrf' => csrf($fila)]))), 'retomou no 4º');
+    // Voltar ao anterior só revisita (não reinsere): salvar o revisitado volta ao próximo não visitado.
+    $p4 = http('GET', 'painel.php?p=conferir&id=' . $ids[3] . '&seq=' . $mk2[1])['body'];
+    ok(preg_match('~href="([^"]+)">← Voltar ao anterior~', $p4, $mp) === 1, 'botão voltar ao anterior');
+    $rev = http('GET', html_entity_decode($mp[1]))['body'];
+    ok(str_contains($rev, 'Revisitando') && str_contains($rev, 'name="rev" value="1"'), 'revisitar sem mudar o progresso');
+    eq($ids[3], $idOf($loc(http('POST', 'painel.php', ['action' => 'seq_resume', 'back' => 'fila', 'csrf' => csrf($rev)]))), 'revisitado sem salvar: "Ir ao próximo não visitado" volta ao 4º');
+    // Último: conclui, oferece revisitar os pulados; encerrar limpa a sequência.
+    $p4 = http('GET', 'painel.php?p=conferir&id=' . $ids[3] . '&seq=' . $mk2[1])['body'];
+    $end = follow(http('POST', 'painel.php', $checkPost($p4)))['body'];
+    ok(str_contains($end, 'concluída') && str_contains($end, 'Revisitar pulados (1)'), 'concluída com 1 pulado');
+    eq($ids[1], $idOf($loc(http('POST', 'painel.php', ['action' => 'seq_skipped', 'back' => 'fila', 'csrf' => csrf($end)]))), 'revisitar pulados abre o 2º');
+    $f2 = http('GET', 'painel.php?p=fila')['body'];
+    follow(http('POST', 'painel.php', ['action' => 'seq_end', 'back' => 'fila', 'csrf' => csrf($f2)]));
+    ok(!str_contains(http('GET', 'painel.php?p=fila')['body'], 'Sequência em andamento'), 'encerrada');
+    // Formulário de uma sequência encerrada: salva o produto, mas não "avança" numa sequência que não existe.
+    $r = http('POST', 'painel.php', $checkPost($p4, ['seq' => $mk2[1]]));
+    ok(!str_contains($loc($r), 'seq='), 'sem avanço fantasma');
+});
+test('3.2.2.1 — Ranking e Candidatos: depois de aprovar/descartar, volta ao mesmo modo, filtros e página', function () use ($mk, $loc) {
+    $pdo = Db::get();
+    $id = $mk('Ranking volta', ['category' => 'Rank Volta']);
+    $page = http('GET', 'painel.php?p=ranking&modo=potencial&marketplace=shopee&ordem=preco')['body'];
+    $l = $loc(http('POST', 'painel.php', ['action' => 'offer_status', 'id' => (string)$id, 'status' => 'aprovado', 'back' => 'ranking', 'csrf' => csrf($page)]));
+    ok(str_contains($l, 'marketplace=shopee') && str_contains($l, 'ordem=preco') && str_ends_with($l, '#r' . $id), 'ranking preservado: ' . $l);
+    eq('aprovado', Gmax\Catalog::get($pdo, $id)['validation_status']);
+    $now = gmdate('Y-m-d H:i:s');
+    for ($i = 0; $i < 25; $i++) {
+        Db::run($pdo, "INSERT OR IGNORE INTO gmax3_ml_candidates(product_id,name,origem,first_seen_at,last_seen_at) VALUES(?,?,'termo',?,?)", ['MLB' . (7100000 + $i), "Candidato volta $i", $now, $now]);
+    }
+    $page = http('GET', 'painel.php?p=candidatos&status=novo&q=volta&pg=2')['body'];
+    preg_match('~name="action" value="ml_candidate_discard"><input type="hidden" name="id" value="(\d+)"~', $page, $m);
+    $l = $loc(http('POST', 'painel.php', ['action' => 'ml_candidate_discard', 'id' => $m[1] ?? '0', 'back' => 'candidatos', 'csrf' => csrf($page)]));
+    ok(str_contains($l, 'q=volta') && str_contains($l, 'pg=2'), 'candidatos: mesma busca e página: ' . $l);
 });
 test('Abrir Início, Minha fila, Candidatos, AutoLab e Ofertas não grava nada no banco', function () {
     $pdo = Db::get();

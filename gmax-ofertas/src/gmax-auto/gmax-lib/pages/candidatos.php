@@ -13,6 +13,7 @@ $f += ['status' => 'novo'];
 if (isset($f['seg']) && !isset(Gmax\Text::SEGMENTS[$f['seg']])) {
     unset($f['seg']);
 }
+$_SESSION['gmax3_cand_f'] = $f; // retorno aos mesmos filtros e página depois de "Descartar"
 $on = MlCandidates::enabled($pdo);
 $res = $on ? MlCandidates::browse($pdo, $f) : ['rows' => [], 'total' => 0, 'pages' => 1, 'page' => 1];
 $rows = $res['rows'];

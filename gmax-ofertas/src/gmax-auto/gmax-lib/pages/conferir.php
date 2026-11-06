@@ -5,7 +5,11 @@ use Gmax\{Catalog, Money, Pricing, Time, Url, View};
 /** @var PDO $pdo @var int $staleHours */
 $id = isset($_GET['id']) && is_string($_GET['id']) && ctype_digit($_GET['id']) ? (int)$_GET['id'] : 0;
 $r = $id ? Catalog::get($pdo, $id) : null;
-$fromQueue = ($_GET['fila'] ?? '') === '1';
+$seqId = is_string($_GET['seq'] ?? null) ? mb_substr($_GET['seq'], 0, 20) : '';
+$seq = Gmax\Sequence::current();
+$inSeq = $id && Gmax\Sequence::inSequence($seq, $id, $seqId);
+$revisit = $inSeq && isset($seq['done'][$id]);
+$fromQueue = ($_GET['fila'] ?? '') === '1' || $inSeq;
 $pos = isset($_GET['pos']) && is_string($_GET['pos']) && ctype_digit($_GET['pos']) ? (int)$_GET['pos'] : 0;
 if ($fromQueue) {
     $backUrl = View::url('fila', Gmax\Funnel::filters(is_array($_SESSION['gmax3_fila_f'] ?? null) ? $_SESSION['gmax3_fila_f'] : [])) . ($id ? '#p' . $id : '');
@@ -15,6 +19,17 @@ if ($fromQueue) {
 }
 ?>
 <a class="back-link" href="<?= View::e($backUrl) ?>">← <?= $fromQueue ? 'Voltar à fila de trabalho' : 'Voltar aos resultados' ?></a>
+<?php if ($inSeq): [$k, $n] = Gmax\Sequence::progress($seq, $id); $prev = Gmax\Sequence::previous($seq, $id); ?>
+<div class="seq-bar card" role="status">
+  <strong><?= $revisit ? 'Revisitando' : 'Conferência ' . $k . ' de ' . $n ?></strong>
+  <?php if ($revisit): ?><span class="small muted">já <?= View::e(Gmax\Sequence::DONE[$seq['done'][$id]] ?? 'visitado') ?> nesta sequência; salvar não muda o progresso</span><?php endif; ?>
+  <span class="seq-actions">
+    <?php if ($prev): ?><a class="btn btn-sm btn-ghost" href="<?= View::e(View::url('conferir', ['id' => (string)$prev, 'seq' => $seq['id']])) ?>">← Voltar ao anterior</a><?php endif; ?>
+    <?php if (!$revisit): ?><?= View::actionButton('seq_skip', ['id' => $id, 'seq' => $seq['id'], 'back' => 'conferir'], 'Pular por enquanto', 'btn btn-sm') ?><?php else: ?><?= View::actionButton('seq_resume', ['back' => 'fila'], 'Ir ao próximo não visitado', 'btn btn-sm') ?><?php endif; ?>
+    <?= View::actionButton('seq_end', ['back' => 'fila'], 'Encerrar sequência', 'btn btn-sm btn-ghost') ?>
+  </span>
+</div>
+<?php endif; ?>
 <?php if (!$r): ?>
   <div class="card empty"><strong>Produto não encontrado</strong>Escolha um produto em <a href="<?= View::e(View::url('ofertas')) ?>">Ofertas</a> e toque em “Conferir preço”.</div>
 <?php return; endif;
@@ -59,7 +74,8 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
   <form method="post" action="painel.php" class="card stack" data-loading>
     <?= View::csrfField() ?><input type="hidden" name="action" value="offer_check"><input type="hidden" name="back" value="conferir"><input type="hidden" name="id" value="<?= (int)$id ?>">
     <input type="hidden" name="v" value="<?= View::e(Gmax\Funnel::version($r)) ?>">
-    <?php if ($fromQueue): ?><input type="hidden" name="fila" value="1"><input type="hidden" name="pos" value="<?= $pos ?>"><?php endif; ?>
+    <?php if ($inSeq): ?><input type="hidden" name="seq" value="<?= View::e($seq['id']) ?>"><?= $revisit ? '<input type="hidden" name="rev" value="1">' : '' ?>
+    <?php elseif ($fromQueue): ?><input type="hidden" name="fila" value="1"><input type="hidden" name="pos" value="<?= $pos ?>"><?php endif; ?>
     <h2>2. Registre o que encontrou na loja</h2>
     <p class="muted small">Campos com * são obrigatórios.</p>
     <?= View::priceCalculator(['uid' => 'cf', 'row' => $r, 'estimate' => Pricing::latestEstimate($pdo, $r), 'mode' => $fv('price_mode', 'original'), 'pct' => $fv('desconto_pct', ''),
@@ -87,9 +103,10 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
       <p class="muted small">Isto é uma <strong>conferência manual</strong> e fica registrada assim (não é validação pela API). Alterar o preço retira a aprovação do produto.</p>
     </div>
     <div class="form-actions">
-      <?php if ($fromQueue): ?>
-        <button type="submit" name="fila_next" value="1" class="btn btn-primary btn-lg btn-block">Salvar e ir para o próximo</button>
-        <button type="submit" class="btn btn-block">Salvar e voltar à fila</button>
+      <?php if ($inSeq): ?>
+        <button type="submit" class="btn btn-primary btn-lg btn-block"><?= $revisit ? 'Salvar e voltar à sequência' : 'Salvar e ir para o próximo' ?></button>
+      <?php elseif ($fromQueue): ?>
+        <button type="submit" class="btn btn-primary btn-lg btn-block">Salvar e voltar à fila</button>
       <?php else: ?>
         <button type="submit" class="btn btn-primary btn-lg btn-block">Salvar conferência</button>
       <?php endif; ?>

@@ -11,6 +11,7 @@ foreach ($keys as $k) {
         $f[$k] = mb_substr(trim($_GET[$k]), 0, 40);
     }
 }
+$_SESSION['gmax3_ranking_f'] = $f; // retorno ao mesmo modo, filtros e página depois de "Aprovar"
 $mode = isset(Ranking::MODES[$f['modo'] ?? '']) ? $f['modo'] : 'potencial';
 $res = Ranking::board($pdo, $f);
 $keep = array_diff_key($f, ['page' => 1]);

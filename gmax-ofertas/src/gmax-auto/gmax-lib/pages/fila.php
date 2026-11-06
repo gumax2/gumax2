@@ -19,6 +19,14 @@ $cats = array_column(Db::all($pdo, "SELECT DISTINCT category FROM gmax3_catalog 
 $prioTag = [1 => 'tag-bad', 2 => 'tag-warn', 3 => ''];
 $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, static fn($v) => $v !== null && $v !== ''));
 ?>
+<?php $seq = Gmax\Sequence::current(); $toCheck = count(array_filter($all, static fn($x) => ($x['a']['action']['page'] ?? '') === 'conferir')); ?>
+<?php if ($seq && !$seq['finished']): [$k, $n] = Gmax\Sequence::progress($seq, null); ?>
+  <div class="seq-bar card" role="status"><strong>Sequência em andamento: <?= count($seq['done']) ?> de <?= $n ?> visitados</strong>
+    <span class="seq-actions"><?= View::actionButton('seq_resume', ['back' => 'fila'], 'Retomar sequência', 'btn btn-primary btn-sm') ?><?= View::actionButton('seq_end', ['back' => 'fila'], 'Encerrar', 'btn btn-ghost btn-sm') ?></span></div>
+<?php elseif ($seq): $t = Gmax\Sequence::tally($seq); ?>
+  <div class="seq-bar card" role="status"><strong>Sequência concluída</strong> <span class="small"><?= (int)$t['salvo'] ?> conferido(s) · <?= (int)$t['pulado'] ?> pulado(s) · <?= (int)$t['resolvido'] + (int)$t['removido'] ?> resolvido(s) fora</span>
+    <span class="seq-actions"><?php if ($t['pulado']): ?><?= View::actionButton('seq_skipped', ['back' => 'fila'], 'Revisitar pulados (' . (int)$t['pulado'] . ')', 'btn btn-sm') ?><?php endif; ?><?= View::actionButton('seq_end', ['back' => 'fila'], 'Fechar', 'btn btn-ghost btn-sm') ?></span></div>
+<?php endif; ?>
 <p class="lead small">Tudo o que precisa de você, em ordem: primeiro o que bloqueia uma oferta aprovada, depois o que está aguardando validação. Resolva e use <strong>Salvar e ir para o próximo</strong>.</p>
 
 <nav class="chip-row" aria-label="Situações">
@@ -43,7 +51,8 @@ $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, s
 <?php if (!$items): ?>
   <div class="card empty"><strong><?= $f ? 'Nada com estes filtros' : 'Fila vazia' ?></strong><?= $f ? 'Limpe os filtros para ver todas as pendências.' : 'Nenhuma pendência agora. As automações continuam trabalhando.' ?></div>
 <?php else: ?>
-<p class="small muted"><?= $total ?> pendência(s)<?= $pages > 1 ? " · página $pg de $pages" : '' ?></p>
+<p class="small muted"><?= $total ?> pendência(s)<?= $pages > 1 ? " · página $pg de $pages" : '' ?>
+  <?php if ($toCheck): ?> · <?= View::actionButton('seq_start', ['back' => 'fila'], 'Conferir em sequência (' . $toCheck . ')', 'btn btn-sm btn-primary', ($seq && !$seq['finished']) ? 'Iniciar uma NOVA sequência? A atual será substituída (nada é alterado nos produtos).' : null) ?><?php endif; ?></p>
 <ol class="work-list" start="<?= ($pg - 1) * $per + 1 ?>">
 <?php foreach ($items as $i => ['item' => $r, 'a' => $a]): $pos = ($pg - 1) * $per + $i; $id = (int)$r['id']; $v = Funnel::version($r); ?>
   <li class="card work" id="p<?= $id ?>">
@@ -56,8 +65,10 @@ $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, s
     <p class="work-pending"><strong><?= View::e(Funnel::SITUATIONS[$a['situation']] ?? '') ?>:</strong> <?= View::e((string)$a['pending']) ?></p>
     <?php if (count($a['issues']) > 1): ?><p class="small muted work-also">Também: <?= View::e(implode(' · ', array_slice($a['issues'], 1))) ?></p><?php endif; ?>
     <div class="actions work-actions">
-      <?php $act = $a['action']; if ($act['kind'] === 'link'): ?>
-        <a class="btn btn-primary" href="<?= View::e(View::url($act['page'], $act['params'] + ($act['page'] === 'conferir' ? ['fila' => 1, 'pos' => $pos] : []))) ?>"><?= View::e($act['label']) ?></a>
+      <?php $act = $a['action']; if ($act['kind'] === 'link' && $act['page'] === 'conferir'): ?>
+        <?= View::actionButton('seq_start', ['from' => $id, 'back' => 'fila'], $act['label'], 'btn btn-primary', ($seq && !$seq['finished']) ? 'Iniciar uma nova sequência a partir deste produto? A atual será substituída (nada é alterado nos produtos).' : null) ?>
+      <?php elseif ($act['kind'] === 'link'): ?>
+        <a class="btn btn-primary" href="<?= View::e(View::url($act['page'], $act['params'])) ?>"><?= View::e($act['label']) ?></a>
       <?php elseif ($act['kind'] === 'approve'): ?>
         <?= View::actionButton('fila_approve', ['id' => $id, 'v' => $v, 'pos' => $pos, 'back' => 'fila'], 'Aprovar', 'btn btn-primary') ?>
       <?php elseif ($act['kind'] === 'enqueue'): ?>

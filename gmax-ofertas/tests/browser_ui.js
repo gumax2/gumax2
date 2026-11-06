@@ -218,12 +218,16 @@ async function overflow(page) {
         let clicks = 0;
         await page.goto(`${C.base}/painel.php?p=fila&cat=${encodeURIComponent('Fila UI')}`);
         const firstId = await page.evaluate(() => (document.querySelector('.work') || {}).id || '');
-        await Promise.all([page.waitForNavigation(), page.click(`#${firstId} a.btn-primary`)]); clicks++; // 1. Conferir agora
-        await page.check('input[name=confirmo]'); clicks++;                                              // 2. confirmo
-        await Promise.all([page.waitForNavigation(), page.click('button[name=fila_next]')]); clicks++;  // 3. salvar e ir para o próximo
+        await Promise.all([page.waitForNavigation(), page.click(`#${firstId} .work-actions button.btn-primary`)]); clicks++; // 1. Conferir agora (inicia a sequência)
+        const ind1 = await page.textContent('.seq-bar strong').catch(() => '');
+        await page.check('input[name=confirmo]'); clicks++;                                                                  // 2. confirmo
+        await Promise.all([page.waitForNavigation(), page.click('.form-actions button.btn-primary')]); clicks++;           // 3. salvar e ir para o próximo
         const url = page.url();
-        const nextOk = /p=conferir/.test(url) && /fila=1/.test(url) && !url.includes(`id=${firstId.slice(1)}&`);
-        out(G, `Fila: conferir e avançar ao próximo em ${clicks + 1} interações (abrir a fila + ${clicks})`, nextOk && clicks + 1 <= 4, url);
+        const ind2 = await page.textContent('.seq-bar strong').catch(() => '');
+        const nextOk = /p=conferir/.test(url) && /seq=/.test(url) && !url.includes(`id=${firstId.slice(1)}&`) && /Conferência 1 de \d+/.test(ind1) && /Conferência 2 de \d+/.test(ind2);
+        out(G, `Fila: conferência sequencial, avança ao próximo em ${clicks + 1} interações (abrir a fila + ${clicks}); indicador "${ind1}" → "${ind2}"`, nextOk && clicks + 1 <= 4, url);
+        // Encerrar a sequência para não interferir no resto do teste.
+        await Promise.all([page.waitForNavigation(), page.click('form:has(input[value=seq_end]) button')]);
         if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-fila-conferir.png`, fullPage: true });
       }
       if (p.shots) {
