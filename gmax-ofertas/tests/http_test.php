@@ -168,8 +168,8 @@ test('Migração exige confirmação digitada e cria backup', function () {
 test('Painel unificado mostra as duas lojas (5 Shopee + 1 Mercado Livre)', function () {
     $r = http('GET', 'painel.php');
     no_php_errors($r, 'visão geral');
-    ok(preg_match('/Shopee<\/span>\s*<strong>5<\/strong>/', $r['body']) === 1, '5 Shopee');
-    ok(preg_match('/Mercado Livre<\/span>\s*<strong>1<\/strong>/', $r['body']) === 1, '1 Mercado Livre');
+    ok(preg_match('/Shopee <strong>5<\/strong>/', $r['body']) === 1, '5 Shopee');
+    ok(preg_match('/Mercado Livre <strong>1<\/strong>/', $r['body']) === 1, '1 Mercado Livre');
     $r = http('GET', 'painel.php?p=ofertas&marketplace=mercadolivre');
     ok(str_contains($r['body'], 'Parafusadeira Furadeira 48V'), 'ML-001 listado');
     ok(str_contains($r['body'], '65% OFF'), 'desconto calculado');

@@ -26,10 +26,19 @@ $msgs = Db::all($pdo, 'SELECT m.*, c.title AS cat_title FROM gmax3_autolab_messa
 $runs = Db::all($pdo, 'SELECT * FROM gmax3_autolab_runs ORDER BY id DESC LIMIT 15');
 $kinds = ['oferta_validada' => 'Oferta validada', 'candidato' => 'Candidato', 'simulacao' => 'Simulação'];
 $sources = ['api_shopee' => 'API Shopee (agora)', 'catalogo_ml' => 'Catálogo ML', 'catalogo_gmax' => 'Catálogo GMAX', 'simulacao' => 'Fictício'];
+$lastOk = Db::one($pdo, "SELECT m.*, c.title AS cat_title FROM gmax3_autolab_messages m LEFT JOIN gmax3_catalog c ON c.id = m.catalog_id WHERE m.state='confirmado' ORDER BY m.id DESC LIMIT 1");
+$since = Time::now()->modify('-7 days')->format('Y-m-d H:i:s');
+// Motivos de falha/bloqueio dos últimos 7 dias, agrupados (o detalhe completo fica em "Execuções").
+$reasons = Db::all($pdo, "SELECT status, detail, COUNT(*) n, MAX(started_at) ultima FROM gmax3_autolab_runs WHERE status IN ('bloqueado','falhou','sem_envio') AND started_at >= ? GROUP BY status, detail ORDER BY n DESC, ultima DESC LIMIT 8", [$since]);
+$msgFail = Db::all($pdo, "SELECT state, note, COUNT(*) n FROM gmax3_autolab_messages WHERE state IN ('falhou','incerto') AND created_at >= ? GROUP BY state, note ORDER BY n DESC LIMIT 5", [$since]);
+$slotFmt = static fn(?string $k) => $k ? substr($k, 8, 2) . '/' . substr($k, 5, 2) . ' ' . substr($k, 11, 5) : '—';
 $stateTag = static fn(string $s) => '<span class="tag ' . (['confirmado' => 'tag-ok', 'incerto' => 'tag-warn', 'falhou' => 'tag-bad'][$s] ?? '') . '">' . View::e($s) . '</span>';
 ?>
 <div class="alert alert-aviso" role="note"><strong>Homologação, não publicação comercial.</strong> O AutoLab envia só ao supergrupo privado de testes, só mensagens rotuladas <strong>TESTE</strong> ou <strong>SIMULAÇÃO</strong>, no máximo <?= AutoLab::dailyLimit($pdo) ?> por dia. Ele não usa a fila comercial nem altera produtos, preços ou links, e não libera nenhuma trava de publicação.</div>
 
+<?php if ($st === 'ativo' && !$lastOk): ?>
+<div class="alert alert-aviso" role="status"><strong>Primeiro envio real ainda não observado.</strong> O AutoLab está ativo, mas nenhuma mensagem foi confirmada pelo Telegram até agora. Próximo horário: <strong><?= View::e($slotFmt($next)) ?></strong>. Depois dele, confira no grupo privado a mensagem com a “Ref. AutoLab” correspondente.</div>
+<?php endif; ?>
 <section class="card">
   <h2>Estado</h2>
   <div class="grid stats">
@@ -40,6 +49,10 @@ $stateTag = static fn(string $s) => '<span class="tag ' . (['confirmado' => 'tag
     <div class="stat"><span class="muted">Incertas</span><strong><?= $tot['incertas'] ?></strong></div>
     <div class="stat"><span class="muted">Erros</span><strong><?= $tot['erros'] ?></strong></div>
   </div>
+  <p class="small"><strong>Último envio confirmado pelo Telegram:</strong>
+    <?php if ($lastOk): ?><span class="tag tag-ok">✓ confirmado</span> <?= View::e($slotFmt($lastOk['slot_key'])) ?> · msg <?= (int)$lastOk['telegram_message_id'] ?> · <?= View::e($kinds[$lastOk['kind']] ?? $lastOk['kind']) ?>
+      <?= $lastOk['catalog_id'] ? ' · produto #' . (int)$lastOk['catalog_id'] : ($lastOk['candidate_id'] ? ' · candidato ML #' . (int)$lastOk['candidate_id'] : '') ?> · preço: <?= View::e($sources[$lastOk['source']] ?? $lastOk['source']) ?><?= (int)$lastOk['price_confirmed'] ? ' (confirmado)' : ' (sem preço confirmado)' ?>
+    <?php else: ?><span class="tag tag-warn">nenhum até agora</span><?php endif; ?></p>
   <?php if (($m = Settings::get($pdo, 'autolab_motivo', '')) !== ''): ?><p class="small"><strong>Motivo:</strong> <?= View::e($m) ?></p><?php endif; ?>
   <p class="small">Período autorizado até <strong><?= View::e(Time::show(Settings::get($pdo, 'autolab_ate', '') ?: null)) ?></strong> · horários <strong><?= View::e(implode(', ', AutoLab::times($pdo))) ?></strong> (Brasília) · última execução
     <?= $last ? View::e(Time::show($last['started_at'])) . ' — ' . View::e($last['status']) : '—' ?></p>
@@ -53,6 +66,16 @@ $stateTag = static fn(string $s) => '<span class="tag ' . (['confirmado' => 'tag
   <?php if (in_array($st, ['desativado', 'encerrado', 'falha'], true)): ?>
   <p class="muted small">Ativar, renovar o período ou retomar após falha só pela linha de comando: <code>gmax-admin-cli.php autolab validar-destino</code> e depois <code>autolab ativar <?= AutoLab::ACTIVATION_PHRASE ?> --dias 7</code>.</p>
   <?php endif; ?>
+</section>
+
+<section class="card">
+  <h2>Motivos de falha e bloqueio (7 dias)</h2>
+  <?php if (!$reasons && !$msgFail): ?><p class="muted small">Nenhuma falha ou bloqueio registrado.</p><?php else: ?>
+  <ul class="small">
+    <?php foreach ($reasons as $r): ?><li><span class="tag <?= $r['status'] === 'sem_envio' ? '' : 'tag-bad' ?>"><?= View::e($r['status']) ?> ×<?= (int)$r['n'] ?></span> <?= View::e((string)$r['detail']) ?> <span class="muted">(último <?= View::e(Time::show($r['ultima'])) ?>)</span></li><?php endforeach; ?>
+    <?php foreach ($msgFail as $r): ?><li><span class="tag <?= $r['state'] === 'incerto' ? 'tag-warn' : 'tag-bad' ?>">envio <?= View::e($r['state']) ?> ×<?= (int)$r['n'] ?></span> <?= View::e((string)$r['note']) ?></li><?php endforeach; ?>
+  </ul><?php endif; ?>
+  <p class="muted small">Pausa por falha não é desfeita automaticamente: a retomada é sempre decisão sua.</p>
 </section>
 
 <section class="card">

@@ -27,20 +27,52 @@ try {
 }
 
 $page = is_string($_GET['p'] ?? null) ? $_GET['p'] : 'painel';
-$pages = ['painel', 'automacoes', 'autolab', 'diagnostico', 'execucoes', 'integracoes', 'candidatos', 'ofertas', 'oferta', 'conferir', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
+$pages = ['painel', 'fila', 'automacoes', 'autolab', 'diagnostico', 'execucoes', 'integracoes', 'candidatos', 'ofertas', 'oferta', 'conferir', 'importar', 'lote', 'links', 'lote_links', 'ranking', 'publicacoes', 'relatorios', 'categorias', 'sistema', 'modelo', 'exportar'];
 if (!in_array($page, $pages, true)) {
     $page = 'painel';
 }
 
 /** Redireciona sempre para o próprio painel (nunca para URL externa). */
-function gmax_redirect(string $page, array $params = []): never
+function gmax_redirect(string $page, array $params = [], string $anchor = ''): never
 {
     if ($page === 'ofertas' && !$params && is_array($_SESSION['gmax3_ofertas_f'] ?? null)) {
         // Volta para a mesma lista filtrada (filtros já validados pela página de ofertas).
         $params = array_filter($_SESSION['gmax3_ofertas_f'], static fn($v) => is_string($v));
     }
-    header('Location: ' . View::url($page, $params), true, 303);
+    $anchor = preg_match('/^p\d{1,10}$/D', $anchor) ? '#' . $anchor : '';
+    header('Location: ' . View::url($page, $params) . $anchor, true, 303);
     exit;
+}
+
+/** Filtros da fila de trabalho guardados na sessão (já validados por Funnel::filters). */
+function gmax_fila_filters(): array
+{
+    return Gmax\Funnel::filters(is_array($_SESSION['gmax3_fila_f'] ?? null) ? $_SESSION['gmax3_fila_f'] : []);
+}
+
+/** Volta à fila na mesma posição: página e âncora do próximo produto. */
+function gmax_fila_return(PDO $pdo, int $id, int $pos): never
+{
+    $f = gmax_fila_filters();
+    $next = Gmax\Funnel::next($pdo, $f, $id, $pos);
+    if ($next === null) {
+        View::flash('ok', 'Fila concluída com estes filtros.');
+        gmax_redirect('fila', $f);
+    }
+    $ids = array_map(static fn($x) => (int)$x['item']['id'], Gmax\Funnel::workQueue($pdo, $f));
+    $idx = (int)array_search((int)$next['item']['id'], $ids, true);
+    gmax_redirect('fila', $f + ($idx >= 25 ? ['pg' => (string)(intdiv($idx, 25) + 1)] : []), 'p' . (int)$next['item']['id']);
+}
+
+/** Recusa ação sobre dados que mudaram desde que a tela foi aberta (outra aba, automação ou clique repetido). */
+function gmax_check_version(PDO $pdo, int $id): array
+{
+    $cur = Catalog::get($pdo, $id) ?? throw new RuntimeException('Produto não encontrado');
+    $v = gmax_post_str('v', 32);
+    if ($v !== '' && !hash_equals(Gmax\Funnel::version($cur), $v)) {
+        throw new RuntimeException('Este produto mudou depois que a tela foi aberta (outra aba, automação ou clique repetido). Nada foi feito: confira os dados atualizados.');
+    }
+    return $cur;
 }
 
 function gmax_post_int(string $key): int
@@ -353,6 +385,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 unset($_SESSION['gmax3_form']);
                 gmax_redirect('oferta', ['id' => $id]);
+            case 'fila_approve':
+                $id = gmax_post_int('id');
+                $cur = gmax_check_version($pdo, $id);
+                if ($cur['validation_status'] === 'aprovado') {
+                    throw new RuntimeException('Produto #' . $id . ' já está aprovado.');
+                }
+                $issues = Catalog::setStatus($pdo, $id, 'aprovado', $actor);
+                View::flash($issues ? 'erro' : 'ok', $issues ? 'Não aprovado: ' . implode('; ', $issues) : 'Produto #' . $id . ' aprovado.');
+                gmax_fila_return($pdo, $id, gmax_post_int('pos'));
+            case 'fila_enqueue':
+                $id = gmax_post_int('id');
+                gmax_check_version($pdo, $id);
+                $reasons = Queue::enqueue($pdo, $id, 'telegram_privado', null, $actor);
+                View::flash($reasons ? 'erro' : 'ok', $reasons ? 'Não agendado: ' . implode('; ', $reasons) : 'Produto #' . $id . ' agendado no próximo horário livre. O envio real continua bloqueado pelas travas.');
+                gmax_fila_return($pdo, $id, gmax_post_int('pos'));
             case 'offer_status':
                 $id = gmax_post_int('id');
                 $issues = Catalog::setStatus($pdo, $id, gmax_post_str('status', 30), $actor, !empty($_POST['confirm_price']));
@@ -360,6 +407,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 gmax_redirect(in_array($back, ['ofertas', 'ranking'], true) ? $back : 'oferta', in_array($back, ['ofertas', 'ranking'], true) ? [] : ['id' => $id]);
             case 'offer_check':
                 $id = gmax_post_int('id');
+                gmax_check_version($pdo, $id);
                 try {
                     $res = Catalog::manualCheck($pdo, $id, [
                         'confirmo' => !empty($_POST['confirmo']), 'price_promo' => gmax_post_str('price_promo', 20), 'price_original' => gmax_post_str('price_original', 20),
@@ -376,6 +424,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . ($res['status'] !== $res['status_before'] ? ' Preço alterado: aprovação retirada para nova validação.' : '')
                     . ($res['estimativa'] ? ' Preço original ESTIMADO pelo desconto de ' . $res['estimativa']['percentual'] . '%: ≈ ' . Money::format($res['estimativa']['original']) . ' (calculado, não confirmado; não é usado como "De" nas publicações).' : '')
                     . ($res['preservado_api'] ? ' O preço original confirmado pela API foi mantido.' : ''));
+                if (!empty($_POST['fila_next'])) {
+                    // Salvar e avançar: próximo da fila; se também for conferência, abre direto a conferência.
+                    $next = Gmax\Funnel::next($pdo, gmax_fila_filters(), $id, gmax_post_int('pos'));
+                    if ($next && ($next['a']['action']['page'] ?? '') === 'conferir') {
+                        $ids = array_map(static fn($x) => (int)$x['item']['id'], Gmax\Funnel::workQueue($pdo, gmax_fila_filters()));
+                        gmax_redirect('conferir', ['id' => (int)$next['item']['id'], 'fila' => '1', 'pos' => (string)(int)array_search((int)$next['item']['id'], $ids, true)]);
+                    }
+                    gmax_fila_return($pdo, $id, gmax_post_int('pos'));
+                }
+                if (!empty($_POST['fila'])) {
+                    gmax_fila_return($pdo, $id, gmax_post_int('pos'));
+                }
                 gmax_redirect('conferir', ['id' => $id]);
             case 'offer_confirm_price':
                 $id = gmax_post_int('id');
@@ -407,7 +467,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 gmax_redirect($back, array_intersect_key($_POST, array_flip(['marketplace', 'status', 'q'])));
             case 'link_set':
                 $id = gmax_post_int('id');
-                $cur = Catalog::get($pdo, $id) ?? throw new RuntimeException('Produto não encontrado');
+                $cur = gmax_check_version($pdo, $id);
                 $url = gmax_post_str('affiliate_url', 300);
                 if (!Url::isAffiliate($cur['marketplace'], $url)) {
                     throw new RuntimeException('Link afiliado inválido para ' . Url::MARKETPLACES[$cur['marketplace']] . ($cur['marketplace'] === 'mercadolivre' ? ' (use o link curto https://meli.la/… do gerador oficial)' : ' (use https://s.shopee.com.br/…)'));
@@ -423,6 +483,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 });
                 View::flash('ok', 'Link associado ao produto #' . $id . '. Confira se o link abre exatamente este anúncio antes de aprovar.');
+                if ($back === 'fila') {
+                    gmax_fila_return($pdo, $id, gmax_post_int('pos'));
+                }
                 gmax_redirect($back === 'links' ? 'links' : 'oferta', $back === 'links' ? [] : ['id' => $id]);
             case 'queue_add':
                 $id = gmax_post_int('id');
@@ -502,11 +565,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         View::flash('erro', $msg);
         error_log('[gmax3] ' . $action . ': ' . get_class($e) . ': ' . $e->getMessage());
+        if ($back === 'fila') {
+            gmax_redirect('fila', gmax_fila_filters(), gmax_post_int('id') ? 'p' . gmax_post_int('id') : ''); // mesma posição na fila
+        }
         $params = [];
         foreach (['id', 'batch'] as $k) {
             if (gmax_post_int($k)) {
                 $params[$k === 'batch' ? 'id' : 'id'] = gmax_post_int($k);
             }
+        }
+        if ($back === 'conferir' && !empty($_POST['fila'])) {
+            $params += ['fila' => '1', 'pos' => (string)gmax_post_int('pos')];
         }
         gmax_redirect($back, $params);
     }
@@ -646,7 +715,7 @@ $flash = View::takeFlash();
 $paused = $migrated ? Settings::paused($pdo) : true;
 $staleHours = $migrated ? Settings::int($pdo, 'validade_preco_horas', 24) : 24;
 $titles = ['painel' => 'Visão geral', 'automacoes' => 'Central de Automações', 'execucoes' => 'Detalhes das execuções', 'integracoes' => 'Integrações', 'candidatos' => 'Candidatos do Mercado Livre', 'ofertas' => 'Ofertas', 'oferta' => 'Produto', 'conferir' => 'Conferência rápida', 'importar' => 'Importar lote', 'lote' => 'Lote de importação', 'links' => 'Links afiliados',
-    'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança', 'autolab' => 'GMAX AutoLab — homologação', 'diagnostico' => 'Diagnóstico e saúde'];
+    'lote_links' => 'Lote de links afiliados', 'ranking' => 'Ranking de oportunidades', 'publicacoes' => 'Publicações', 'relatorios' => 'Relatórios', 'categorias' => 'Categorias', 'sistema' => 'Sistema e segurança', 'autolab' => 'GMAX AutoLab — homologação', 'diagnostico' => 'Diagnóstico e saúde', 'fila' => 'Minha fila de trabalho'];
 $title = $titles[$page] ?? 'Painel';
 require __DIR__ . '/gmax-lib/pages/_layout_top.php';
 require __DIR__ . '/gmax-lib/pages/' . $page . '.php';

@@ -29,7 +29,7 @@ const PROFILES = [
 ];
 const PAGES = ['painel', 'ofertas', `oferta&id=${C.ids.shopee[0]}`, `conferir&id=${C.ids.variacao}`, 'importar', 'links', 'ranking', 'publicacoes',
   'automacoes', 'execucoes', 'integracoes', 'relatorios', 'categorias', 'sistema', 'ofertas&marketplace=shopee&variation=1',
-  'ranking&modo=prontas', 'ranking&marketplace=shopee&conferido=nunca&ordem=preco&link=com', 'candidatos', 'autolab', 'diagnostico'];
+  'ranking&modo=prontas', 'ranking&marketplace=shopee&conferido=nunca&ordem=preco&link=com', 'candidatos', 'autolab', 'diagnostico', 'fila'];
 const STORE_HOSTS = /^https:\/\/(s\.shopee\.com\.br|shopee\.com\.br|meli\.la|[a-z]+\.mercadolivre\.com\.br|mercadolivre\.com\.br)\//;
 
 async function newContext(browser, p) {

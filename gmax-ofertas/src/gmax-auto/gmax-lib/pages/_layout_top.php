@@ -3,12 +3,16 @@ declare(strict_types=1);
 defined('GMAX_VERSION') || exit;
 use Gmax\View;
 /** @var string $page @var string $title @var array $flash @var bool $paused @var bool $migrated */
-$nav = [
-    'painel' => ['Visão geral', '◧'], 'ofertas' => ['Ofertas', '▤'], 'importar' => ['Importar', '⇪'], 'links' => ['Links afiliados', '⛓'],
-    'ranking' => ['Ranking', '★'], 'candidatos' => ['Candidatos ML', '◎'], 'publicacoes' => ['Publicações', '✉'], 'automacoes' => ['Automações', '⟳'], 'autolab' => ['AutoLab', '⚗'], 'relatorios' => ['Relatórios', '▥'],
-    'categorias' => ['Categorias', '◈'], 'diagnostico' => ['Diagnóstico', '♥'], 'sistema' => ['Sistema', '⚙'],
+// 3.2.2: menu em grupos lógicos (nenhuma página removida).
+$navGroups = [
+    'Operação' => ['painel' => ['Início', '◧'], 'fila' => ['Minha fila', '☑'], 'publicacoes' => ['Publicações', '✉'], 'autolab' => ['AutoLab', '⚗']],
+    'Produtos' => ['ofertas' => ['Ofertas', '▤'], 'importar' => ['Importar', '⇪'], 'links' => ['Links afiliados', '⛓'], 'candidatos' => ['Candidatos ML', '◎'], 'categorias' => ['Categorias', '◈']],
+    'Automação' => ['automacoes' => ['Automações', '⟳'], 'integracoes' => ['Integrações', '⇄']],
+    'Análise' => ['ranking' => ['Ranking', '★'], 'relatorios' => ['Relatórios', '▥']],
+    'Sistema' => ['diagnostico' => ['Diagnóstico', '♥'], 'sistema' => ['Sistema', '⚙']],
 ];
-$active = ['oferta' => 'ofertas', 'conferir' => 'ofertas', 'lote' => 'importar', 'lote_links' => 'links', 'integracoes' => 'automacoes', 'execucoes' => 'automacoes'][$page] ?? $page;
+$bottomNav = ['painel' => ['Início', '◧'], 'fila' => ['Minha fila', '☑'], 'ofertas' => ['Ofertas', '▤'], 'automacoes' => ['Automações', '⟳']];
+$active = ['oferta' => 'ofertas', 'conferir' => (($_GET['fila'] ?? '') === '1' ? 'fila' : 'ofertas'), 'lote' => 'importar', 'lote_links' => 'links', 'execucoes' => 'automacoes'][$page] ?? $page;
 $v = View::e(GMAX_VERSION);
 ?>
 <!doctype html>
@@ -54,9 +58,20 @@ $v = View::e(GMAX_VERSION);
 <div class="net-status" data-net-status role="status" aria-live="polite"></div>
 <div class="shell">
   <nav id="mainnav" class="sidenav" aria-label="Principal">
-    <?php foreach ($nav as $k => [$label, $icon]): ?>
-      <a href="<?= View::e(View::url($k)) ?>"<?= $active === $k ? ' class="active" aria-current="page"' : '' ?>><span class="nav-ico" aria-hidden="true"><?= $icon ?></span><?= View::e($label) ?></a>
+    <?php foreach ($navGroups as $group => $items): ?>
+      <div class="nav-group" role="group" aria-label="<?= View::e($group) ?>">
+        <span class="nav-group-title" aria-hidden="true"><?= View::e($group) ?></span>
+        <?php foreach ($items as $k => [$label, $icon]): ?>
+          <a href="<?= View::e(View::url($k)) ?>"<?= $active === $k ? ' class="active" aria-current="page"' : '' ?>><span class="nav-ico" aria-hidden="true"><?= $icon ?></span><?= View::e($label) ?></a>
+        <?php endforeach; ?>
+      </div>
     <?php endforeach; ?>
+  </nav>
+  <nav class="bottomnav" aria-label="Acesso rápido">
+    <?php foreach ($bottomNav as $k => [$label, $icon]): ?>
+      <a href="<?= View::e(View::url($k)) ?>"<?= $active === $k ? ' class="active" aria-current="page"' : '' ?>><span aria-hidden="true"><?= $icon ?></span><span><?= View::e($label) ?></span></a>
+    <?php endforeach; ?>
+    <button type="button" class="bottomnav-menu" data-toggle="#mainnav" aria-controls="mainnav" aria-expanded="false"><span aria-hidden="true">☰</span><span>Menu</span></button>
   </nav>
   <main class="wrap" id="conteudo" tabindex="-1">
   <h1 class="page-title"><?= View::e($title) ?></h1>
