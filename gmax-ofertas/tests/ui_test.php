@@ -58,6 +58,14 @@ foreach ([['2026-11-04 10:00', 'oferta_validada', 'api_shopee', 1, 3990, 'confir
     Db::run($pdo, 'INSERT INTO gmax3_autolab_messages(run_id,slot_key,kind,source,price_confirmed,price_cents,dedup_key,text,text_hash,state,created_at,http_code,telegram_message_id) VALUES(?,?,?,?,?,?,?,?,?,?,datetime(\'now\'),?,?)',
         [$i + 1, $slot, $kind, $src, $conf, $price, "k$i", $text, hash('sha256', $text), $state, $state === 'confirmado' ? 200 : 0, $state === 'confirmado' ? 501 : null]);
 }
+// 3.2.2: produtos com preço nunca conferido para o fluxo da fila de trabalho (salvar e avançar).
+$filaUi = [];
+for ($i = 1; $i <= 4; $i++) {
+    $fid = Catalog::insert($pdo, ['marketplace' => 'shopee', 'external_id' => (string)(66600000000 + $i), 'title' => "Garrafa Fila UI $i 500ml", 'category' => 'Fila UI',
+        'price_promo_cents' => 2990, 'payment_condition' => 'normal', 'availability' => 'disponivel', 'original_url' => "https://shopee.com.br/product/123/" . (66600000000 + $i)], 'aguardando_validacao', 'teste');
+    Db::run($pdo, "UPDATE gmax3_catalog SET affiliate_url='https://s.shopee.com.br/FilaUi' || id, affiliate_norm='s.shopee.com.br/FilaUi' || id WHERE id=?", [$fid]);
+    $filaUi[] = $fid;
+}
 $before = [
     'pausa' => Settings::paused($pdo), 'auto' => Settings::get($pdo, 'automacoes_pausadas'), 'aprov' => Settings::get($pdo, 'aprovacao_automatica'),
     'links' => Db::all($pdo, 'SELECT id, affiliate_url FROM gmax3_catalog ORDER BY id'),
@@ -76,7 +84,7 @@ $shots = __DIR__ . '/../docs/capturas/3.1.5';
 @mkdir($shots, 0755, true);
 $ctx = json_encode(['base' => $base, 'password' => T_PASSWORD, 'shots' => realpath($shots), 'fixture' => realpath(__DIR__ . '/fixtures/shopee-5-ofertas.csv'),
     'estimates' => array_map(static fn($pct) => array_map(static fn($c) => Gmax\Money::format($c), array_intersect_key(Gmax\Pricing::estimate(9990, $pct), ['original' => 1, 'min' => 1, 'max' => 1])), ['35' => '35', '35,5' => '35,5', '7' => '7']),
-    'ids' => ['calc' => $ids[4], 'shopee' => $ids, 'ml' => $ml, 'semLink' => $noLink, 'api' => $ids[3], 'variacao' => $ids[1], 'indisponivel' => $ids[2]],
+    'ids' => ['filaUi' => $filaUi, 'calc' => $ids[4], 'shopee' => $ids, 'ml' => $ml, 'semLink' => $noLink, 'api' => $ids[3], 'variacao' => $ids[1], 'indisponivel' => $ids[2]],
     'urls' => ['shopee0' => Catalog::get($pdo, $ids[0])['original_url'], 'aff0' => Catalog::get($pdo, $ids[0])['affiliate_url']]]);
 $cmd = 'env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy NODE_PATH=$(npm root -g) node ' . escapeshellarg(__DIR__ . '/browser_ui.js') . ' ' . escapeshellarg($ctx) . ' 2>&1';
 $out = (string)shell_exec($cmd);
@@ -103,6 +111,13 @@ test('Envios continuam pausados, automações pausadas, aprovação automática 
 });
 test('Links afiliados preservados (nenhum trocado pelo link comum)', function () use ($before) {
     eq($before['links'], Db::all(Db::get(), 'SELECT id, affiliate_url FROM gmax3_catalog WHERE id IN (' . implode(',', array_column($before['links'], 'id')) . ') ORDER BY id'));
+});
+test('Fila pela interface: exatamente um produto conferido (manual), sem aprovação automática nem fila comercial', function () use ($filaUi) {
+    $pdo = Db::get();
+    $done = Db::all($pdo, 'SELECT id, price_source, validation_status FROM gmax3_catalog WHERE id IN (' . implode(',', $filaUi) . ') AND price_verified_at IS NOT NULL');
+    eq(1, count($done), 'um conferido');
+    eq(['conferencia_manual', 'aguardando_validacao'], [$done[0]['price_source'], $done[0]['validation_status']], 'registrado como manual e não aprovado');
+    eq(0, (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_pub_queue WHERE catalog_id IN (' . implode(',', $filaUi) . ')'));
 });
 test('Abrir o anúncio não confirmou preço; só a conferência salva gerou registro manual', function () use ($ids, $ml) {
     $pdo = Db::get();

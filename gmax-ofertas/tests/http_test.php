@@ -643,6 +643,90 @@ test('Diagnóstico: saúde e tarefas; registra o usuário do PHP web; simulaçã
     ok(str_contains($r['body'], 'Integridade do banco: ok'), 'integridade');
 });
 
+echo "\n== 3.2.2: fila de trabalho, funil e navegação\n";
+$mk = static function (string $title, array $over = [], string $status = 'aguardando_validacao'): int {
+    static $n = 0;
+    $n++;
+    $pdo = Db::get();
+    $id = Gmax\Catalog::insert($pdo, ['marketplace' => 'shopee', 'external_id' => (string)(88800000000 + $n + random_int(0, 99999) * 100), 'title' => $title, 'category' => 'Fila HTTP',
+        'price_promo_cents' => 3990, 'payment_condition' => 'normal', 'availability' => 'disponivel'], $status, 'teste');
+    Db::run($pdo, "UPDATE gmax3_catalog SET affiliate_url='https://s.shopee.com.br/Ht' || id, affiliate_norm='s.shopee.com.br/Ht' || id, price_verified_at=datetime('now'), price_verified_by='api:shopee', price_source='api_shopee' WHERE id=?", [$id]);
+    foreach ($over as $k => $v) {
+        Db::run($pdo, "UPDATE gmax3_catalog SET $k=? WHERE id=?", [$v, $id]);
+    }
+    return $id;
+};
+test('Fila: abre com pendências, títulos maliciosos escapados, barra inferior com 5 atalhos e menu em grupos', function () use ($mk) {
+    $id = $mk('<script>alert(1)</script> Fone', ['price_verified_at' => null]);
+    $r = http('GET', 'painel.php?p=fila&cat=' . rawurlencode('Fila HTTP'));
+    eq(200, $r['status']);
+    ok(str_contains($r['body'], 'id="p' . $id . '"') && str_contains($r['body'], '&lt;script&gt;') && !str_contains($r['body'], '<script>alert'), 'item listado e escapado');
+    preg_match('~<nav class="bottomnav".*?</nav>~s', $r['body'], $m);
+    eq(5, preg_match_all('~<a |<button ~', $m[0] ?? ''), 'Início, Minha fila, Ofertas, Automações e Menu');
+    foreach (['Operação', 'Produtos', 'Automação', 'Análise', 'Sistema'] as $g) {
+        ok(str_contains($r['body'], 'aria-label="' . $g . '"'), "grupo $g");
+    }
+});
+test('Aprovar pela fila: uma vez só (clique repetido ou outra aba é recusado) e volta à mesma posição', function () use ($mk) {
+    $pdo = Db::get();
+    $id = $mk('Aprovar pela fila 1');
+    $mk('Aprovar pela fila 2');
+    $page = http('GET', 'painel.php?p=fila&cat=' . rawurlencode('Fila HTTP') . '&sit=aguardando_aprovacao')['body'];
+    ok(preg_match('~name="action" value="fila_approve"><input type="hidden" name="id" value="' . $id . '"><input type="hidden" name="v" value="([0-9a-f]+)"><input type="hidden" name="pos" value="(\d+)"~', $page, $m) === 1, 'botão Aprovar com versão');
+    $post = ['action' => 'fila_approve', 'id' => (string)$id, 'v' => $m[1], 'pos' => $m[2], 'back' => 'fila', 'csrf' => csrf($page)];
+    $r1 = http('POST', 'painel.php', $post);
+    ok(str_contains((string)header_value($r1, 'Location'), 'p=fila') && str_contains((string)header_value($r1, 'Location'), '#p'), 'volta à fila na posição do próximo: ' . header_value($r1, 'Location'));
+    eq('aprovado', Gmax\Catalog::get($pdo, $id)['validation_status']);
+    $r2 = follow(http('POST', 'painel.php', $post)); // mesmo formulário de novo
+    ok(str_contains($r2['body'], 'mudou depois que a tela foi aberta') || str_contains($r2['body'], 'já está aprovado'), 'segunda vez recusada');
+    eq(1, (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_audit WHERE action='status_alterado' AND entity_id=?", [(string)$id]), 'uma única aprovação registrada');
+});
+test('Link pela fila: inválido não grava e volta ao item; válido grava e segue', function () use ($mk) {
+    $pdo = Db::get();
+    $id = $mk('Sem link pela fila', ['affiliate_url' => null, 'affiliate_norm' => null]);
+    $page = http('GET', 'painel.php?p=fila&cat=' . rawurlencode('Fila HTTP') . '&sit=sem_link')['body'];
+    preg_match('~name="id" value="' . $id . '"><input type="hidden" name="v" value="([0-9a-f]+)"><input type="hidden" name="pos" value="(\d+)"~', $page, $m);
+    $base = ['action' => 'link_set', 'back' => 'fila', 'id' => (string)$id, 'v' => $m[1] ?? '', 'pos' => $m[2] ?? '0', 'csrf' => csrf($page)];
+    $r = http('POST', 'painel.php', $base + ['affiliate_url' => 'https://example.com/x']);
+    ok(str_ends_with((string)header_value($r, 'Location'), '#p' . $id), 'erro volta ao mesmo item: ' . header_value($r, 'Location'));
+    eq(null, Gmax\Catalog::get($pdo, $id)['affiliate_url']);
+    $r = http('POST', 'painel.php', $base + ['affiliate_url' => 'https://s.shopee.com.br/FilaOk' . $id, 'csrf' => csrf(http('GET', 'painel.php?p=fila')['body'])]);
+    ok(str_contains((string)header_value($r, 'Location'), 'p=fila'), 'segue na fila');
+    eq('https://s.shopee.com.br/FilaOk' . $id, Gmax\Catalog::get($pdo, $id)['affiliate_url']);
+});
+test('Conferência rápida pela fila: "Salvar e ir para o próximo" abre a conferência do próximo item', function () use ($mk) {
+    $a = $mk('Conferir fila A', ['price_verified_at' => null, 'category' => 'Fila Conferir']);
+    $b = $mk('Conferir fila B', ['price_verified_at' => null, 'category' => 'Fila Conferir']);
+    http('GET', 'painel.php?p=fila&cat=' . rawurlencode('Fila Conferir') . '&sit=preco_desatualizado');
+    $page = http('GET', "painel.php?p=conferir&id=$a&fila=1&pos=0")['body'];
+    ok(str_contains($page, 'Salvar e ir para o próximo') && str_contains($page, 'Voltar à fila de trabalho'), 'modo fila');
+    preg_match('~name="v" value="([0-9a-f]+)"~', $page, $m);
+    $r = http('POST', 'painel.php', ['action' => 'offer_check', 'back' => 'conferir', 'id' => (string)$a, 'v' => $m[1], 'fila' => '1', 'pos' => '0', 'fila_next' => '1', 'csrf' => csrf($page),
+        'confirmo' => '1', 'price_promo' => '39,90', 'price_mode' => 'original', 'payment_condition' => 'normal', 'availability' => 'disponivel']);
+    ok(str_contains((string)header_value($r, 'Location'), "p=conferir&id=$b&fila=1"), 'vai direto ao próximo: ' . header_value($r, 'Location'));
+    ok(Gmax\Catalog::get(Db::get(), $a)['price_verified_at'] !== null, 'conferência gravada');
+    $r = http('POST', 'painel.php', ['action' => 'offer_check', 'back' => 'conferir', 'id' => (string)$a, 'v' => $m[1], 'fila' => '1', 'pos' => '0', 'fila_next' => '1', 'csrf' => csrf($page),
+        'confirmo' => '1', 'price_promo' => '39,90', 'price_mode' => 'original', 'payment_condition' => 'normal', 'availability' => 'disponivel']);
+    ok(str_contains((string)header_value($r, 'Location'), 'fila=1'), 'reenvio recusado volta à conferência em modo fila');
+    eq(1, (int)Db::value(Db::get(), "SELECT COUNT(*) FROM gmax3_audit WHERE action='preco_confirmado' AND entity_id=?", [(string)$a]), 'uma única conferência registrada');
+});
+test('Abrir Início, Minha fila, Candidatos, AutoLab e Ofertas não grava nada no banco', function () {
+    $pdo = Db::get();
+    $dump = static function () use ($pdo): string {
+        $s = [];
+        foreach ($pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'gmax3_%' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN) as $t) {
+            $s[$t] = $pdo->query("SELECT * FROM $t ORDER BY rowid")->fetchAll(PDO::FETCH_NUM);
+        }
+        return hash('sha256', serialize($s));
+    };
+    http('GET', 'painel.php?p=painel'); // primeira visita pode sincronizar o legado (comportamento anterior)
+    $before = $dump();
+    foreach (['painel', 'fila', 'fila&sit=sem_link', 'candidatos', 'autolab', 'ofertas'] as $p) {
+        eq(200, http('GET', "painel.php?p=$p")['status'], $p);
+    }
+    eq($before, $dump(), 'nenhuma gravação');
+});
+
 echo "\n== Agendadores existentes e CLI (sem rede)\n";
 $cli = static function (array $cmd) use ($env, $app): array {
     $p = proc_open(array_merge([PHP_BINARY, '-d', 'allow_url_fopen=0'], $cmd), [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $app, $env);

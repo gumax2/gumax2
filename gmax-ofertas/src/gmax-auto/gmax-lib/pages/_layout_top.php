@@ -49,7 +49,7 @@ $v = View::e(GMAX_VERSION);
           <button type="submit" class="btn btn-danger btn-sm">Pausa emergencial</button>
         </form>
       <?php else: ?>
-        <span class="pill pill-paused" title="Nenhum envio será processado"><span class="pill-long">Envios pausados</span><span class="pill-short">Envios pausados</span></span>
+        <span class="pill pill-paused" title="Nenhum envio será processado"><span class="pill-long">Envios pausados</span><span class="pill-short">Pausado</span></span>
       <?php endif; ?>
       <?= View::actionButton('logout', [], 'Sair', 'btn btn-ghost btn-sm') ?>
     </div>

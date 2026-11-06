@@ -22,8 +22,8 @@ h1,h2,h3{line-height:1.25}h2{font-size:17px;margin:0 0 12px}h3{font-size:15px;ma
 /* ---------- cabeçalho compacto ---------- */
 .top{position:sticky;top:0;z-index:30;background:#0b1729f5;border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top)}
 @supports (backdrop-filter:blur(6px)){.top{backdrop-filter:blur(6px);background:#0b1729e6}}
-.top-inner{max-width:1600px;margin:auto;padding:8px 12px;display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"menu brand actions" "search search search";align-items:center;gap:8px 10px}
-.brand{grid-area:brand;font-weight:800;font-size:18px;color:var(--text);text-decoration:none;white-space:nowrap}
+.top-inner{max-width:1600px;margin:auto;padding:8px 12px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"menu brand actions" "search search search";align-items:center;gap:8px 10px}
+.brand{grid-area:brand;font-weight:800;font-size:18px;color:var(--text);text-decoration:none;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .nav-toggle{grid-area:menu;display:inline-flex;align-items:center;gap:6px;min-height:var(--tap);min-width:var(--tap);justify-content:center;padding:6px 10px}
 .nav-toggle-label{display:none}
 .global-search{grid-area:search;margin:0}
@@ -366,3 +366,4 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0;min-height:32px}
 .status-list li{padding:5px 0;overflow-wrap:anywhere}
 .sim-tag{background:#3b2a52;color:#e6d5ff}
 .api-fields{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:2px 10px;margin:6px 0}.api-fields dt{color:var(--muted)}.api-fields dd{margin:0;overflow-wrap:anywhere}
+.sources .tag{white-space:normal;max-width:100%}

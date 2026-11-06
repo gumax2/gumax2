@@ -9,14 +9,23 @@
     if (msg && !window.confirm(msg)) { ev.preventDefault(); return; }
     if (form.dataset.busy === '1') { ev.preventDefault(); return; }
     form.dataset.busy = '1';
-    var btn = form.querySelector('button[type=submit],button:not([type])');
-    if (btn) { btn.setAttribute('aria-busy', 'true'); btn.disabled = true; }
+    // Botão desativado não envia name/value: o do botão clicado vira um campo oculto (ex.: "Salvar e ir para o próximo").
+    var sub = ev.submitter || form.querySelector('button[type=submit],button:not([type])');
+    if (sub && sub.name) {
+      var h = document.createElement('input');
+      h.type = 'hidden'; h.name = sub.name; h.value = sub.value; h.setAttribute('data-submitter', '1');
+      form.appendChild(h);
+    }
+    if (sub) sub.setAttribute('aria-busy', 'true');
+    form.querySelectorAll('button[type=submit],button:not([type])').forEach(function (b) { b.disabled = true; });
   });
   // Ao voltar pelo histórico, reabilita os botões.
   window.addEventListener('pageshow', function () {
     document.querySelectorAll('form[data-busy]').forEach(function (f) {
       delete f.dataset.busy;
-      f.querySelectorAll('button[aria-busy]').forEach(function (b) { b.removeAttribute('aria-busy'); b.disabled = false; });
+      f.querySelectorAll('button[aria-busy]').forEach(function (b) { b.removeAttribute('aria-busy'); });
+      f.querySelectorAll('button[type=submit],button:not([type])').forEach(function (b) { b.disabled = false; });
+      f.querySelectorAll('input[data-submitter]').forEach(function (i) { i.remove(); });
     });
   });
 

@@ -84,6 +84,9 @@ async function overflow(page) {
         if (!csp.includes("form-action 'self'") || !csp.includes("script-src 'self'") || /unsafe-inline/.test(csp)) noCsp.push(pg);
         const o = await overflow(page);
         if (o) over.push(`${pg}: ${o.page}>${o.vw} ${o.bad.join(', ')}`);
+        // 3.2.2: a página não pode alargar o viewport de layout (o celular reduziria o zoom e a barra inferior sairia da tela).
+        const lw = await page.evaluate(() => innerWidth);
+        if (lw > p.w) over.push(`${pg}: viewport de layout ${lw}px > ${p.w}px`);
         const body = await page.content();
         if (/(Warning|Notice|Deprecated|Fatal error|Uncaught)\b.*on line/i.test(body)) php.push(pg);
       }
@@ -143,7 +146,7 @@ async function overflow(page) {
         const open2 = await page.evaluate(() => document.querySelector('details.filters-box').open);
         const n = await page.locator('.offer-card').count();
         const count = await page.textContent('.filter-count').catch(() => '');
-        out(G, 'Filtro ativo: painel de filtros aberto, contador e resultados só da Shopee', open2 && count.trim() === '1' && n === 6 && (await page.locator('.offer-card .mp-mercadolivre').count()) === 0, `open=${open2} count=${count} n=${n}`);
+        out(G, 'Filtro ativo: painel de filtros aberto, contador e resultados só da Shopee', open2 && count.trim() === '1' && n === 6 + C.ids.filaUi.length && (await page.locator('.offer-card .mp-mercadolivre').count()) === 0, `open=${open2} count=${count} n=${n}`);
       } else {
         out(G, 'Ofertas: tabela completa com seleção em lote visível, cartões ocultos', tableVisible && !cardsVisible && (await page.isVisible('select[name=op]')), `tabela=${tableVisible} cards=${cardsVisible}`);
         out(G, 'Filtros sempre abertos no computador', filtersOpen && (await page.isVisible('select[name=marketplace]')), `open=${filtersOpen}`);
@@ -184,6 +187,47 @@ async function overflow(page) {
         hist: /Oferta validada/.test(document.body.textContent) && /Candidato/.test(document.body.textContent), conf: /confirmado/.test(document.body.textContent) }));
       out(G, 'AutoLab: aviso de homologação, pausa imediata, destino fixo e histórico com tipo e resultado do Telegram', al.aviso && al.pausa && al.destino && al.hist && al.conf, JSON.stringify(al));
       if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-autolab.png`, fullPage: true });
+
+      // 4e. 3.2.2 — navegação: barra inferior no celular/tablet (5 atalhos), menu em grupos no desktop.
+      await page.goto(`${C.base}/painel.php?p=painel`);
+      const bn = await page.evaluate(() => { const b = document.querySelector('.bottomnav'); const st = b && getComputedStyle(b);
+        return { vis: !!b && st.display !== 'none' && b.getBoundingClientRect().height > 0, n: b ? b.querySelectorAll('a,button').length : 0,
+          groups: document.querySelectorAll('#mainnav .nav-group').length, labels: b ? [...b.querySelectorAll('a,button')].map((x) => x.textContent.trim()) : [] }; });
+      if (p.w < 1024) {
+        out(G, 'Barra inferior visível com Início, Minha fila, Ofertas, Automações e Menu', bn.vis && bn.n === 5 && /Minha fila/.test(bn.labels.join('|')) && /Menu/.test(bn.labels.join('|')), JSON.stringify(bn));
+        const hit = await page.evaluate(() => { const b = document.querySelector('.bottomnav-menu').getBoundingClientRect(); const el = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+          return { onTop: !!el && !!el.closest('.bottomnav'), el: el ? el.tagName + '.' + el.className : null, rect: [Math.round(b.top), Math.round(b.bottom)], vh: innerHeight, vv: window.visualViewport ? Math.round(window.visualViewport.height) : null }; });
+        let opened = false;
+        try {
+          await page.click('.bottomnav-menu', { timeout: 5000 });
+          opened = await page.isVisible('#mainnav') && (await page.getAttribute('.bottomnav-menu', 'aria-expanded')) === 'true';
+          await page.keyboard.press('Escape');
+        } catch (e) { /* registrado abaixo com o diagnóstico */ }
+        out(G, 'Barra inferior acima do conteúdo (recebe o toque)', hit.onTop, JSON.stringify(hit));
+        out(G, 'Botão Menu da barra inferior abre e fecha o menu completo (5 grupos)', opened && bn.groups === 5 && !(await page.isVisible('#mainnav')), `opened=${opened} groups=${bn.groups} ${JSON.stringify(hit)}`);
+      } else {
+        out(G, 'Desktop: menu lateral em 5 grupos; barra inferior oculta', !bn.vis && bn.groups === 5 && (await page.isVisible('#mainnav')), JSON.stringify(bn));
+      }
+      // Visão Geral: cada indicador abre a lista filtrada correspondente.
+      const ind = await page.evaluate(() => [...document.querySelectorAll('section.stats a.stat, .funnel a')].map((a) => a.getAttribute('href')));
+      out(G, 'Visão Geral: indicadores e etapas do funil levam a listas filtradas', ind.length >= 13 && ind.every((h) => /p=(fila|candidatos|publicacoes)/.test(h)), ind.join(' '));
+      if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-visao-geral.png`, fullPage: true });
+      // Minha fila: resolver uma pendência comum em no máximo 4 interações (uma vez, no primeiro celular com capturas).
+      if (p.mobile && p.shots && !globalThis.filaFlowDone) {
+        globalThis.filaFlowDone = true;
+        let clicks = 0;
+        await page.goto(`${C.base}/painel.php?p=fila&cat=${encodeURIComponent('Fila UI')}`);
+        const firstId = await page.evaluate(() => (document.querySelector('.work') || {}).id || '');
+        await Promise.all([page.waitForNavigation(), page.click(`#${firstId} a.btn-primary`)]); clicks++; // 1. Conferir agora
+        await page.check('input[name=confirmo]'); clicks++;                                              // 2. confirmo
+        await Promise.all([page.waitForNavigation(), page.click('button[name=fila_next]')]); clicks++;  // 3. salvar e ir para o próximo
+        const url = page.url();
+        const nextOk = /p=conferir/.test(url) && /fila=1/.test(url) && !url.includes(`id=${firstId.slice(1)}&`);
+        out(G, `Fila: conferir e avançar ao próximo em ${clicks + 1} interações (abrir a fila + ${clicks})`, nextOk && clicks + 1 <= 4, url);
+        if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-fila-conferir.png`, fullPage: true });
+        await page.goto(`${C.base}/painel.php?p=fila&cat=${encodeURIComponent('Fila UI')}`);
+        if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-fila.png`, fullPage: true });
+      }
 
       // 5. Busca global.
       if (p.w >= 640 || p.mobile) {
