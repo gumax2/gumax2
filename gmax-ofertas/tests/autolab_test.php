@@ -399,11 +399,12 @@ test('Isolamento da fila comercial: AutoLab ativo não libera nenhuma trava come
 });
 test('Compatibilidade: sem a migração 006 o Cron segue igual; 006 e 005 revertem separadamente', function () use ($ready) {
     $pdo = $ready();
+    eq('007', Migrator::down($pdo, 'teste')['version'], 'desfaz a 007 (3.2.2.2)');
     eq('006', Migrator::down($pdo, 'teste')['version']);
     eq(['resultado' => 'sem_migracao_006'], AutoLab::tick($pdo));
     ok(Db::tableExists($pdo, 'gmax3_retention_runs'), '005 continua');
     eq('005', Migrator::down($pdo, 'teste')['version']);
-    eq(['005', '006'], Migrator::pending($pdo));
+    eq(['005', '006', '007'], Migrator::pending($pdo));
     Migrator::up($pdo, 'teste');
     ok(AutoLab::installed($pdo), 'reaplicada');
     Db::run($pdo, "INSERT INTO gmax3_autolab_runs(slot_key,status,started_at) VALUES('x','concluido',?)", [Time::nowSql()]);

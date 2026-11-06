@@ -89,7 +89,7 @@ echo "\n== Migração, preservação e rollback\n";
 test('Migração preserva tabelas antigas e copia 5 Shopee + 1 Mercado Livre', function () {
     $pdo = t_seed();
     $before = t_legacy_snapshot($pdo);
-    eq(['001', '002', '003', '004', '005', '006'], Migrator::pending($pdo));
+    eq(['001', '002', '003', '004', '005', '006', '007'], Migrator::pending($pdo));
     $done = Migrator::up($pdo, 'teste');
     eq(['shopee' => 5, 'mercadolivre' => 1], $done[0]['result']);
     ok(is_file($done[0]['backup']), 'backup prévio criado');
@@ -129,6 +129,7 @@ test('Reverter migração remove apenas tabelas gmax3_ e mantém dados antigos',
     $pdo = t_seed();
     $before = t_legacy_snapshot($pdo);
     Migrator::up($pdo, 'teste');
+    eq('007', Migrator::down($pdo, 'teste')['version'], 'desfaz a 007 (3.2.2.2)');
     eq('006', Migrator::down($pdo, 'teste')['version'], 'desfaz a 006 (AutoLab)');
     eq('005', Migrator::down($pdo, 'teste')['version'], 'desfaz a 005 (3.2.1)');
     eq('004', Migrator::down($pdo, 'teste')['version'], 'reverte a mais recente primeiro');

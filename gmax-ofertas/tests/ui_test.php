@@ -64,6 +64,11 @@ for ($i = 1; $i <= 4; $i++) {
     $fid = Catalog::insert($pdo, ['marketplace' => 'shopee', 'external_id' => (string)(66600000000 + $i), 'title' => "Garrafa Fila UI $i 500ml", 'category' => 'Fila UI',
         'price_promo_cents' => 2990, 'payment_condition' => 'normal', 'availability' => 'disponivel', 'original_url' => "https://shopee.com.br/product/123/" . (66600000000 + $i)], 'aguardando_validacao', 'teste');
     Db::run($pdo, "UPDATE gmax3_catalog SET affiliate_url='https://s.shopee.com.br/FilaUi' || id, affiliate_norm='s.shopee.com.br/FilaUi' || id WHERE id=?", [$fid]);
+    // Aprovados com preço nunca conferido = prioridade alta: são os primeiros da rodada de conferência no teste.
+    if ($issues = Catalog::setStatus($pdo, $fid, 'aprovado', 'teste')) {
+        throw new RuntimeException('Fila UI: ' . implode('; ', $issues));
+    }
+    Db::run($pdo, "UPDATE gmax3_catalog SET variation_pending=1, variation_note='Escolher a cor' WHERE id=?", [$fid]); // continua pendente (não fica pronto)
     $filaUi[] = $fid;
 }
 $before = [
@@ -116,7 +121,7 @@ test('Fila pela interface: exatamente um produto conferido (manual), sem aprova�
     $pdo = Db::get();
     $done = Db::all($pdo, 'SELECT id, price_source, validation_status FROM gmax3_catalog WHERE id IN (' . implode(',', $filaUi) . ') AND price_verified_at IS NOT NULL');
     eq(1, count($done), 'um conferido');
-    eq(['conferencia_manual', 'aguardando_validacao'], [$done[0]['price_source'], $done[0]['validation_status']], 'registrado como manual e não aprovado');
+    eq(['conferencia_manual', 'aprovado'], [$done[0]['price_source'], $done[0]['validation_status']], 'registrado como manual; aprovação inalterada (mesmo preço), nada aprovado pela conferência');
     eq(0, (int)Db::value($pdo, 'SELECT COUNT(*) FROM gmax3_pub_queue WHERE catalog_id IN (' . implode(',', $filaUi) . ')'));
 });
 test('Abrir o anúncio não confirmou preço; só a conferência salva gerou registro manual', function () use ($ids, $ml) {

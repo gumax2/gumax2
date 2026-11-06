@@ -68,17 +68,31 @@ function gmax_fila_return(PDO $pdo, int $id, int $pos): never
     gmax_redirect('fila', $f + ($i >= $per ? ['pg' => (string)(intdiv($i, $per) + 1)] : []), 'p' . $ids[$i]);
 }
 
-/** Conferência sequencial: abre o próximo produto ainda não visitado ou encerra com o resumo. */
-function gmax_seq_go(PDO $pdo, array $seq): never
+/**
+ * Conferência progressiva (3.2.2.2): abre o próximo produto AINDA NÃO ANALISADO da rodada persistente
+ * (SQLite), ou avisa que todos foram analisados. Nunca reinicia a rodada sozinho.
+ */
+function gmax_round_continue(PDO $pdo, ?int $exclude = null): never
 {
-    $next = Gmax\Sequence::nextId($pdo, $seq);
-    Gmax\Sequence::store($seq);
-    if ($next !== null) {
-        gmax_redirect('conferir', ['id' => (string)$next, 'seq' => $seq['id']]);
+    $round = Gmax\Review::open($pdo, Auth::actor());
+    if (!$round) {
+        View::flash('erro', 'Nenhuma rodada de conferência aberta: inicie uma em Minha fila de trabalho.');
+        gmax_redirect('fila');
     }
-    $t = Gmax\Sequence::tally($seq);
-    View::flash('ok', sprintf('Conferência da sequência concluída: %d conferido(s), %d pulado(s), %d resolvido(s) fora da sequência, %d removido(s).', $t['salvo'], $t['pulado'], $t['resolvido'], $t['removido']));
-    gmax_redirect('fila', is_array($seq['f']) ? Gmax\Funnel::filters($seq['f']) : []);
+    $next = Gmax\Review::nextId($pdo, (int)$round['id'], $exclude);
+    if ($next === null) {
+        View::flash('ok', 'Todos os produtos desta rodada foram analisados.');
+        gmax_redirect('fila', ['sec' => 'analisado']);
+    }
+    gmax_redirect('conferir', ['id' => (string)$next, 'rodada' => (string)$round['id']]);
+}
+
+/** Rodada aberta do administrador, se o formulário pertence a ela. */
+function gmax_round_of_post(PDO $pdo): ?array
+{
+    $rid = gmax_post_int('rodada');
+    $round = $rid ? Gmax\Review::open($pdo, Auth::actor()) : null;
+    return $round && (int)$round['id'] === $rid ? $round : null;
 }
 
 /** Recusa ação sobre dados que mudaram desde que a tela foi aberta (outra aba, automação ou clique repetido). */
@@ -418,35 +432,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $reasons = Queue::enqueue($pdo, $id, 'telegram_privado', null, $actor);
                 View::flash($reasons ? 'erro' : 'ok', $reasons ? 'Não agendado: ' . implode('; ', $reasons) : 'Produto #' . $id . ' agendado no próximo horário livre. O envio real continua bloqueado pelas travas.');
                 gmax_fila_return($pdo, $id, gmax_post_int('pos'));
-            case 'seq_start':
-                // Fotografia ordenada dos produtos a conferir na fila filtrada (a partir do produto escolhido).
-                $seq = Gmax\Sequence::start($pdo, gmax_fila_filters(), gmax_post_int('from') ?: null);
-                if (!$seq['ids']) {
-                    Gmax\Sequence::clear();
-                    View::flash('erro', 'Nenhum produto para conferir com estes filtros.');
-                    gmax_redirect('fila', gmax_fila_filters());
-                }
-                gmax_seq_go($pdo, $seq);
-            case 'seq_resume':
-                $seq = Gmax\Sequence::current() ?? throw new RuntimeException('Nenhuma sequência em andamento.');
-                gmax_seq_go($pdo, $seq);
-            case 'seq_skip':
+            case 'round_start':
+                // Nova rodada só por ação explícita: encerra a atual (histórico preservado) e fotografa os produtos ativos.
+                $round = Gmax\Review::start($pdo, Auth::actor(), $actor);
+                View::flash('ok', 'Rodada #' . $round['id'] . ' iniciada com ' . $round['total_initial'] . ' produto(s). Nenhum dado de produto foi alterado.');
+                gmax_round_continue($pdo);
+            case 'round_continue':
+                gmax_round_continue($pdo);
+            case 'round_mark':
+                // Analisado sem alterar dados / pular / precisa de revisão posterior. Não muda pendências nem prontidão.
                 $id = gmax_post_int('id');
-                $seq = Gmax\Sequence::current();
-                if (!Gmax\Sequence::inSequence($seq, $id, gmax_post_str('seq', 20))) {
-                    throw new RuntimeException('Esta sequência foi encerrada ou substituída. Abra a fila de novo.');
+                $round = gmax_round_of_post($pdo) ?? throw new RuntimeException('Esta rodada foi encerrada ou substituída. Abra a fila de trabalho.');
+                $result = gmax_post_str('result', 20);
+                $action = ['analisado' => 'analisado_sem_alteracao', 'pulado' => 'pulado', 'revisar' => 'revisar_depois'][$result] ?? throw new RuntimeException('Resultado inválido.');
+                $item = Gmax\Review::item($pdo, (int)$round['id'], $id);
+                if ($item && $item['state'] === $result && empty($_POST['rev']) && $item['last_visit_at'] !== null && Gmax\Time::hoursSince($item['last_visit_at']) * 3600 < 30) {
+                    View::flash('ok', 'Já registrado nesta rodada (clique repetido ignorado).');
+                    gmax_round_continue($pdo, $id);
                 }
-                Gmax\Sequence::mark($seq, $id, 'pulado');
-                gmax_seq_go($pdo, $seq);
-            case 'seq_skipped':
-                $old = Gmax\Sequence::current() ?? throw new RuntimeException('Nenhuma sequência para revisitar.');
-                $seq = Gmax\Sequence::start($pdo, is_array($old['f']) ? $old['f'] : [], null, Gmax\Sequence::skipped($old));
-                gmax_seq_go($pdo, $seq);
-            case 'seq_end':
-                $seq = Gmax\Sequence::current();
-                Gmax\Sequence::clear();
-                View::flash('ok', 'Sequência encerrada. Nada foi alterado nos produtos.');
-                gmax_redirect('fila', $seq && is_array($seq['f']) ? Gmax\Funnel::filters($seq['f']) : gmax_fila_filters());
+                Gmax\Review::record($pdo, (int)$round['id'], $id, $result, $action, Auth::actor());
+                gmax_round_continue($pdo, $id);
+            case 'round_extend':
+                $round = Gmax\Review::open($pdo, Auth::actor()) ?? throw new RuntimeException('Nenhuma rodada aberta.');
+                $n = Gmax\Review::extend($pdo, (int)$round['id'], $actor);
+                View::flash('ok', $n . ' recém-chegado(s) incluído(s) no fim da rodada #' . $round['id'] . '.');
+                gmax_redirect('fila', ['sec' => 'nao_analisado']);
+            case 'round_requeue':
+                $round = Gmax\Review::open($pdo, Auth::actor()) ?? throw new RuntimeException('Nenhuma rodada aberta.');
+                $which = gmax_post_str('which', 10) === 'pulado' ? 'pulado' : 'revisar';
+                $n = Gmax\Review::requeue($pdo, (int)$round['id'], $which, $actor);
+                View::flash('ok', $n . ' produto(s) devolvido(s) para "Ainda não analisados" por sua escolha.');
+                gmax_redirect('fila', ['sec' => 'nao_analisado']);
             case 'offer_status':
                 $id = gmax_post_int('id');
                 $issues = Catalog::setStatus($pdo, $id, gmax_post_str('status', 30), $actor, !empty($_POST['confirm_price']));
@@ -458,12 +474,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 gmax_redirect($back === 'ofertas' ? 'ofertas' : 'oferta', $back === 'ofertas' ? [] : ['id' => $id]);
             case 'offer_check':
                 $id = gmax_post_int('id');
-                $seq = Gmax\Sequence::current();
-                $inSeq = Gmax\Sequence::inSequence($seq, $id, gmax_post_str('seq', 20));
-                if ($inSeq && empty($_POST['rev']) && ($seq['done'][$id] ?? '') === 'salvo') {
-                    // Clique duplo / reenvio: já salvo nesta sequência; nada é gravado de novo.
-                    View::flash('ok', 'Este produto já foi salvo nesta sequência (envio repetido ignorado).');
-                    gmax_seq_go($pdo, $seq);
+                $round = gmax_round_of_post($pdo);
+                if ($round && empty($_POST['rev']) && (Gmax\Review::item($pdo, (int)$round['id'], $id)['state'] ?? '') === 'analisado') {
+                    // Clique duplo / reenvio: já analisado nesta rodada; nada é gravado de novo.
+                    View::flash('ok', 'Este produto já foi analisado nesta rodada (envio repetido ignorado).');
+                    gmax_round_continue($pdo, $id);
                 }
                 try {
                     gmax_check_version($pdo, $id); // dentro do try: a recusa preserva o que foi digitado
@@ -482,10 +497,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . ($res['status'] !== $res['status_before'] ? ' Preço alterado: aprovação retirada para nova validação.' : '')
                     . ($res['estimativa'] ? ' Preço original ESTIMADO pelo desconto de ' . $res['estimativa']['percentual'] . '%: ≈ ' . Money::format($res['estimativa']['original']) . ' (calculado, não confirmado; não é usado como "De" nas publicações).' : '')
                     . ($res['preservado_api'] ? ' O preço original confirmado pela API foi mantido.' : ''));
-                if ($inSeq) {
-                    // Registra a visita NESTA sequência (não é validação) e abre o próximo não visitado.
-                    Gmax\Sequence::mark($seq, $id, 'salvo');
-                    gmax_seq_go($pdo, $seq);
+                if ($round) {
+                    // Registra a análise NA RODADA (persistente; não é validação) e abre o próximo não analisado.
+                    Gmax\Review::record($pdo, (int)$round['id'], $id, 'analisado', 'conferencia', Auth::actor());
+                    gmax_round_continue($pdo, $id);
                 }
                 if (!empty($_POST['fila'])) {
                     gmax_fila_return($pdo, $id, gmax_post_int('pos'));
@@ -632,8 +647,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($back === 'conferir' && !empty($_POST['fila'])) {
             $params += ['fila' => '1', 'pos' => (string)gmax_post_int('pos')];
         }
-        if ($back === 'conferir' && ($seqId = gmax_post_str('seq', 20)) !== '' && Gmax\Sequence::inSequence(Gmax\Sequence::current(), gmax_post_int('id'), $seqId)) {
-            $params += ['seq' => $seqId] + (!empty($_POST['rev']) ? ['rev' => '1'] : []); // falhou: fica no MESMO produto, dados preservados
+        if ($back === 'conferir' && gmax_round_of_post($pdo)) {
+            $params += ['rodada' => (string)gmax_post_int('rodada')]; // falhou: fica no MESMO produto da rodada, dados preservados
         }
         gmax_redirect($back, $params);
     }

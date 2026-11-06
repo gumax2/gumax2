@@ -45,6 +45,7 @@ test('Migração 002: tarefas criadas inativas, automações pausadas, aprovaç�
     eq('0', Settings::get($pdo, 'aprovacao_automatica'));
     eq('1', Settings::get($pdo, 'publicacao_pausada'), 'envios continuam pausados');
     $catalog = $pdo->query('SELECT COUNT(*) FROM gmax3_catalog')->fetchColumn();
+    eq('007', Migrator::down($pdo, 'teste')['version'], 'desfaz a 007 (3.2.2.2)');
     eq('006', Migrator::down($pdo, 'teste')['version'], 'desfaz a 006 (AutoLab)');
     eq('005', Migrator::down($pdo, 'teste')['version'], 'desfaz a 005 (3.2.1)');
     eq('004', Migrator::down($pdo, 'teste')['version']);

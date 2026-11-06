@@ -121,51 +121,6 @@ test('Ordem de atendimento, filtros (loja, categoria, prioridade, situação, et
     ok(!array_filter(Funnel::workQueue($pdo, ['prio' => '1']), fn($x) => $x['a']['priority'] !== 1), 'só prioridade alta');
     eq([], Funnel::filters(['mp' => 'amazon', 'sit' => '<x>', 'prio' => '9', 'etapa' => 'x']), 'filtros inválidos ignorados');
 });
-test('3.2.2.1 — o ciclo da 3.2.2 (reproduzido) não existe na conferência sequencial: 10 produtos, cada um uma vez', function () use ($ready, $make) {
-    $pdo = $ready();
-    $_SESSION = [];
-    $ids = [];
-    for ($i = 0; $i < 10; $i++) { // variação pendente: depois de conferido o produto CONTINUA na etapa de conferência
-        $ids[] = $make($pdo, ['price_verified_at' => null, 'variation_pending' => 1, 'category' => 'Seq']);
-    }
-    $seq = Gmax\Sequence::start($pdo, ['cat' => 'Seq']);
-    eq($ids, $seq['ids'], 'fotografia na ordem da fila');
-    $visited = [];
-    while (($id = Gmax\Sequence::nextId($pdo, $seq)) !== null && count($visited) < 30) {
-        $visited[] = $id;
-        Catalog::confirmPrice($pdo, $id, 't'); // salvo: continua pendente (variação) e muda de lugar na ordenação
-        Gmax\Sequence::mark($seq, $id, 'salvo');
-    }
-    eq($ids, $visited, 'todos, na ordem, sem repetição');
-    ok($seq['finished'], 'sequência concluída');
-    eq(10, count(Funnel::workQueue($pdo, ['cat' => 'Seq'])), 'continuam pendentes (variação): visitado não é validado');
-    eq(['salvo' => 10, 'pulado' => 0, 'resolvido' => 0, 'removido' => 0], Gmax\Sequence::tally($seq));
-});
-test('Sequência: pular, revisitar anterior, resolvido fora, arquivado, produto novo e progresso', function () use ($ready, $make) {
-    $pdo = $ready();
-    $_SESSION = [];
-    $ids = [];
-    for ($i = 0; $i < 5; $i++) {
-        $ids[] = $make($pdo, ['price_verified_at' => null, 'category' => 'Seq2']);
-    }
-    $seq = Gmax\Sequence::start($pdo, ['cat' => 'Seq2'], $ids[1]); // a partir do 2º
-    eq(array_slice($ids, 1), $seq['ids'], 'a partir do produto escolhido');
-    eq([1, 4], Gmax\Sequence::progress($seq, $ids[1]));
-    Gmax\Sequence::mark($seq, $ids[1], 'pulado');
-    eq($ids[1], Gmax\Sequence::previous($seq, $ids[2]), 'anterior = o pulado (só revisita)');
-    $new = $make($pdo, ['price_verified_at' => null, 'category' => 'Seq2']); // novo durante a sequência
-    Catalog::confirmPrice($pdo, $ids[2], 't');                              // resolvido em outra aba
-    Catalog::setStatus($pdo, $ids[3], 'arquivado', 't');                   // arquivado
-    eq($ids[4], Gmax\Sequence::nextId($pdo, $seq), 'pula resolvido e arquivado');
-    eq(['salvo' => 0, 'pulado' => 1, 'resolvido' => 1, 'removido' => 1], Gmax\Sequence::tally($seq));
-    Gmax\Sequence::mark($seq, $ids[4], 'salvo');
-    eq(null, Gmax\Sequence::nextId($pdo, $seq), 'produto novo não entra na sequência');
-    ok(!in_array($new, $seq['ids'], true), 'novo fora');
-    eq([$ids[1]], Gmax\Sequence::skipped($seq));
-    $again = Gmax\Sequence::start($pdo, [], null, Gmax\Sequence::skipped($seq));
-    eq([$ids[1]], $again['ids'], 'revisitar pulados = nova sequência só com eles');
-    ok(!Gmax\Sequence::inSequence($again, $ids[1], $seq['id']), 'formulário de sequência antiga não vale na nova');
-});
 test('Versão do produto muda a cada alteração relevante (base da proteção contra ação duplicada)', function () use ($ready, $make) {
     $pdo = $ready();
     $id = $make($pdo);

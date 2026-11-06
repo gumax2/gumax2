@@ -19,15 +19,70 @@ $cats = array_column(Db::all($pdo, "SELECT DISTINCT category FROM gmax3_catalog 
 $prioTag = [1 => 'tag-bad', 2 => 'tag-warn', 3 => ''];
 $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, static fn($v) => $v !== null && $v !== ''));
 ?>
-<?php $seq = Gmax\Sequence::current(); $toCheck = count(array_filter($all, static fn($x) => ($x['a']['action']['page'] ?? '') === 'conferir')); ?>
-<?php if ($seq && !$seq['finished']): [$k, $n] = Gmax\Sequence::progress($seq, null); ?>
-  <div class="seq-bar card" role="status"><strong>Sequência em andamento: <?= count($seq['done']) ?> de <?= $n ?> visitados</strong>
-    <span class="seq-actions"><?= View::actionButton('seq_resume', ['back' => 'fila'], 'Retomar sequência', 'btn btn-primary btn-sm') ?><?= View::actionButton('seq_end', ['back' => 'fila'], 'Encerrar', 'btn btn-ghost btn-sm') ?></span></div>
-<?php elseif ($seq): $t = Gmax\Sequence::tally($seq); ?>
-  <div class="seq-bar card" role="status"><strong>Sequência concluída</strong> <span class="small"><?= (int)$t['salvo'] ?> conferido(s) · <?= (int)$t['pulado'] ?> pulado(s) · <?= (int)$t['resolvido'] + (int)$t['removido'] ?> resolvido(s) fora</span>
-    <span class="seq-actions"><?php if ($t['pulado']): ?><?= View::actionButton('seq_skipped', ['back' => 'fila'], 'Revisitar pulados (' . (int)$t['pulado'] . ')', 'btn btn-sm') ?><?php endif; ?><?= View::actionButton('seq_end', ['back' => 'fila'], 'Fechar', 'btn btn-ghost btn-sm') ?></span></div>
+<?php
+// 3.2.2.2: conferência progressiva por rodadas (persistente no SQLite).
+$round = Gmax\Review::open($pdo, Gmax\Auth::actor());
+$rs = $round ? Gmax\Review::stats($pdo, (int)$round['id']) : null;
+$sec = is_string($_GET['sec'] ?? null) && isset(Gmax\Review::SECTIONS[$_GET['sec']]) ? $_GET['sec'] : null;
+$secLink = static fn(string $k) => View::url('fila', ['sec' => $k]);
+?>
+<?php if (Gmax\Review::installed($pdo)): ?>
+<section class="card round-panel" aria-label="Conferência progressiva">
+  <?php if (!$round): $active = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_catalog WHERE validation_status NOT IN ('arquivado','rejeitado')"); ?>
+    <h2>Conferência progressiva</h2>
+    <p class="small">Analise cada um dos <strong><?= $active ?></strong> produtos uma vez. O sistema lembra o que você já examinou, mesmo depois de sair, e só volta a um produto quando você decidir revisar.</p>
+    <?= View::actionButton('round_start', ['back' => 'fila'], 'Iniciar rodada de conferência', 'btn btn-primary') ?>
+  <?php else: ?>
+    <h2>Rodada #<?= (int)$round['id'] ?> · <?= (int)$rs['analisados'] ?> de <?= (int)$rs['total'] ?> analisados</h2>
+    <progress max="<?= max(1, (int)$rs['total']) ?>" value="<?= (int)$rs['analisados'] ?>" aria-label="Progresso da rodada"></progress>
+    <?php if ($rs['nao_analisado'] > 0): ?>
+      <p><?= View::actionButton('round_continue', ['back' => 'fila'], 'Continuar conferência (' . (int)$rs['nao_analisado'] . ' restante(s))', 'btn btn-primary') ?></p>
+    <?php else: ?>
+      <p class="alert alert-ok" role="status"><strong>Todos os produtos desta rodada foram analisados.</strong> A rodada não recomeça sozinha.</p>
+    <?php endif; ?>
+    <nav class="chip-row" aria-label="Progresso da conferência">
+      <?php foreach (['nao_analisado' => $rs['nao_analisado'], 'analisado' => $rs['analisados'], 'pulado' => $rs['pulado'], 'revisar' => $rs['revisar'], 'novos' => $rs['novos']] as $k => $n): ?>
+        <a class="chip<?= $sec === $k ? ' chip-on' : '' ?>" href="<?= View::e($secLink($k)) ?>"><?= View::e(Gmax\Review::SECTIONS[$k]) ?> <strong><?= (int)$n ?></strong></a>
+      <?php endforeach; ?>
+      <a class="chip" href="<?= View::e(View::url('fila', ['sit' => 'disponivel_selecao'])) ?>">Prontos para divulgar <strong><?= (int)$sum['situacoes']['disponivel_selecao'] ?></strong></a>
+    </nav>
+    <p class="small actions">
+      <?php if ($rs['novos']): ?><?= View::actionButton('round_extend', ['back' => 'fila'], 'Incluir ' . (int)$rs['novos'] . ' recém-chegado(s) nesta rodada', 'btn btn-sm') ?><?php endif; ?>
+      <?php if ($rs['pulado']): ?><?= View::actionButton('round_requeue', ['which' => 'pulado', 'back' => 'fila'], 'Devolver pulados para análise', 'btn btn-sm btn-ghost') ?><?php endif; ?>
+      <?php if ($rs['revisar']): ?><?= View::actionButton('round_requeue', ['which' => 'revisar', 'back' => 'fila'], 'Devolver os que precisam de revisão', 'btn btn-sm btn-ghost') ?><?php endif; ?>
+      <?= View::actionButton('round_start', ['back' => 'fila'], 'Iniciar nova rodada', 'btn btn-sm btn-ghost', 'Iniciar uma NOVA rodada com todos os produtos ativos? A rodada atual é encerrada e fica no histórico; nenhum dado de produto é alterado.') ?>
+    </p>
+    <p class="muted small">Progresso da conferência ≠ pendências comerciais ≠ prontidão para divulgar. Um produto analisado pode continuar pendente.</p>
+  <?php endif; ?>
+</section>
 <?php endif; ?>
-<p class="lead small">Tudo o que precisa de você, em ordem: primeiro o que bloqueia uma oferta aprovada, depois o que está aguardando validação. Resolva e use <strong>Salvar e ir para o próximo</strong>.</p>
+
+<?php if ($round && $sec): // Lista de uma seção da rodada (paginada no SQLite)
+    $sp = max(1, min(10000, (int)($_GET['pg'] ?? 1)));
+    $list = Gmax\Review::section($pdo, (int)$round['id'], $sec, $per, ($sp - 1) * $per);
+    $spages = max(1, (int)ceil($list['total'] / $per)); ?>
+  <h2 class="kpi-group"><?= View::e(Gmax\Review::SECTIONS[$sec]) ?> (<?= (int)$list['total'] ?>)</h2>
+  <?php if (!$list['rows']): ?><div class="card empty"><strong>Nada nesta seção</strong></div><?php endif; ?>
+  <ol class="work-list">
+  <?php foreach ($list['rows'] as $r): $id = (int)$r['id']; $fa = Funnel::analyze($pdo, $r, $ctx); ?>
+    <li class="card work" id="p<?= $id ?>">
+      <div class="work-head"><?= View::mp($r['marketplace']) ?> <?php if ($r['r_state']): ?><span class="tag"><?= View::e(Gmax\Review::STATES[$r['r_state']] ?? $r['r_state']) ?></span><?php endif; ?>
+        <?= !empty($r['r_review']) && $r['r_state'] === 'analisado' ? '<span class="tag tag-warn">mudou depois da análise</span>' : '' ?>
+        <a class="work-title" href="<?= View::e(View::url('oferta', ['id' => $id])) ?>"><?= View::e(Text::shortTitle((string)$r['title'])) ?></a></div>
+      <p class="small"><?= $r['r_last_visit_at'] ? 'Última análise: ' . View::e(Time::show($r['r_last_visit_at'])) . ' · ' . (int)$r['r_visits'] . ' visita(s) · ' : '' ?>Pendências: <?= $fa['issues'] ? View::e(implode(' · ', $fa['issues'])) : 'nenhuma' ?></p>
+      <div class="actions work-actions"><a class="btn btn-primary" href="<?= View::e(View::url('conferir', ['id' => $id, 'rodada' => $round['id']])) ?>"><?= $r['r_state'] && $r['r_state'] !== 'nao_analisado' ? 'Revisitar' : 'Analisar' ?></a><?= View::storeButtons($r, 'btn-sm', Text::shortTitle((string)$r['title'], 60)) ?></div>
+    </li>
+  <?php endforeach; ?>
+  </ol>
+  <?php if ($spages > 1): ?><nav class="pager" aria-label="Páginas">
+    <?php if ($sp > 1): ?><a class="btn btn-sm" href="<?= View::e(View::url('fila', ['sec' => $sec, 'pg' => (string)($sp - 1)])) ?>">← Anterior</a><?php endif; ?>
+    <span class="small muted">Página <?= $sp ?> de <?= $spages ?></span>
+    <?php if ($sp < $spages): ?><a class="btn btn-sm" href="<?= View::e(View::url('fila', ['sec' => $sec, 'pg' => (string)($sp + 1)])) ?>">Próxima →</a><?php endif; ?>
+  </nav><?php endif; ?>
+  <p><a class="btn btn-ghost" href="<?= View::e(View::url('fila')) ?>">← Voltar às pendências comerciais</a></p>
+<?php return; endif; ?>
+<h2 class="kpi-group">Pendências comerciais</h2>
+<p class="lead small">Tudo o que precisa de você, em ordem: primeiro o que bloqueia uma oferta aprovada, depois o que está aguardando validação. Para examinar o catálogo inteiro sem repetir produtos, use a <strong>conferência progressiva</strong> acima.</p>
 
 <nav class="chip-row" aria-label="Situações">
   <a class="chip<?= !isset($f['sit']) ? ' chip-on' : '' ?>" href="<?= View::e(View::url('fila', array_diff_key($f, ['sit' => 1]))) ?>">Todas <strong><?= (int)$sum['total'] ?></strong></a>
@@ -52,7 +107,7 @@ $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, s
   <div class="card empty"><strong><?= $f ? 'Nada com estes filtros' : 'Fila vazia' ?></strong><?= $f ? 'Limpe os filtros para ver todas as pendências.' : 'Nenhuma pendência agora. As automações continuam trabalhando.' ?></div>
 <?php else: ?>
 <p class="small muted"><?= $total ?> pendência(s)<?= $pages > 1 ? " · página $pg de $pages" : '' ?>
-  <?php if ($toCheck): ?> · <?= View::actionButton('seq_start', ['back' => 'fila'], 'Conferir em sequência (' . $toCheck . ')', 'btn btn-sm btn-primary', ($seq && !$seq['finished']) ? 'Iniciar uma NOVA sequência? A atual será substituída (nada é alterado nos produtos).' : null) ?><?php endif; ?></p>
+</p>
 <ol class="work-list" start="<?= ($pg - 1) * $per + 1 ?>">
 <?php foreach ($items as $i => ['item' => $r, 'a' => $a]): $pos = ($pg - 1) * $per + $i; $id = (int)$r['id']; $v = Funnel::version($r); ?>
   <li class="card work" id="p<?= $id ?>">
@@ -66,7 +121,7 @@ $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, s
     <?php if (count($a['issues']) > 1): ?><p class="small muted work-also">Também: <?= View::e(implode(' · ', array_slice($a['issues'], 1))) ?></p><?php endif; ?>
     <div class="actions work-actions">
       <?php $act = $a['action']; if ($act['kind'] === 'link' && $act['page'] === 'conferir'): ?>
-        <?= View::actionButton('seq_start', ['from' => $id, 'back' => 'fila'], $act['label'], 'btn btn-primary', ($seq && !$seq['finished']) ? 'Iniciar uma nova sequência a partir deste produto? A atual será substituída (nada é alterado nos produtos).' : null) ?>
+        <a class="btn btn-primary" href="<?= View::e(View::url('conferir', ['id' => $id] + ($round ? ['rodada' => $round['id']] : ['fila' => 1, 'pos' => $pos]))) ?>"><?= View::e($act['label']) ?></a>
       <?php elseif ($act['kind'] === 'link'): ?>
         <a class="btn btn-primary" href="<?= View::e(View::url($act['page'], $act['params'])) ?>"><?= View::e($act['label']) ?></a>
       <?php elseif ($act['kind'] === 'approve'): ?>

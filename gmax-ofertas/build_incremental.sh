@@ -2,8 +2,8 @@
 # Pacote INCREMENTAL: roda todos os testes e empacota só os arquivos alterados/novos desde BASE_COMMIT.
 set -euo pipefail
 cd "$(dirname "$0")"
-NAME="${NAME:-GMAX_Ofertas_3.2.2.1_incremental}"
-BASE_COMMIT="${BASE_COMMIT:-b30b0df}"   # b30b0df = 3.2.2 instalada; d1ca87e = 3.2.1; 494b653 = 3.2.0; 30e8a11 = 3.1.9; 5b1fc07 = 3.1.8; da82f0e = 3.1.7; be35b8b = 3.1.6; 72a05b7 = 3.1.5; 16c081f = 3.1.4; 592ed19 = 3.1.3; 645659a = 3.1.1; cd8ac74 = 3.0.2
+NAME="${NAME:-GMAX_Ofertas_3.2.2.2_incremental}"
+BASE_COMMIT="${BASE_COMMIT:-16c8f4f}"   # 16c8f4f = 3.2.2.1 instalada; b30b0df = 3.2.2; d1ca87e = 3.2.1; 494b653 = 3.2.0; 30e8a11 = 3.1.9; 5b1fc07 = 3.1.8; da82f0e = 3.1.7; be35b8b = 3.1.6; 72a05b7 = 3.1.5; 16c081f = 3.1.4; 592ed19 = 3.1.3; 645659a = 3.1.1; cd8ac74 = 3.0.2
 OUT="dist-inc/$NAME"
 rm -rf dist-inc && mkdir -p "$OUT"
 find src -name '*.php' -print0 | xargs -0 -n1 php -l | grep -v '^No syntax errors' || true
@@ -25,12 +25,16 @@ php -d allow_url_fopen=0 tests/v321_test.php > dist-inc/t-v321.txt 2>&1; W=$?
 php -d allow_url_fopen=0 tests/autolab_test.php > dist-inc/t-autolab.txt 2>&1; X=$?
 php -d allow_url_fopen=0 -d memory_limit=1G tests/v322_test.php > dist-inc/t-v322.txt 2>&1; Y=$?
 php tests/loop_fila_test.php > dist-inc/t-loop-fila.txt 2>&1; Z=$?
+php -d allow_url_fopen=0 tests/v3222_test.php > dist-inc/t-v3222.txt 2>&1; P=$?
+php tests/progresso_rodada_test.php > dist-inc/t-progresso-rodada.txt 2>&1; G=$?
 php tests/ui_test.php > dist-inc/t-interface.txt 2>&1; I=$?
 set -e
 tail -qn1 dist-inc/t-*.txt
 php tools/relatorio_testes.php > docs/TESTES.md
 FILES=$(cd .. && git diff --name-only "$BASE_COMMIT" -- gmax-ofertas/src/gmax-auto; git ls-files --others --exclude-standard gmax-ofertas/src/gmax-auto)
 FILES=$(echo "$FILES" | sed 's#^gmax-ofertas/src/gmax-auto/##' | sort -u)
+REMOVED=$(for f in $FILES; do [ -f "src/gmax-auto/$f" ] || echo "$f"; done)
+FILES=$(for f in $FILES; do [ -f "src/gmax-auto/$f" ] && echo "$f"; done)
 ( cd src/gmax-auto && zip -q -X "../../$OUT/${NAME}_arquivos.zip" $FILES )
 {
   echo "$NAME (sobre o commit $BASE_COMMIT) — MANIFESTO ($(date -u +%Y-%m-%dT%H:%MZ))"
@@ -41,17 +45,18 @@ FILES=$(echo "$FILES" | sed 's#^gmax-ofertas/src/gmax-auto/##' | sort -u)
     elif [ -f "referencia/producao-20261029/$f" ]; then tipo="SUBSTITUI"; else tipo="NOVO    "; fi
     printf '  %s  %s  %s\n' "$tipo" "$(sha256sum "src/gmax-auto/$f" | cut -c1-16)" "$f"
   done
+  for f in $REMOVED; do printf '  REMOVIDO  (não incluído; pode ficar no servidor sem efeito)  %s\n' "$f"; done
   echo
-  echo "BANCO: NENHUMA migração na 3.2.2.1 (a sequência de conferência fica só na sessão do administrador)."
+  echo "BANCO: migração 007 (ADITIVA: só cria gmax3_review_rounds/items/visits; nenhum produto alterado). Aplicar em Sistema → MIGRAR."
+  echo "REMOVIDO DO CÓDIGO: gmax-lib/Gmax/Sequence.php (sequência só na sessão, da 3.2.2.1). Se ficar no servidor, não é usado."
   echo "ARQUIVOS ANTIGOS: não tocados (app.php, index.php, mercadolivre.php, cron.php, publicador)."
   echo "ENVIOS COMERCIAIS: nenhum habilitado. Aprovação automática: desligada. Cron e credenciais: não alterados."
   echo "AUTOLAB: autorização, destino, limite diário, prazo e Cron NÃO alterados; continua como está no servidor."
 } > "$OUT/MANIFESTO.txt"
-cp docs/ATUALIZACAO_3.2.2.1_CORRECAO_LOOP_FILA.md "$OUT/00_LEIA_PRIMEIRO_3.2.2.1.md"
-cp docs/ATUALIZACAO_3.2.2_CENTRAL_DE_OPERACOES.md "$OUT/"
+cp docs/ATUALIZACAO_3.2.2.2_CONFERENCIA_PROGRESSIVA.md "$OUT/00_LEIA_PRIMEIRO_3.2.2.2.md"
 cp docs/RELATORIO_HOMOLOGACAO_AUTOLAB.md "$OUT/"
 mkdir -p "$OUT/capturas" && cp docs/capturas/3.1.5/*-visao-geral.png docs/capturas/3.1.5/*-fila*.png docs/capturas/3.1.5/*-menu.png docs/capturas/3.1.5/*-candidatos.png docs/capturas/3.1.5/*-autolab.png "$OUT/capturas/" 2>/dev/null || true
 cp docs/TESTES.md "$OUT/TESTES.md"
 ( cd dist-inc && zip -q -X -r "$NAME.zip" "$NAME" )
 ls -la dist-inc
-[ $U -eq 0 ] && [ $H -eq 0 ] && [ $C -eq 0 ] && [ $L -eq 0 ] && [ $A -eq 0 ] && [ $O -eq 0 ] && [ $E -eq 0 ] && [ $S -eq 0 ] && [ $K -eq 0 ] && [ $I -eq 0 ] && [ $Q -eq 0 ] && [ $R -eq 0 ] && [ $M -eq 0 ] && [ $V -eq 0 ] && [ $W -eq 0 ] && [ $X -eq 0 ] && [ $Y -eq 0 ] && [ $Z -eq 0 ] || { echo "ATENÇÃO: há testes falhando"; exit 1; }
+[ $U -eq 0 ] && [ $H -eq 0 ] && [ $C -eq 0 ] && [ $L -eq 0 ] && [ $A -eq 0 ] && [ $O -eq 0 ] && [ $E -eq 0 ] && [ $S -eq 0 ] && [ $K -eq 0 ] && [ $I -eq 0 ] && [ $Q -eq 0 ] && [ $R -eq 0 ] && [ $M -eq 0 ] && [ $V -eq 0 ] && [ $W -eq 0 ] && [ $X -eq 0 ] && [ $Y -eq 0 ] && [ $Z -eq 0 ] && [ $P -eq 0 ] && [ $G -eq 0 ] || { echo "ATENÇÃO: há testes falhando"; exit 1; }

@@ -386,3 +386,5 @@ details summary{cursor:pointer;color:var(--muted);margin:6px 0;min-height:32px}
 .seq-bar strong{font-size:17px}
 .seq-actions{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
 .seq-actions .inline{display:inline}
+.round-panel progress{width:100%;height:10px;accent-color:var(--accent);margin:4px 0 10px}
+.seq-status{flex:1 1 100%;margin:4px 0 0}

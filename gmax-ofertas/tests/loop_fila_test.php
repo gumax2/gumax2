@@ -49,32 +49,35 @@ test('Defeito 3.2.2: "salvar e ir para o próximo" percorre os 10 produtos uma �
     [$b] = $req('GET', 'painel.php');
     $req('POST', 'painel.php', ['action' => 'login', 'password' => T_PASSWORD, 'csrf' => $csrf($b)]);
     [$b] = $req('GET', 'painel.php?p=fila&cat=Seq+Loop');
-    if (preg_match('~href="(painel\.php\?p=conferir[^"]+fila=1[^"]*)"[^>]*>Conferir agora~', html_entity_decode($b), $m)) {
+    if (str_contains($b, 'value="round_start"')) { // 3.2.2.2: rodada persistente (todos os produtos ativos)
+        [, $url] = $req('POST', 'painel.php', ['action' => 'round_start', 'back' => 'fila', 'csrf' => $csrf($b)]);
+    } elseif (preg_match('~href="(painel\.php\?p=conferir[^"]+fila=1[^"]*)"[^>]*>Conferir agora~', html_entity_decode($b), $m)) {
         $url = html_entity_decode($m[1]); // 3.2.2
     } else {
         preg_match('/name="action" value="seq_start"><input type="hidden" name="from" value="(\d+)"/', $b, $mf);
         [, $url] = $req('POST', 'painel.php', ['action' => 'seq_start', 'from' => $mf[1] ?? '', 'back' => 'fila', 'csrf' => $csrf($b)]); // 3.2.2.1
     }
     $seen = [];
-    for ($step = 0; $step < 30 && $url && str_contains($url, 'p=conferir'); $step++) {
+    for ($step = 0; $step < 60 && $url && str_contains($url, 'p=conferir'); $step++) {
         [$page] = $req('GET', $url);
         preg_match('/name="id" value="(\d+)"/', $page, $mi);
         preg_match('/name="v" value="([0-9a-f]+)"/', $page, $mv);
         $seen[] = (int)($mi[1] ?? 0);
         $post = ['action' => 'offer_check', 'back' => 'conferir', 'id' => $mi[1] ?? '', 'v' => $mv[1] ?? '', 'csrf' => $csrf($page), 'fila_next' => '1',
             'confirmo' => '1', 'price_promo' => '19,90', 'price_mode' => 'original', 'payment_condition' => 'normal', 'availability' => 'disponivel'];
-        foreach (['seq', 'pos', 'fila'] as $k) {
+        foreach (['seq', 'pos', 'fila', 'rodada', 'rev'] as $k) {
             if (preg_match('/name="' . $k . '" value="([^"]+)"/', $page, $mx)) {
                 $post[$k] = $mx[1];
             }
         }
         [, $url] = $req('POST', 'painel.php', $post);
+        if (getenv('LOOP_DEBUG')) { fwrite(STDERR, "POST " . json_encode($post) . " -> $url\n"); }
     }
     [$end] = $url ? $req('GET', $url) : [''];
     $GLOBALS['loop_seen'] = $seen;
     eq(count($seen), count(array_unique($seen)), 'nenhum produto repetido: ' . implode(',', $seen));
-    eq(10, count(array_unique($seen)), 'todos os 10 visitados');
-    ok(str_contains($end, 'Conferência da sequência concluída'), 'termina com "Conferência da sequência concluída" (último destino: ' . $url . ')');
+    eq([], array_values(array_diff($ids, $seen)), 'todos os 10 produtos com variação pendente visitados');
+    ok(str_contains($end, 'Conferência da sequência concluída') || str_contains($end, 'Todos os produtos desta rodada foram analisados'), 'termina com a mensagem de conclusão (último destino: ' . $url . ')');
 });
 proc_terminate($srv);
 $pass = count(array_filter($GLOBALS['t_results'], fn($r) => $r[1]));

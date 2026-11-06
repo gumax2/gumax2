@@ -218,16 +218,18 @@ async function overflow(page) {
         let clicks = 0;
         await page.goto(`${C.base}/painel.php?p=fila&cat=${encodeURIComponent('Fila UI')}`);
         const firstId = await page.evaluate(() => (document.querySelector('.work') || {}).id || '');
-        await Promise.all([page.waitForNavigation(), page.click(`#${firstId} .work-actions button.btn-primary`)]); clicks++; // 1. Conferir agora (inicia a sequência)
+        await Promise.all([page.waitForNavigation(), page.click('.round-panel form:has(input[value=round_start]) button')]); clicks++; // 1. Iniciar rodada de conferência
         const ind1 = await page.textContent('.seq-bar strong').catch(() => '');
         await page.check('input[name=confirmo]'); clicks++;                                                                  // 2. confirmo
         await Promise.all([page.waitForNavigation(), page.click('.form-actions button.btn-primary')]); clicks++;           // 3. salvar e ir para o próximo
         const url = page.url();
         const ind2 = await page.textContent('.seq-bar strong').catch(() => '');
-        const nextOk = /p=conferir/.test(url) && /seq=/.test(url) && !url.includes(`id=${firstId.slice(1)}&`) && /Conferência 1 de \d+/.test(ind1) && /Conferência 2 de \d+/.test(ind2);
-        out(G, `Fila: conferência sequencial, avança ao próximo em ${clicks + 1} interações (abrir a fila + ${clicks}); indicador "${ind1}" → "${ind2}"`, nextOk && clicks + 1 <= 4, url);
-        // Encerrar a sequência para não interferir no resto do teste.
-        await Promise.all([page.waitForNavigation(), page.click('form:has(input[value=seq_end]) button')]);
+        const nextOk = /p=conferir/.test(url) && /rodada=/.test(url) && / 0 de \d+ analisados/.test(ind1) && / 1 de \d+ analisados/.test(ind2);
+        out(G, `Fila: conferência progressiva (rodada persistente), avança ao próximo em ${clicks + 1} interações (abrir a fila + ${clicks}); indicador "${ind1}" → "${ind2}"`, nextOk && clicks + 1 <= 4, url);
+        await page.goto(`${C.base}/painel.php?p=fila`);
+        const panel = await page.textContent('.round-panel').catch(() => '');
+        out(G, 'Fila: painel da rodada com progresso real, "Continuar conferência" e seções (não analisados, analisados, pulados, revisão, recém-chegados, prontos)',
+          / 1 de \d+ analisados/.test(panel) && /Continuar conferência/.test(panel) && /Ainda não analisados/.test(panel) && /Precisam de revisão/.test(panel) && /Recém-chegados/.test(panel) && /Prontos para divulgar/.test(panel), panel.slice(0, 300));
         if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-fila-conferir.png`, fullPage: true });
       }
       if (p.shots) {

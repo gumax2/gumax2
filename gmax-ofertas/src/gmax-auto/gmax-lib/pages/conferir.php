@@ -5,11 +5,11 @@ use Gmax\{Catalog, Money, Pricing, Time, Url, View};
 /** @var PDO $pdo @var int $staleHours */
 $id = isset($_GET['id']) && is_string($_GET['id']) && ctype_digit($_GET['id']) ? (int)$_GET['id'] : 0;
 $r = $id ? Catalog::get($pdo, $id) : null;
-$seqId = is_string($_GET['seq'] ?? null) ? mb_substr($_GET['seq'], 0, 20) : '';
-$seq = Gmax\Sequence::current();
-$inSeq = $id && Gmax\Sequence::inSequence($seq, $id, $seqId);
-$revisit = $inSeq && isset($seq['done'][$id]);
-$fromQueue = ($_GET['fila'] ?? '') === '1' || $inSeq;
+$round = Gmax\Review::open($pdo, Gmax\Auth::actor());
+$inRound = $id && $round && (string)$round['id'] === (string)($_GET['rodada'] ?? '');
+$rItem = $inRound ? Gmax\Review::item($pdo, (int)$round['id'], $id) : null;
+$revisit = $inRound && $rItem && $rItem['state'] !== 'nao_analisado';
+$fromQueue = ($_GET['fila'] ?? '') === '1' || $inRound;
 $pos = isset($_GET['pos']) && is_string($_GET['pos']) && ctype_digit($_GET['pos']) ? (int)$_GET['pos'] : 0;
 if ($fromQueue) {
     $backUrl = View::url('fila', Gmax\Funnel::filters(is_array($_SESSION['gmax3_fila_f'] ?? null) ? $_SESSION['gmax3_fila_f'] : [])) . ($id ? '#p' . $id : '');
@@ -19,15 +19,21 @@ if ($fromQueue) {
 }
 ?>
 <a class="back-link" href="<?= View::e($backUrl) ?>">← <?= $fromQueue ? 'Voltar à fila de trabalho' : 'Voltar aos resultados' ?></a>
-<?php if ($inSeq): [$k, $n] = Gmax\Sequence::progress($seq, $id); $prev = Gmax\Sequence::previous($seq, $id); ?>
+<?php if ($inRound && ($rr = Catalog::get($pdo, $id))): $st = Gmax\Review::stats($pdo, (int)$round['id']); $fa = Gmax\Funnel::analyze($pdo, $rr, Gmax\Funnel::context($pdo)); $ready = !Gmax\Ranking::readiness($pdo, $rr); ?>
 <div class="seq-bar card" role="status">
-  <strong><?= $revisit ? 'Revisitando' : 'Conferência ' . $k . ' de ' . $n ?></strong>
-  <?php if ($revisit): ?><span class="small muted">já <?= View::e(Gmax\Sequence::DONE[$seq['done'][$id]] ?? 'visitado') ?> nesta sequência; salvar não muda o progresso</span><?php endif; ?>
+  <strong>Rodada #<?= (int)$round['id'] ?> · <?= (int)$st['analisados'] ?> de <?= (int)$st['total'] ?> analisados</strong>
+  <?php if ($revisit): ?><span class="small muted">Revisitando: este produto já está “<?= View::e(Gmax\Review::STATES[$rItem['state']] ?? $rItem['state']) ?>” nesta rodada (<?= (int)$rItem['visits'] ?> visita(s)); a nova visita fica registrada.</span><?php endif; ?>
   <span class="seq-actions">
-    <?php if ($prev): ?><a class="btn btn-sm btn-ghost" href="<?= View::e(View::url('conferir', ['id' => (string)$prev, 'seq' => $seq['id']])) ?>">← Voltar ao anterior</a><?php endif; ?>
-    <?php if (!$revisit): ?><?= View::actionButton('seq_skip', ['id' => $id, 'seq' => $seq['id'], 'back' => 'conferir'], 'Pular por enquanto', 'btn btn-sm') ?><?php else: ?><?= View::actionButton('seq_resume', ['back' => 'fila'], 'Ir ao próximo não visitado', 'btn btn-sm') ?><?php endif; ?>
-    <?= View::actionButton('seq_end', ['back' => 'fila'], 'Encerrar sequência', 'btn btn-sm btn-ghost') ?>
+    <?php if (!$revisit): ?>
+      <?= View::actionButton('round_mark', ['id' => $id, 'rodada' => $round['id'], 'result' => 'analisado', 'back' => 'conferir'], 'Analisado, sem alterar → próximo', 'btn btn-sm') ?>
+      <?= View::actionButton('round_mark', ['id' => $id, 'rodada' => $round['id'], 'result' => 'pulado', 'back' => 'conferir'], 'Pular por enquanto', 'btn btn-sm btn-ghost') ?>
+      <?= View::actionButton('round_mark', ['id' => $id, 'rodada' => $round['id'], 'result' => 'revisar', 'back' => 'conferir'], 'Revisar depois', 'btn btn-sm btn-ghost') ?>
+    <?php else: ?>
+      <?= View::actionButton('round_continue', ['back' => 'fila'], 'Continuar conferência', 'btn btn-sm btn-primary') ?>
+    <?php endif; ?>
   </span>
+  <p class="small seq-status">Progresso ≠ pendência ≠ prontidão. <strong>Pendências comerciais:</strong> <?= $fa['issues'] ? View::e(implode(' · ', $fa['issues'])) : 'nenhuma' ?>
+    · <strong>Pronto para divulgar:</strong> <?= $ready ? 'sim' : 'não' ?></p>
 </div>
 <?php endif; ?>
 <?php if (!$r): ?>
@@ -74,7 +80,7 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
   <form method="post" action="painel.php" class="card stack" data-loading>
     <?= View::csrfField() ?><input type="hidden" name="action" value="offer_check"><input type="hidden" name="back" value="conferir"><input type="hidden" name="id" value="<?= (int)$id ?>">
     <input type="hidden" name="v" value="<?= View::e(Gmax\Funnel::version($r)) ?>">
-    <?php if ($inSeq): ?><input type="hidden" name="seq" value="<?= View::e($seq['id']) ?>"><?= $revisit ? '<input type="hidden" name="rev" value="1">' : '' ?>
+    <?php if ($inRound): ?><input type="hidden" name="rodada" value="<?= (int)$round['id'] ?>"><?= $revisit ? '<input type="hidden" name="rev" value="1">' : '' ?>
     <?php elseif ($fromQueue): ?><input type="hidden" name="fila" value="1"><input type="hidden" name="pos" value="<?= $pos ?>"><?php endif; ?>
     <h2>2. Registre o que encontrou na loja</h2>
     <p class="muted small">Campos com * são obrigatórios.</p>
@@ -103,8 +109,8 @@ $avail = $fv('availability', (string)($r['availability'] ?? 'desconhecida'));
       <p class="muted small">Isto é uma <strong>conferência manual</strong> e fica registrada assim (não é validação pela API). Alterar o preço retira a aprovação do produto.</p>
     </div>
     <div class="form-actions">
-      <?php if ($inSeq): ?>
-        <button type="submit" class="btn btn-primary btn-lg btn-block"><?= $revisit ? 'Salvar e voltar à sequência' : 'Salvar e ir para o próximo' ?></button>
+      <?php if ($inRound): ?>
+        <button type="submit" class="btn btn-primary btn-lg btn-block"><?= $revisit ? 'Salvar revisita e continuar' : 'Salvar conferência e ir para o próximo' ?></button>
       <?php elseif ($fromQueue): ?>
         <button type="submit" class="btn btn-primary btn-lg btn-block">Salvar e voltar à fila</button>
       <?php else: ?>

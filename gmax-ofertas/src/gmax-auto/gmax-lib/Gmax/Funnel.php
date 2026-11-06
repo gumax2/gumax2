@@ -201,7 +201,7 @@ final class Funnel
     }
 
     // 3.2.2.1: removidos successors()/pick()/next(). Navegar pelo "próximo" de uma lista que se
-    // reordena após cada gravação causava o ciclo; a navegação sequencial agora é Gmax\Sequence.
+    // reordena após cada gravação causava o ciclo; a conferência progressiva (3.2.2.2) é Gmax\Review, persistida no SQLite.
 
     /** Contagem por etapa (inclui descoberta = candidatos ML novos) e por situação. */
     public static function summary(PDO $pdo, ?array $ctx = null, ?array $all = null): array
