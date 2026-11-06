@@ -33,6 +33,7 @@ final class Funnel
         'triagem' => 'Rascunho para triagem',
     ];
     public const PRIORITIES = [1 => 'Alta', 2 => 'Média', 3 => 'Baixa'];
+    public const PER_PAGE = 25;
 
     /** Contexto carregado UMA vez por requisição: regras, validade do preço e último estado na fila. */
     public static function context(PDO $pdo): array
@@ -160,34 +161,39 @@ final class Funnel
     }
 
     /**
+     * Uma única passada pelo catálogo (não arquivados): cada produto com a sua análise.
+     * Telas reutilizam o resultado para a lista e para o resumo (evita varrer o catálogo duas vezes).
+     * @return list<array{item:array,a:array}>
+     */
+    public static function analyzeAll(PDO $pdo, ?array $ctx = null): array
+    {
+        $ctx ??= self::context($pdo);
+        $out = [];
+        $st = $pdo->query("SELECT * FROM gmax3_catalog WHERE validation_status NOT IN ('arquivado','rejeitado') ORDER BY id");
+        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+            $out[] = ['item' => $r, 'a' => self::analyze($pdo, $r, $ctx)];
+        }
+        return $out;
+    }
+
+    /**
      * Fila de trabalho: todos os produtos com algo a fazer, na ordem de atendimento
      * (prioridade, etapa do funil, produto mais antigo sem conferência primeiro).
      * @return list<array{item:array,a:array}>
      */
-    public static function workQueue(PDO $pdo, array $f = [], ?array $ctx = null): array
+    public static function workQueue(PDO $pdo, array $f = [], ?array $ctx = null, ?array $all = null): array
     {
-        $ctx ??= self::context($pdo);
-        $where = "validation_status NOT IN ('arquivado','rejeitado')";
-        $args = [];
-        if (isset($f['mp'])) {
-            $where .= ' AND marketplace = ?';
-            $args[] = $f['mp'];
-        }
-        if (isset($f['cat'])) {
-            $where .= ' AND category = ?';
-            $args[] = $f['cat'];
-        }
+        $all ??= self::analyzeAll($pdo, $ctx);
         $order = array_flip(array_keys(self::STAGES));
         $out = [];
-        $st = $pdo->prepare("SELECT * FROM gmax3_catalog WHERE $where ORDER BY id");
-        $st->execute($args);
-        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-            $a = self::analyze($pdo, $r, $ctx);
-            if ($a['situation'] === null || (isset($f['sit']) && $a['situation'] !== $f['sit']) || (isset($f['prio']) && $a['priority'] !== (int)$f['prio'])
+        foreach ($all as $x) {
+            [$r, $a] = [$x['item'], $x['a']];
+            if ($a['situation'] === null || (isset($f['mp']) && $r['marketplace'] !== $f['mp']) || (isset($f['cat']) && (string)$r['category'] !== $f['cat'])
+                || (isset($f['sit']) && $a['situation'] !== $f['sit']) || (isset($f['prio']) && $a['priority'] !== (int)$f['prio'])
                 || (isset($f['etapa']) && $a['stage'] !== $f['etapa'])) {
                 continue;
             }
-            $out[] = ['item' => $r, 'a' => $a];
+            $out[] = $x;
         }
         usort($out, static fn($x, $y) => [$x['a']['priority'], $order[$x['a']['stage']] ?? 9, (string)($x['item']['price_verified_at'] ?? ''), (int)$x['item']['id']]
             <=> [$y['a']['priority'], $order[$y['a']['stage']] ?? 9, (string)($y['item']['price_verified_at'] ?? ''), (int)$y['item']['id']]);
@@ -195,34 +201,58 @@ final class Funnel
     }
 
     /**
-     * Próximo produto depois de resolver o da posição $pos: o resolvido sai da fila, então o
-     * próximo ocupa a mesma posição; se o produto continua pendente, avança uma posição.
+     * IDs que vêm DEPOIS do produto atual na fila, calculados ANTES da gravação: depois de resolvido,
+     * o produto pode mudar de etapa e de lugar na ordenação, então a posição atual não serve de guia.
+     * @return list<int>
      */
-    public static function next(PDO $pdo, array $f, int $currentId, int $pos): ?array
+    public static function successors(PDO $pdo, array $f, int $currentId, int $pos): array
+    {
+        $ids = array_map(static fn($x) => (int)$x['item']['id'], self::workQueue($pdo, $f));
+        $i = array_search($currentId, $ids, true);
+        $i = $i === false ? max(0, $pos) - 1 : $i;
+        return array_values(array_filter([...array_slice($ids, $i + 1), ...array_slice($ids, 0, max(0, $i + 1))], static fn($id) => $id !== $currentId));
+    }
+
+    /**
+     * Próximo a atender depois da gravação: o primeiro dos sucessores (calculados antes) que continua
+     * pendente; sem sucessores pendentes, o que estiver na mesma posição; fila vazia = null.
+     * @param list<int> $successors
+     * @return ?array{item:array,a:array,index:int}
+     */
+    public static function pick(PDO $pdo, array $f, int $currentId, int $pos, array $successors): ?array
     {
         $q = self::workQueue($pdo, $f);
-        $ids = array_map(static fn($x) => (int)$x['item']['id'], $q);
-        $i = array_search($currentId, $ids, true);
-        $idx = $i === false ? max(0, $pos) : $i + 1;
-        if (!isset($q[$idx])) {
-            $idx = 0; // volta ao começo (itens que ficaram para trás)
-            if (isset($q[$idx]) && (int)$q[$idx]['item']['id'] === $currentId) {
-                return null;
+        $index = [];
+        foreach ($q as $i => $x) {
+            $index[(int)$x['item']['id']] = $i;
+        }
+        foreach ($successors as $id) {
+            if (isset($index[$id])) {
+                return $q[$index[$id]] + ['index' => $index[$id]];
             }
         }
-        return $q[$idx] ?? null;
+        foreach ([$pos, 0] as $i) {
+            if (isset($q[$i]) && (int)$q[$i]['item']['id'] !== $currentId) {
+                return $q[$i] + ['index' => $i];
+            }
+        }
+        return null;
+    }
+
+    /** Compatibilidade: próximo depois do atual, sem gravação no meio. */
+    public static function next(PDO $pdo, array $f, int $currentId, int $pos): ?array
+    {
+        return self::pick($pdo, $f, $currentId, $pos, self::successors($pdo, $f, $currentId, $pos));
     }
 
     /** Contagem por etapa (inclui descoberta = candidatos ML novos) e por situação. */
-    public static function summary(PDO $pdo, ?array $ctx = null): array
+    public static function summary(PDO $pdo, ?array $ctx = null, ?array $all = null): array
     {
-        $ctx ??= self::context($pdo);
+        $all ??= self::analyzeAll($pdo, $ctx);
         $stages = array_fill_keys(array_keys(self::STAGES), 0);
         $sit = array_fill_keys(array_keys(self::SITUATIONS), 0);
         $prio = [1 => 0, 2 => 0, 3 => 0];
-        $st = $pdo->query("SELECT * FROM gmax3_catalog WHERE validation_status NOT IN ('arquivado','rejeitado')");
-        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-            $a = self::analyze($pdo, $r, $ctx);
+        foreach ($all as ['a' => $a]) {
             if (isset($stages[$a['stage']])) {
                 $stages[$a['stage']]++;
             }

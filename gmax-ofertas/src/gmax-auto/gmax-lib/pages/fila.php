@@ -6,14 +6,15 @@ use Gmax\{Db, Funnel, Text, Time, Url, View};
 $f = Funnel::filters($_GET);
 $_SESSION['gmax3_fila_f'] = $f; // "salvar e avançar" e o retorno usam os mesmos filtros
 $ctx = Funnel::context($pdo);
-$all = Funnel::workQueue($pdo, $f, $ctx);
-$per = 25;
+$analyzed = Funnel::analyzeAll($pdo, $ctx); // uma passada pelo catálogo para a lista e para o resumo
+$all = Funnel::workQueue($pdo, $f, $ctx, $analyzed);
+$per = Funnel::PER_PAGE;
 $pg = max(1, min(10000, (int)($_GET['pg'] ?? 1)));
 $total = count($all);
 $pages = max(1, (int)ceil($total / $per));
 $pg = min($pg, $pages);
 $items = array_slice($all, ($pg - 1) * $per, $per);
-$sum = Funnel::summary($pdo, $ctx);
+$sum = Funnel::summary($pdo, $ctx, $analyzed);
 $cats = array_column(Db::all($pdo, "SELECT DISTINCT category FROM gmax3_catalog WHERE category IS NOT NULL AND category <> '' AND validation_status NOT IN ('arquivado','rejeitado') ORDER BY category"), 'category');
 $prioTag = [1 => 'tag-bad', 2 => 'tag-warn', 3 => ''];
 $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, static fn($v) => $v !== null && $v !== ''));
@@ -53,7 +54,7 @@ $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, s
       <a class="work-title" href="<?= View::e(View::url('oferta', ['id' => $id])) ?>" title="<?= View::e($r['title']) ?>"><?= View::e(Text::shortTitle((string)$r['title'])) ?></a>
     </div>
     <p class="work-pending"><strong><?= View::e(Funnel::SITUATIONS[$a['situation']] ?? '') ?>:</strong> <?= View::e((string)$a['pending']) ?></p>
-    <?php if (count($a['issues']) > 1): ?><p class="small muted">Também: <?= View::e(implode(' · ', array_slice($a['issues'], 1))) ?></p><?php endif; ?>
+    <?php if (count($a['issues']) > 1): ?><p class="small muted work-also">Também: <?= View::e(implode(' · ', array_slice($a['issues'], 1))) ?></p><?php endif; ?>
     <div class="actions work-actions">
       <?php $act = $a['action']; if ($act['kind'] === 'link'): ?>
         <a class="btn btn-primary" href="<?= View::e(View::url($act['page'], $act['params'] + ($act['page'] === 'conferir' ? ['fila' => 1, 'pos' => $pos] : []))) ?>"><?= View::e($act['label']) ?></a>
@@ -73,7 +74,7 @@ $link = static fn(array $extra) => View::url('fila', array_filter($extra + $f, s
       <?php if ($act['kind'] !== 'link' || ($act['page'] ?? '') !== 'conferir'): ?>
         <a class="btn btn-ghost btn-sm" href="<?= View::e(View::url('conferir', ['id' => $id, 'fila' => 1, 'pos' => $pos])) ?>">Conferência rápida</a>
       <?php endif; ?>
-      <?= View::storeButtons($r, 'btn-sm', 'fila') ?>
+      <?= View::storeButtons($r, 'btn-sm', Text::shortTitle((string)$r['title'], 60)) ?>
     </div>
     <?php $hist = Db::all($pdo, "SELECT at, actor, action FROM gmax3_audit WHERE entity='catalog' AND entity_id=? ORDER BY id DESC LIMIT 5", [(string)$id]); ?>
     <?php if ($hist): ?><details class="small"><summary>Histórico (<?= count($hist) ?>)</summary><ul class="log"><?php foreach ($hist as $h): ?><li><span class="muted"><?= View::e(Time::show($h['at'])) ?></span> <?= View::e(str_replace('_', ' ', $h['action'])) ?> · <?= View::e($h['actor']) ?></li><?php endforeach; ?></ul></details><?php endif; ?>

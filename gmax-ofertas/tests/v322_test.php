@@ -139,6 +139,25 @@ test('Salvar e avançar: resolvido sai e o próximo ocupa a posição; pendente 
     }
     eq(null, Funnel::next($pdo, $f, $order[2], 1), 'fila concluída');
 });
+test('Revisão técnica: resolvido que muda de etapa (conferência → aprovação) não faz pular os seguintes', function () use ($ready, $make) {
+    $pdo = $ready();
+    $conf = [];
+    for ($i = 0; $i < 3; $i++) {
+        $conf[] = $make($pdo, ['price_verified_at' => null, 'category' => 'Pulo']);
+    }
+    $appr = $make($pdo, ['category' => 'Pulo']); // aguardando aprovação (etapa seguinte na ordenação)
+    $f = ['cat' => 'Pulo'];
+    $order = array_map(fn($x) => (int)$x['item']['id'], Funnel::workQueue($pdo, $f));
+    eq([...$conf, $appr], $order, 'conferências antes da aprovação');
+    $succ = Funnel::successors($pdo, $f, $conf[0], 0); // calculado ANTES de gravar
+    Catalog::confirmPrice($pdo, $conf[0], 't');          // A vira "aguardando aprovação" e vai para o fim
+    $next = Funnel::pick($pdo, $f, $conf[0], 0, $succ);
+    eq($conf[1], (int)$next['item']['id'], 'o próximo é B, não um item de aprovação');
+    eq(0, $next['index'], 'B ocupa a 1ª posição');
+    $succ = Funnel::successors($pdo, $f, $appr, 3);
+    Catalog::setStatus($pdo, $appr, 'aprovado', 't');
+    ok(in_array((int)Funnel::pick($pdo, $f, $appr, 3, $succ)['item']['id'], [$conf[0], $conf[1], $conf[2]], true), 'depois da última, volta ao começo');
+});
 test('Versão do produto muda a cada alteração relevante (base da proteção contra ação duplicada)', function () use ($ready, $make) {
     $pdo = $ready();
     $id = $make($pdo);

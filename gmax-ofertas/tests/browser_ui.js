@@ -225,8 +225,10 @@ async function overflow(page) {
         const nextOk = /p=conferir/.test(url) && /fila=1/.test(url) && !url.includes(`id=${firstId.slice(1)}&`);
         out(G, `Fila: conferir e avançar ao próximo em ${clicks + 1} interações (abrir a fila + ${clicks})`, nextOk && clicks + 1 <= 4, url);
         if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-fila-conferir.png`, fullPage: true });
-        await page.goto(`${C.base}/painel.php?p=fila&cat=${encodeURIComponent('Fila UI')}`);
-        if (p.shots) await page.screenshot({ path: `${C.shots}/${p.shots}-fila.png`, fullPage: true });
+      }
+      if (p.shots) {
+        await page.goto(`${C.base}/painel.php?p=fila`);
+        await page.screenshot({ path: `${C.shots}/${p.shots}-fila.png`, fullPage: true });
       }
 
       // 5. Busca global.

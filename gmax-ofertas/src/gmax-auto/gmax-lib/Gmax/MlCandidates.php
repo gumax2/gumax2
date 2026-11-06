@@ -53,8 +53,8 @@ final class MlCandidates
         ]);
     }
 
-    /** @return list<array> */
-    public static function list(PDO $pdo, array $f, int $limit = 60): array
+    /** @return array{0:string,1:list<mixed>} */
+    private static function where(array $f): array
     {
         $where = ['1=1'];
         $args = [];
@@ -75,39 +75,66 @@ final class MlCandidates
             $where[] = "(name LIKE ? ESCAPE '\\' OR termo LIKE ? ESCAPE '\\' OR product_id LIKE ? ESCAPE '\\')";
             array_push($args, $q, $q, $q);
         }
-        return Db::all($pdo, 'SELECT * FROM gmax3_ml_candidates WHERE ' . implode(' AND ', $where)
-            . ' ORDER BY (bb_price_cents IS NOT NULL) DESC, COALESCE(trend_pos, 999) ASC, last_seen_at DESC, id DESC LIMIT ' . max(1, min(2000, $limit)), $args);
+        return [implode(' AND ', $where), $args];
+    }
+
+    private const ORDER = ' ORDER BY (bb_price_cents IS NOT NULL) DESC, COALESCE(trend_pos, 999) ASC, last_seen_at DESC, id DESC';
+
+    /** @return list<array> */
+    public static function list(PDO $pdo, array $f, int $limit = 60): array
+    {
+        [$w, $args] = self::where($f);
+        return Db::all($pdo, "SELECT * FROM gmax3_ml_candidates WHERE $w" . self::ORDER . ' LIMIT ' . max(1, min(2000, $limit)), $args);
     }
 
     /**
-     * 3.2.2: lista enriquecida para a tela (sem nenhuma chamada à API):
-     * título resumido, segmento (com prioridade pela ordem dos segmentos), semelhantes entre os
-     * candidatos e com produtos do catálogo, campos efetivamente gravados e paginação.
+     * 3.2.2: lista enriquecida para a tela (sem nenhuma chamada à API): título resumido, segmento,
+     * semelhantes (entre candidatos e com o catálogo), campos efetivamente gravados e paginação.
+     * Contagem e páginas no SQL; o segmento de TODOS só é calculado quando se filtra ou ordena por ele.
      * @return array{rows:list<array>,total:int,pages:int,page:int}
      */
     public static function browse(PDO $pdo, array $f, int $per = 20): array
     {
-        $all = self::list($pdo, $f, 2000);
-        $segOrder = array_flip(array_keys(Text::SEGMENTS));
-        foreach ($all as &$c) {
-            $c['_seg'] = Text::segment((string)$c['name'], (string)($c['category_name'] ?? ''));
-            $c['_tok'] = Text::tokens((string)$c['name']);
+        [$w, $args] = self::where($f);
+        $bySeg = !empty($f['seg']) || ($f['ordem'] ?? '') === 'segmento';
+        if ($bySeg) {
+            $segOrder = array_flip(array_keys(Text::SEGMENTS));
+            $ids = [];
+            foreach (Db::all($pdo, "SELECT id, name, category_name FROM gmax3_ml_candidates WHERE $w" . self::ORDER, $args) as $r) {
+                $seg = Text::segment((string)$r['name'], (string)($r['category_name'] ?? ''));
+                if (empty($f['seg']) || $seg === $f['seg']) {
+                    $ids[] = [(int)$r['id'], $segOrder[$seg] ?? 99];
+                }
+            }
+            if (($f['ordem'] ?? '') === 'segmento') {
+                usort($ids, static fn($a, $b) => [$a[1], -$a[0]] <=> [$b[1], -$b[0]]);
+            }
+            $total = count($ids);
+        } else {
+            $total = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_ml_candidates WHERE $w", $args);
         }
-        unset($c);
-        if (!empty($f['seg'])) {
-            $all = array_values(array_filter($all, static fn($c) => $c['_seg'] === $f['seg']));
-        }
-        if (($f['ordem'] ?? '') === 'segmento') {
-            usort($all, static fn($a, $b) => [$segOrder[$a['_seg']] ?? 99, (int)$b['id']] <=> [$segOrder[$b['_seg']] ?? 99, (int)$a['id']]);
-        }
-        $total = count($all);
         $pages = max(1, (int)ceil($total / $per));
         $page = min(max(1, (int)($f['pg'] ?? 1)), $pages);
-        $rows = array_slice($all, ($page - 1) * $per, $per);
-        // Semelhantes: só para a página exibida, contra todos os candidatos e o catálogo (títulos já carregados).
+        if ($bySeg) {
+            $pageIds = array_column(array_slice($ids, ($page - 1) * $per, $per), 0);
+            $byId = [];
+            if ($pageIds) {
+                foreach (Db::all($pdo, 'SELECT * FROM gmax3_ml_candidates WHERE id IN (' . implode(',', array_fill(0, count($pageIds), '?')) . ')', $pageIds) as $r) {
+                    $byId[(int)$r['id']] = $r;
+                }
+            }
+            $rows = array_values(array_filter(array_map(static fn($id) => $byId[$id] ?? null, $pageIds)));
+        } else {
+            $rows = Db::all($pdo, "SELECT * FROM gmax3_ml_candidates WHERE $w" . self::ORDER . ' LIMIT ' . (int)$per . ' OFFSET ' . (int)(($page - 1) * $per), $args);
+        }
+        // Semelhantes: só para a página exibida, contra todos os candidatos e o catálogo (só títulos).
+        $others = [];
+        foreach ($pdo->query('SELECT id, name FROM gmax3_ml_candidates')->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $others[] = [(int)$r['id'], Text::tokens((string)$r['name'])];
+        }
         $catalog = [];
         foreach ($pdo->query("SELECT id, title FROM gmax3_catalog WHERE validation_status <> 'arquivado'")->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $catalog[] = [(int)$r['id'], Text::tokens((string)$r['title']), (string)$r['title']];
+            $catalog[] = [(int)$r['id'], Text::tokens((string)$r['title'])];
         }
         $jac = static function (array $x, array $y): float {
             if (!$x || !$y) {
@@ -117,15 +144,17 @@ final class MlCandidates
             return $i / (count($x) + count($y) - $i);
         };
         foreach ($rows as &$c) {
+            $tok = Text::tokens((string)$c['name']);
+            $c['_seg'] = Text::segment((string)$c['name'], (string)($c['category_name'] ?? ''));
             $c['_similar'] = [];
-            foreach ($all as $o) {
-                if ($o['id'] !== $c['id'] && ($j = $jac($c['_tok'], $o['_tok'])) >= 0.6) {
-                    $c['_similar'][] = ['tipo' => 'candidato', 'id' => (int)$o['id'], 'nome' => (string)$o['name'], 'grau' => $j];
+            foreach ($others as [$id, $t]) {
+                if ($id !== (int)$c['id'] && ($j = $jac($tok, $t)) >= 0.6) {
+                    $c['_similar'][] = ['tipo' => 'candidato', 'id' => $id, 'grau' => $j];
                 }
             }
-            foreach ($catalog as [$id, $tok, $title]) {
-                if ((int)($c['catalog_id'] ?? 0) !== $id && ($j = $jac($c['_tok'], $tok)) >= 0.6) {
-                    $c['_similar'][] = ['tipo' => 'produto', 'id' => $id, 'nome' => $title, 'grau' => $j];
+            foreach ($catalog as [$id, $t]) {
+                if ((int)($c['catalog_id'] ?? 0) !== $id && ($j = $jac($tok, $t)) >= 0.6) {
+                    $c['_similar'][] = ['tipo' => 'produto', 'id' => $id, 'grau' => $j];
                 }
             }
             usort($c['_similar'], static fn($a, $b) => $b['grau'] <=> $a['grau']);
@@ -134,7 +163,6 @@ final class MlCandidates
             $c['_fields'] = array_filter(array_intersect_key($c, array_flip(['product_id', 'name', 'domain_id', 'category_id', 'category_name', 'picture_url', 'permalink',
                 'bb_item_id', 'bb_price_cents', 'bb_original_cents', 'bb_currency', 'bb_free_shipping', 'bb_official_store', 'bb_checked_at', 'trend_pos', 'termo'])),
                 static fn($v) => $v !== null && $v !== '');
-            unset($c['_tok']);
         }
         unset($c);
         return ['rows' => $rows, 'total' => $total, 'pages' => $pages, 'page' => $page];

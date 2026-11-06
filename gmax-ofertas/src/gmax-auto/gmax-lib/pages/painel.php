@@ -5,9 +5,11 @@ use Gmax\AutoLab\AutoLab;
 use Gmax\{Db, Funnel, Health, Queue, Settings, Text, Time, View};
 /** @var PDO $pdo @var int $staleHours @var bool $paused  Visão Geral (3.2.2): orientada a decisões. */
 $ctx = Funnel::context($pdo);
-$sum = Funnel::summary($pdo, $ctx);
-$work = Funnel::workQueue($pdo, [], $ctx);
-$now = array_slice(array_values(array_filter($work, static fn($w) => $w['a']['situation'] !== 'disponivel_selecao')), 0, 5);
+$analyzed = Funnel::analyzeAll($pdo, $ctx); // uma passada pelo catálogo
+$sum = Funnel::summary($pdo, $ctx, $analyzed);
+$work = Funnel::workQueue($pdo, [], $ctx, $analyzed);
+$pendingWork = array_values(array_filter($work, static fn($w) => $w['a']['situation'] !== 'disponivel_selecao'));
+$now = array_slice($pendingWork, 0, 3);
 $ready = array_values(array_filter($work, static fn($w) => $w['a']['situation'] === 'disponivel_selecao'));
 $scheduled = (int)Db::value($pdo, "SELECT COUNT(*) FROM gmax3_pub_queue WHERE state='agendado'");
 $pending = Queue::unreconciled($pdo);
@@ -48,6 +50,7 @@ if ($alerts) {
 if ($cands) {
     $next[] = ['Avaliar ' . $cands . ' candidato(s) do Mercado Livre', View::url('candidatos'), ''];
 }
+
 $ind = [
     'aguardando_aprovacao' => 'Aguardando validação', 'preco_desatualizado' => 'Preços desatualizados', 'sem_link' => 'Links afiliados ausentes',
     'variacao' => 'Variações pendentes', 'inconsistencia' => 'Inconsistências',
@@ -61,15 +64,17 @@ $hl = static fn(string $lvl) => '<span class="tag ' . ['ok' => 'tag-ok', 'aviso'
 ?>
 <section class="decide">
   <div class="card">
-    <h2>Precisa de você agora <span class="tag<?= $sum['total'] ? ' tag-warn' : ' tag-ok' ?>"><?= (int)($sum['total'] - $s['disponivel_selecao']) ?></span></h2>
+    <h2>Precisa de você agora <span class="tag<?= $pendingWork ? ' tag-warn' : ' tag-ok' ?>"><?= count($pendingWork) ?></span></h2>
     <?php if (!$now): ?><p class="empty">Nada pendente. As automações seguem trabalhando.</p><?php else: ?>
+    <p><a class="btn btn-primary" href="<?= View::e(View::url('fila')) ?>">Abrir minha fila (<?= count($pendingWork) ?>)</a></p>
+    <p class="small">Por motivo:<?php foreach ($ind as $k => $label): if (!$s[$k]) { continue; } ?> <a class="chip" href="<?= View::e(View::url('fila', ['sit' => $k])) ?>"><?= View::e($label) ?> <strong><?= (int)$s[$k] ?></strong></a><?php endforeach; ?><?= $s['triagem'] ? ' <a class="chip" href="' . View::e(View::url('fila', ['sit' => 'triagem'])) . '">Rascunhos <strong>' . (int)$s['triagem'] . '</strong></a>' : '' ?></p>
+    <p class="small muted">Primeiros da fila:</p>
     <ul class="decide-list">
       <?php foreach ($now as ['item' => $r, 'a' => $a]): ?>
         <li><span class="tag <?= [1 => 'tag-bad', 2 => 'tag-warn', 3 => ''][$a['priority']] ?>"><?= View::e(Funnel::PRIORITIES[$a['priority']]) ?></span>
           <span class="grow"><a href="<?= View::e(View::url('fila', [], ) . '#p' . (int)$r['id']) ?>"><?= View::e(Text::shortTitle((string)$r['title'], 60)) ?></a><br><span class="small muted"><?= View::e((string)$a['pending']) ?></span></span></li>
       <?php endforeach; ?>
     </ul><?php endif; ?>
-    <p><a class="btn btn-primary" href="<?= View::e(View::url('fila')) ?>">Abrir minha fila de trabalho</a></p>
   </div>
   <div class="card">
     <h2>Prontos para divulgar <span class="tag tag-ok"><?= count($ready) ?></span></h2>
